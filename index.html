@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeLab Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* 核心配色：深蓝底色 + 科技蓝高亮 */
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.6); /* 卡片半透明 */
+            --text-main: #f1f5f9;
+            --text-sub: #94a3b8;
+            --accent: #38bdf8; /* 天蓝色高亮 */
+            --hover-glow: rgba(56, 189, 248, 0.4);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-color);
+            /* 这里预留了背景图位置，你可以找一张 BanG Dream! 的壁纸命名为 bg.jpg 放在同级目录 */
+            /* 如果有背景图，取消下面这行的注释: */
+            background-image: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('bg.jpg');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        h1 {
+            font-weight: 300;
+            letter-spacing: 4px;
+            margin-bottom: 3rem;
+            text-transform: uppercase;
+            font-size: 2.2rem;
+            /* 标题渐变色 */
+            background: linear-gradient(90deg, #fff, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            /* 玻璃拟态效果 (Glassmorphism) */
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 2rem 1rem;
+            text-decoration: none;
+            color: var(--text-main);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 0 15px 30px -10px var(--hover-glow);
+            border-color: var(--accent);
+        }
+
+        .icon {
+            font-size: 2.4rem;
+            color: var(--accent);
+            transition: transform 0.3s ease, filter 0.3s ease;
+            margin-bottom: 0.3rem;
+        }
+
+        .card:hover .icon {
+            transform: scale(1.1);
+            filter: drop-shadow(0 0 10px var(--accent));
+        }
+
+        .name {
+            font-weight: 600;
+            font-size: 1.2rem;
+            letter-spacing: 1px;
+        }
+
+        .desc {
+            font-size: 0.85rem;
+            color: var(--text-sub);
+        }
+
+        /* 状态灯：模拟“在线”状态 */
+        .status {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 8px;
+            height: 8px;
+            background-color: #22c55e;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #22c55e;
+            opacity: 0.8;
+        }
+        
+        @media (max-width: 600px) {
+            .grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .card {
+                padding: 1.5rem 1rem;
+            }
+            .icon {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Service Dashboard</h1>
+    
+    <div class="grid">
+        
+        <a href="https://nas.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-server icon"></i>
+            <span class="name">Synology NAS</span>
+            <span class="desc">数据存储中心</span>
+        </a>
+
+        <a href="https://qbit.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-magnet icon"></i>
+            <span class="name">qBittorrent</span>
+            <span class="desc">PT/BT 下载管理</span>
+        </a>
+
+        <a href="https://pbh.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-user-shield icon"></i>
+            <span class="name">PeerBanHelper</span>
+            <span class="desc">反作弊与封禁管理</span>
+        </a>
+
+        <a href="https://route.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-network-wired icon"></i>
+            <span class="name">Router OS</span>
+            <span class="desc">核心网关管理</span>
+        </a>
+
+        <a href="https://speed.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-gauge-high icon"></i>
+            <span class="name">SpeedTest</span>
+            <span class="desc">内网/外网测速</span>
+        </a>
+
+
+        <a href="https://anon.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-robot icon"></i>
+            <span class="name">Astrbot</span>
+            <span class="desc">智能助理</span>
+        </a>
+
+        <a href="https://git.home.c10h14n2o5.com/" class="card" target="_blank">
+            <div class="status"></div>
+            <i class="fa-solid fa-code-branch icon"></i>
+            <span class="name">Gitea</span>
+            <span class="desc">代码版本管理</span>
+        </a>
+
+    </div>
+</div>
+
+</body>
+</html>
