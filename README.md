@@ -1,6 +1,6 @@
 # Zoraxy HomeLab Service Dashboard
 
-这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。项目采用单页结构，运行时只需要 `index.html` 和 `bg.jpg`，不需要 Node.js、构建工具、数据库或外部图标 CDN。
+这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。项目采用单页结构，运行时只需要 `index.html` 和 `backgrounds/` 图片目录，不需要 Node.js、构建工具、数据库或外部图标 CDN。
 
 本 README 主要面向 Codex 和其他自动化 Agent，同时尽量使用非技术人员也能理解的语言。维护者应先阅读本文，再修改页面或执行部署。
 
@@ -9,7 +9,7 @@
 | 项目 | 当前实现 |
 | --- | --- |
 | 页面入口 | `index.html` |
-| 背景图片 | `bg.jpg`，通过相对路径加载 |
+| 背景图片 | `backgrounds/` 目录自动发现，资源由部署机器本地保存，不进入 Git |
 | 服务数量 | 11 个 |
 | 图标 | 内联 SVG，无外部依赖 |
 | 桌面布局 | 背景主视觉 + 底部居中毛玻璃网格 |
@@ -22,14 +22,16 @@
 
 ```text
 Zoraxy_StaticWebSite/
+├── backgrounds/    # 部署机器本地保存的公开背景目录
+│   ├── .gitignore  # 阻止目录内资源进入 Git
+│   └── bg.jpg      # 本地默认背景；被 Git 忽略，不随仓库分发
 ├── index.html      # 实际运行的页面，包含 HTML、CSS、JavaScript 和 SVG
-├── bg.jpg          # 页面背景图；文件名和相对位置不能随意改变
 ├── CHANGELOG.md    # 面向维护者的变更记录
 ├── README.md       # 项目结构、维护流程和 Agent 操作规范
 └── index.txt       # Zoraxy 原始示例页面，不参与当前网站运行
 ```
 
-部署网站时通常只需要复制 `index.html` 和 `bg.jpg`。README、Changelog、`.git` 目录和 `index.txt` 不应复制到公开 Web 根目录，除非用户明确要求。
+仓库只分发页面代码和 `backgrounds/.gitignore`，不会分发任何背景图片。更新网站时复制 `index.html`，并保留 Zoraxy 运行目录中已有的 `backgrounds/`；首次部署时需从独立的本地来源放入至少一张 `backgrounds/bg.jpg`。README、Changelog、`.git`、`.gitignore` 和 `index.txt` 不应复制到公开 Web 根目录。Zoraxy 必须开启 directory listing，且 `backgrounds/` 中不能存在任何 index 文件。
 
 ## `index.html` 代码结构
 
@@ -62,7 +64,7 @@ sessionStorage.removeItem('homelab-intro-seen')
 CSS 位于 `<style>` 中，主要分为：
 
 - `:root`：颜色、卡片背景、文字、状态颜色和内容宽度；
-- `.background-layer`：背景图片及其位置；
+- `.background-layer`：当前背景图片、统一居中裁切及切换淡入；
 - `.shade-layer`：保护可读性的径向和底部渐变遮罩；
 - `.hero`：HomeLab 标题区；
 - `.dashboard`、`.service-grid`：服务网格；
@@ -113,10 +115,11 @@ CSS 位于 `<style>` 中，主要分为：
 
 ### 5. 运行时 JavaScript
 
-文件末尾脚本负责两件事：
+文件末尾脚本负责三件事：
 
 1. 在背景加载完成或安全超时后启动入场动画；
 2. 页面打开时检测所有服务，并响应“刷新状态”按钮。
+3. 扫描 `backgrounds/` 的 Zoraxy 目录列表，生成背景选择器并保存用户选择。
 
 检测使用默认的 `GET`、`mode: no-cors`、正常跟随重定向和 5 秒超时。`no-cors` 请求不能和 `redirect: manual` 组合使用，否则部分浏览器会在请求发出前直接拒绝。由于跨域响应对浏览器不可读，脚本只能判断请求是否建立，不能读取实际 HTTP 状态码或应用内部状态。
 
@@ -176,19 +179,43 @@ CSS 位于 `<style>` 中，主要分为：
 - 更新页面显示的服务总数和 Changelog；
 - 不要只删除图标、状态或内部某个 `span`。
 
-### 更换背景图
+### 添加或删除背景图
 
-最安全的方式是保持文件名 `bg.jpg` 不变并直接替换图片。
+将图片直接放入 `backgrounds/`，无需修改 HTML。打开页面底部的“切换背景”按钮时，页面会重新请求目录列表并发现新文件。
 
-更换后检查：
+该目录的 `.gitignore` 会忽略其中所有文件和子目录，仅保留规则文件本身。因此背景不会出现在普通 `git status`、提交或推送中，也不能依靠 Git 进行备份和恢复；请在部署机器上单独维护背景资源备份。
 
-- 图片是否可以由浏览器直接读取；
-- 文件名大小写是否完全一致；
-- 桌面端人物或主体是否位于无遮挡区域；
-- 手机端 `.background-layer` 的 `background-position` 是否仍合适；
-- 图片大小是否会明显拖慢首次加载。
+支持的格式：
 
-如需修改焦点，分别调整桌面和移动端的 `background-position`，不要通过改动 HTML 复制第二张背景图。
+- `.jpg`、`.jpeg`；
+- `.png`；
+- `.webp`；
+- `.avif`。
+
+目录只扫描第一层；子目录、SVG、GIF 和其它文件会被忽略。所有图片使用 `cover + center` 居中裁切，因此建议使用构图相近的横向壁纸。
+
+维护要求：
+
+- 保留 `backgrounds/bg.jpg` 作为默认背景；
+- 不要在 `backgrounds/` 中放置 `index.html`，否则 Zoraxy 不会返回目录列表；
+- 目录文件名会对导航页访问者可见，不得放置隐私图片、说明文档或认证资料；
+- 删除用户已经选择的图片是安全的，页面下次加载时会清除旧记录并恢复默认背景；
+- 替换同名图片后如果看到缓存旧图，可强制刷新浏览器；
+- 大尺寸 PNG 会增加加载和缩略图流量，优先使用合理压缩的 JPG、WebP 或 AVIF。
+
+当前选择保存在：
+
+```js
+localStorage['homelab-background']
+```
+
+需要恢复默认选择时，在浏览器控制台执行：
+
+```js
+localStorage.removeItem('homelab-background')
+```
+
+然后刷新页面。
 
 ### 调整配色和卡片
 
@@ -228,14 +255,14 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 1. 使用专用部署工作副本；若工作副本已存在，先确认没有本地改动，再获取远端并检出用户指定的已合并提交；工作区不干净时必须停止；
 2. 输出并记录实际部署的提交 SHA；
 3. 检查工作副本干净，确认来源是上游已合并分支；
-4. 比较目标目录中的现有 `index.html`、`bg.jpg` 与仓库版本；
-5. 如果目标目录包含仓库中没有的人工修改，停止并报告差异；
-6. 在 Web 根目录之外创建带时间戳的备份；
+4. 比较目标目录中的现有 `index.html` 与仓库版本，并确认本地 `backgrounds/bg.jpg` 仍然存在；
+5. 如果目标 `index.html` 包含仓库中没有的人工修改，停止并报告差异；
+6. 在 Web 根目录之外创建带时间戳的备份，同时单独备份部署机器上的整个 `backgrounds/`；
 7. 先复制到同一文件系统的临时位置，再替换目标文件，降低复制中断造成半部署的风险；
-8. 只部署 `index.html` 和 `bg.jpg`；
+8. 常规更新只替换 `index.html`，不得用仓库中仅含 `.gitignore` 的 `backgrounds/` 覆盖或同步删除部署机器上的背景目录；首次部署或明确更新图片时，背景必须来自用户指定的独立本地来源；
 9. 检查文件存在、大小非零、Zoraxy 账户可读；
 10. 访问实际导航页进行冒烟测试；
-11. 向用户报告提交 SHA、源路径、目标路径、备份路径、部署文件和验证结果。
+11. 向用户报告提交 SHA、源路径、目标路径、代码备份路径、背景备份路径、部署文件和验证结果。
 
 命令中的路径必须作为参数传入，并使用适合当前操作系统的安全引用方式。不要把环境特定路径提交到 README 或脚本中。
 
@@ -244,7 +271,8 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 至少确认：
 
 - 页面返回成功且标题显示为 HomeLab；
-- `bg.jpg` 正常加载；
+- `backgrounds/bg.jpg` 正常加载；
+- `/backgrounds/` 返回目录列表，并且选择器能够发现图片；
 - 11 个服务卡片全部出现；
 - 桌面端和手机端没有明显横向溢出；
 - 刷新状态按钮可用；
@@ -256,7 +284,7 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 若部署后出现严重问题：
 
 1. 停止继续覆盖或尝试未经验证的临时修复；
-2. 使用本次部署前的备份恢复 `index.html` 和 `bg.jpg`；
+2. 使用本次部署前的备份恢复 `index.html` 和整个 `backgrounds/` 目录；
 3. 确认 Zoraxy 可以读取恢复文件；
 4. 重新访问页面验证；
 5. 报告失败提交 SHA、错误现象、回滚文件和当前运行版本。
@@ -309,7 +337,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');con
 
 ### 背景不显示
 
-检查 `bg.jpg` 是否和 `index.html` 位于同一部署目录，文件名大小写是否一致，以及 Zoraxy 是否有读取权限。
+检查 `backgrounds/bg.jpg` 是否存在、目录层级和文件名大小写是否一致，以及 Zoraxy 是否有读取权限。如果默认背景正常但选择器只显示一项，确认 `backgrounds/` 已开启 directory listing 且目录中没有 index 文件。
 
 ### 新图标不显示
 

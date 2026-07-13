@@ -12,6 +12,23 @@
             root.classList.remove('no-js');
             root.classList.add('js');
 
+            try {
+                const pageBase = new URL('.', document.baseURI);
+                const backgroundDir = new URL('backgrounds/', pageBase);
+                const savedBackground = localStorage.getItem('homelab-background');
+                const savedUrl = savedBackground ? new URL(savedBackground, pageBase) : null;
+
+                if (savedUrl && savedUrl.origin === location.origin && savedUrl.pathname.startsWith(backgroundDir.pathname)) {
+                    const relativePath = decodeURIComponent(savedUrl.pathname.slice(backgroundDir.pathname.length));
+                    if (relativePath && !relativePath.includes('/') && /\.(?:jpe?g|png|webp|avif)$/i.test(relativePath)) {
+                        root.style.setProperty('--background-image', `url("${savedUrl.href}")`);
+                        root.dataset.background = savedUrl.href;
+                    }
+                }
+            } catch (error) {
+                // Invalid or unavailable storage must never prevent the page from loading.
+            }
+
             if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
                 root.classList.add('reduce-motion', 'intro-skip');
                 return;
@@ -45,6 +62,7 @@
             --checking: #fbbf24;
             --shadow: 0 18px 45px rgba(2, 8, 23, 0.22);
             --content-width: 1280px;
+            --background-image: url("backgrounds/bg.jpg");
         }
 
         *,
@@ -86,13 +104,18 @@
         .background-layer {
             inset: -3%;
             background-color: #183b68;
-            background-image: url("bg.jpg");
+            background-image: var(--background-image);
             background-repeat: no-repeat;
-            background-position: center 38%;
+            background-position: center;
             background-size: cover;
             transform: scale(1);
             transform-origin: 50% 40%;
+            transition: opacity 180ms ease;
             will-change: transform;
+        }
+
+        .background-layer.is-changing {
+            opacity: 0.16;
         }
 
         .shade-layer {
@@ -382,9 +405,9 @@
         .dashboard-footer {
             min-height: 1.5rem;
             margin-top: 0.85rem;
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
             align-items: center;
-            justify-content: space-between;
             gap: 1rem;
             color: var(--subtle);
             font-size: 0.68rem;
@@ -392,6 +415,211 @@
 
         .dashboard-footer p {
             margin: 0;
+        }
+
+        #last-checked {
+            text-align: right;
+        }
+
+        .background-picker-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.38rem;
+            min-height: 2rem;
+            padding: 0.34rem 0.68rem;
+            border: 1px solid rgba(226, 232, 240, 0.13);
+            border-radius: 999px;
+            color: var(--muted);
+            background: rgba(8, 20, 36, 0.42);
+            cursor: pointer;
+            transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+        }
+
+        .background-picker-button:hover {
+            color: var(--text);
+            border-color: rgba(125, 211, 252, 0.4);
+            background: rgba(10, 28, 50, 0.7);
+        }
+
+        .background-picker-button:active {
+            transform: translateY(1px);
+        }
+
+        .background-picker-button:focus-visible,
+        .dialog-close:focus-visible,
+        .background-option:focus-visible {
+            outline: 3px solid rgba(125, 211, 252, 0.9);
+            outline-offset: 3px;
+        }
+
+        .background-picker-button svg {
+            width: 0.92rem;
+            height: 0.92rem;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .background-dialog {
+            width: min(46rem, calc(100vw - 2rem));
+            max-width: none;
+            max-height: min(78vh, 44rem);
+            max-height: min(78svh, 44rem);
+            margin: auto;
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.96);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1.25rem;
+            box-shadow: 0 32px 90px rgba(2, 8, 23, 0.62);
+            -webkit-backdrop-filter: blur(24px) saturate(125%);
+            backdrop-filter: blur(24px) saturate(125%);
+        }
+
+        .background-dialog::backdrop {
+            background: rgba(2, 8, 23, 0.58);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+        }
+
+        .dialog-shell {
+            max-height: min(78vh, 44rem);
+            max-height: min(78svh, 44rem);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dialog-header {
+            padding: 1.05rem 1.15rem 0.85rem;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            border-bottom: 1px solid rgba(226, 232, 240, 0.1);
+        }
+
+        .dialog-header h2 {
+            margin: 0;
+            font-size: 1.05rem;
+            line-height: 1.3;
+        }
+
+        .dialog-header p {
+            margin: 0.32rem 0 0;
+            color: var(--subtle);
+            font-size: 0.73rem;
+            line-height: 1.5;
+        }
+
+        .dialog-close {
+            width: 2.1rem;
+            height: 2.1rem;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            padding: 0;
+            border: 1px solid rgba(226, 232, 240, 0.13);
+            border-radius: 50%;
+            color: var(--muted);
+            background: rgba(15, 31, 51, 0.72);
+            cursor: pointer;
+        }
+
+        .dialog-close:hover {
+            color: var(--text);
+            border-color: rgba(125, 211, 252, 0.38);
+        }
+
+        .background-picker-status {
+            margin: 0;
+            padding: 0.75rem 1.15rem 0;
+            color: var(--muted);
+            font-size: 0.72rem;
+            line-height: 1.5;
+        }
+
+        .background-picker-status[data-kind="error"] {
+            color: #fda4af;
+        }
+
+        .background-picker-status[data-kind="success"] {
+            color: #86efac;
+        }
+
+        .background-grid {
+            min-height: 9rem;
+            padding: 0.85rem 1.15rem 1.15rem;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+            align-content: start;
+            gap: 0.75rem;
+        }
+
+        .background-option {
+            position: relative;
+            min-width: 0;
+            padding: 0;
+            overflow: hidden;
+            color: var(--muted);
+            text-align: left;
+            background: rgba(13, 28, 48, 0.86);
+            border: 1px solid rgba(226, 232, 240, 0.12);
+            border-radius: 0.85rem;
+            cursor: pointer;
+            transition: color 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+        }
+
+        .background-option:hover {
+            color: var(--text);
+            border-color: rgba(125, 211, 252, 0.42);
+            transform: translateY(-2px);
+        }
+
+        .background-option[aria-pressed="true"] {
+            color: var(--text);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25);
+        }
+
+        .background-option img {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            display: block;
+            object-fit: cover;
+            background: rgba(2, 8, 23, 0.5);
+        }
+
+        .background-option-label {
+            display: block;
+            padding: 0.58rem 0.66rem 0.64rem;
+            overflow: hidden;
+            font-size: 0.7rem;
+            font-weight: 620;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .background-option-check {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            width: 1.45rem;
+            height: 1.45rem;
+            display: none;
+            place-items: center;
+            color: #082f49;
+            background: var(--accent);
+            border-radius: 50%;
+            box-shadow: 0 4px 14px rgba(2, 8, 23, 0.35);
+        }
+
+        .background-option[aria-pressed="true"] .background-option-check {
+            display: grid;
         }
 
         .sr-only {
@@ -499,7 +727,7 @@
             }
 
             .background-layer {
-                background-position: center 34%;
+                background-position: center;
                 transform: none !important;
                 will-change: auto;
             }
@@ -575,8 +803,18 @@
 
             .dashboard-footer {
                 align-items: flex-start;
+                display: flex;
                 flex-direction: column;
                 gap: 0.3rem;
+            }
+
+            #last-checked {
+                text-align: left;
+            }
+
+            .background-picker-button {
+                align-self: flex-start;
+                margin-block: 0.2rem;
             }
 
             html.intro-first .background-layer,
@@ -620,6 +858,21 @@
                 width: 2.45rem;
                 padding-inline: 0;
             }
+
+            .background-dialog {
+                width: calc(100vw - 1rem);
+                max-height: 84svh;
+                border-radius: 1rem;
+            }
+
+            .dialog-shell {
+                max-height: 84svh;
+            }
+
+            .background-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                padding-inline: 0.85rem;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -631,6 +884,10 @@
                 animation-delay: 0ms !important;
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
+            }
+
+            .background-layer.is-changing {
+                opacity: 1;
             }
 
             html.intro-first .background-layer,
@@ -786,11 +1043,35 @@
 
             <footer class="dashboard-footer">
                 <p>HomeLab · Private service gateway</p>
+                <button class="background-picker-button" id="background-picker-button" type="button" aria-haspopup="dialog" aria-controls="background-dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <rect x="3" y="4" width="18" height="16" rx="2"/>
+                        <circle cx="8.5" cy="9" r="1.5"/>
+                        <path d="m4 17 5-5 3.5 3.5 2-2L20 19"/>
+                    </svg>
+                    <span>切换背景</span>
+                </button>
                 <p id="last-checked">正在检测 11 个入口…</p>
                 <p class="sr-only" id="status-summary" role="status" aria-live="polite"></p>
             </footer>
         </section>
     </main>
+
+    <dialog class="background-dialog" id="background-dialog" aria-labelledby="background-dialog-title">
+        <div class="dialog-shell">
+            <header class="dialog-header">
+                <div>
+                    <h2 id="background-dialog-title">选择背景</h2>
+                    <p>自动读取 backgrounds 目录中的图片，选择会保存在当前浏览器。</p>
+                </div>
+                <form method="dialog">
+                    <button class="dialog-close" type="submit" aria-label="关闭背景选择器">✕</button>
+                </form>
+            </header>
+            <p class="background-picker-status" id="background-picker-status" role="status" aria-live="polite">准备扫描背景目录…</p>
+            <div class="background-grid" id="background-grid" aria-busy="false"></div>
+        </div>
+    </dialog>
 
     <script>
         (function () {
@@ -812,6 +1093,252 @@
                 window.addEventListener('load', playIntro, { once: true });
                 window.setTimeout(playIntro, 1800);
             }
+
+            const pageBase = new URL('.', document.baseURI);
+            const backgroundDirectory = new URL('backgrounds/', pageBase);
+            const defaultBackground = new URL('bg.jpg', backgroundDirectory);
+            const backgroundStorageKey = 'homelab-background';
+            const backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
+            const backgroundLayer = document.querySelector('.background-layer');
+            const backgroundPickerButton = document.getElementById('background-picker-button');
+            const backgroundDialog = document.getElementById('background-dialog');
+            const backgroundGrid = document.getElementById('background-grid');
+            const backgroundPickerStatus = document.getElementById('background-picker-status');
+            let backgroundScanSequence = 0;
+
+            function normalizeBackgroundUrl(value) {
+                if (!value) return null;
+
+                try {
+                    const url = new URL(value, pageBase);
+                    url.search = '';
+                    url.hash = '';
+
+                    if (url.origin !== location.origin || !url.pathname.startsWith(backgroundDirectory.pathname)) return null;
+                    const relativePath = decodeURIComponent(url.pathname.slice(backgroundDirectory.pathname.length));
+                    if (!relativePath || relativePath.includes('/') || !backgroundExtensionPattern.test(relativePath)) return null;
+                    return url;
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            function readSavedBackground() {
+                try {
+                    return localStorage.getItem(backgroundStorageKey);
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            function saveBackground(url) {
+                try {
+                    localStorage.setItem(backgroundStorageKey, url.href.slice(pageBase.href.length));
+                } catch (error) {
+                    console.warn('无法保存背景选择。', error);
+                }
+            }
+
+            function clearSavedBackground() {
+                try {
+                    localStorage.removeItem(backgroundStorageKey);
+                } catch (error) {
+                    // Storage failure does not affect the current page.
+                }
+            }
+
+            let currentBackground = normalizeBackgroundUrl(root.dataset.background) || defaultBackground;
+
+            function setBackgroundStyle(url) {
+                root.style.setProperty('--background-image', `url("${url.href}")`);
+                root.dataset.background = url.href;
+                currentBackground = url;
+            }
+
+            function setBackgroundStatus(message, kind = '') {
+                backgroundPickerStatus.textContent = message;
+                if (kind) {
+                    backgroundPickerStatus.dataset.kind = kind;
+                } else {
+                    delete backgroundPickerStatus.dataset.kind;
+                }
+            }
+
+            function preloadBackground(url) {
+                return new Promise((resolve, reject) => {
+                    const image = new Image();
+                    image.decoding = 'async';
+                    image.onload = () => resolve(url);
+                    image.onerror = () => reject(new Error(`图片无法加载：${url.pathname}`));
+                    image.src = url.href;
+                });
+            }
+
+            function updateBackgroundSelection() {
+                backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
+                    option.setAttribute('aria-pressed', String(option.dataset.url === currentBackground.href));
+                });
+            }
+
+            async function applyBackground(url, persist = true) {
+                const candidate = normalizeBackgroundUrl(url);
+                if (!candidate) {
+                    setBackgroundStatus('该图片地址无效，已保留当前背景。', 'error');
+                    return false;
+                }
+
+                try {
+                    setBackgroundStatus(`正在加载 ${decodeURIComponent(candidate.pathname.split('/').pop())}…`);
+                    await preloadBackground(candidate);
+
+                    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                    if (!reduceMotion) {
+                        backgroundLayer.classList.add('is-changing');
+                        await new Promise((resolve) => window.setTimeout(resolve, 150));
+                    }
+
+                    setBackgroundStyle(candidate);
+                    if (persist) saveBackground(candidate);
+                    updateBackgroundSelection();
+
+                    window.requestAnimationFrame(() => {
+                        window.requestAnimationFrame(() => backgroundLayer.classList.remove('is-changing'));
+                    });
+                    setBackgroundStatus(`已切换为 ${decodeURIComponent(candidate.pathname.split('/').pop())}`, 'success');
+                    return true;
+                } catch (error) {
+                    backgroundLayer.classList.remove('is-changing');
+                    console.warn('背景切换失败。', error);
+                    setBackgroundStatus('图片加载失败，已保留当前背景。', 'error');
+                    return false;
+                }
+            }
+
+            function backgroundFileName(url) {
+                try {
+                    return decodeURIComponent(url.pathname.split('/').pop());
+                } catch (error) {
+                    return url.pathname.split('/').pop();
+                }
+            }
+
+            function renderBackgroundOptions(urls) {
+                const fragment = document.createDocumentFragment();
+
+                urls.forEach((url) => {
+                    const option = document.createElement('button');
+                    option.type = 'button';
+                    option.className = 'background-option';
+                    option.dataset.url = url.href;
+                    option.setAttribute('aria-pressed', String(url.href === currentBackground.href));
+                    option.setAttribute('aria-label', `切换背景为 ${backgroundFileName(url)}`);
+
+                    const thumbnail = document.createElement('img');
+                    thumbnail.src = url.href;
+                    thumbnail.alt = '';
+                    thumbnail.loading = 'lazy';
+                    thumbnail.decoding = 'async';
+
+                    const label = document.createElement('span');
+                    label.className = 'background-option-label';
+                    label.textContent = backgroundFileName(url);
+
+                    const check = document.createElement('span');
+                    check.className = 'background-option-check';
+                    check.setAttribute('aria-hidden', 'true');
+                    check.textContent = '✓';
+
+                    option.append(thumbnail, label, check);
+                    option.addEventListener('click', () => applyBackground(url));
+                    fragment.append(option);
+                });
+
+                backgroundGrid.replaceChildren(fragment);
+            }
+
+            async function scanBackgroundDirectory() {
+                const scanId = ++backgroundScanSequence;
+                backgroundGrid.setAttribute('aria-busy', 'true');
+                setBackgroundStatus('正在扫描 backgrounds 目录…');
+
+                try {
+                    const response = await fetch(backgroundDirectory.href, {
+                        cache: 'no-store',
+                        credentials: 'same-origin'
+                    });
+                    if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
+
+                    const listing = new DOMParser().parseFromString(await response.text(), 'text/html');
+                    const discovered = new Map();
+
+                    listing.querySelectorAll('a[href]').forEach((anchor) => {
+                        try {
+                            const url = normalizeBackgroundUrl(new URL(anchor.getAttribute('href'), response.url));
+                            if (url) discovered.set(url.href, url);
+                        } catch (error) {
+                            // Ignore malformed links in the server-generated directory listing.
+                        }
+                    });
+
+                    if (scanId !== backgroundScanSequence) return;
+                    if (discovered.size === 0) throw new Error('目录列表中没有支持的图片链接');
+
+                    const urls = Array.from(discovered.values()).sort((left, right) => {
+                        if (left.href === defaultBackground.href) return -1;
+                        if (right.href === defaultBackground.href) return 1;
+                        return backgroundFileName(left).localeCompare(backgroundFileName(right), 'zh-CN', { numeric: true });
+                    });
+
+                    if (!urls.some((url) => url.href === currentBackground.href)) {
+                        clearSavedBackground();
+                        await applyBackground(defaultBackground, false);
+                    }
+
+                    renderBackgroundOptions(urls);
+                    setBackgroundStatus(`发现 ${urls.length} 张背景图片。`, 'success');
+                } catch (error) {
+                    if (scanId !== backgroundScanSequence) return;
+                    console.warn('背景目录扫描失败。', error);
+                    const fallbackUrls = new Map([[defaultBackground.href, defaultBackground]]);
+                    if (currentBackground.href !== defaultBackground.href) fallbackUrls.set(currentBackground.href, currentBackground);
+                    renderBackgroundOptions(Array.from(fallbackUrls.values()));
+                    setBackgroundStatus('无法读取目录列表，已保留可用背景。请确认 Zoraxy 已开启 directory listing。', 'error');
+                } finally {
+                    if (scanId === backgroundScanSequence) backgroundGrid.setAttribute('aria-busy', 'false');
+                }
+            }
+
+            function validateSavedBackground() {
+                const savedValue = readSavedBackground();
+                if (!savedValue) return;
+                const savedUrl = normalizeBackgroundUrl(savedValue);
+                if (!savedUrl) {
+                    clearSavedBackground();
+                    setBackgroundStyle(defaultBackground);
+                    return;
+                }
+
+                preloadBackground(savedUrl).catch((error) => {
+                    console.warn('已保存的背景不存在，恢复默认背景。', error);
+                    clearSavedBackground();
+                    setBackgroundStyle(defaultBackground);
+                });
+            }
+
+            backgroundPickerButton.addEventListener('click', () => {
+                if (typeof backgroundDialog.showModal === 'function') {
+                    if (!backgroundDialog.open) backgroundDialog.showModal();
+                } else {
+                    backgroundDialog.setAttribute('open', '');
+                }
+                scanBackgroundDirectory();
+            });
+
+            backgroundDialog.addEventListener('click', (event) => {
+                if (event.target === backgroundDialog) backgroundDialog.close();
+            });
+
+            validateSavedBackground();
 
             const cards = Array.from(document.querySelectorAll('.service-card'));
             const refreshButton = document.getElementById('refresh-status');

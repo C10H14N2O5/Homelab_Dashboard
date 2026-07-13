@@ -1,0 +1,3 @@
+# Background assets are deployment-local and must not be committed.
+*
+!.gitignore
