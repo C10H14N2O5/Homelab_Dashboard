@@ -118,7 +118,7 @@ CSS 位于 `<style>` 中，主要分为：
 1. 在背景加载完成或安全超时后启动入场动画；
 2. 页面打开时检测所有服务，并响应“刷新状态”按钮。
 
-检测使用 `HEAD`、`mode: no-cors`、手动重定向和 5 秒超时。由于跨域响应对浏览器不可读，脚本只能判断请求是否建立，不能读取实际 HTTP 状态码或应用内部状态。
+检测使用默认的 `GET`、`mode: no-cors`、正常跟随重定向和 5 秒超时。`no-cors` 请求不能和 `redirect: manual` 组合使用，否则部分浏览器会在请求发出前直接拒绝。由于跨域响应对浏览器不可读，脚本只能判断请求是否建立，不能读取实际 HTTP 状态码或应用内部状态。
 
 因此：
 
@@ -301,7 +301,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');con
 
 ### 所有服务都显示不可连接
 
-依次检查浏览器网络、DNS、TLS 证书、HTTPS/HTTP 跳转和安全策略。不要立即把前端状态改成固定绿色。
+先打开浏览器控制台查看“入口检测失败”后的具体错误，再依次检查浏览器网络、DNS、TLS 证书、HTTPS/HTTP 跳转和安全策略。如果出现 `Request mode is "no-cors" but the redirect mode is not "follow"`，说明部署的 `index.html` 仍是使用手动重定向的旧版本。不要立即把前端状态改成固定绿色。
 
 ### 服务可以打开，但状态显示不可连接
 

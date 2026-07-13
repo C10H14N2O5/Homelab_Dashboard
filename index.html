@@ -831,17 +831,17 @@
 
                 try {
                     await fetch(card.href, {
-                        method: 'HEAD',
                         mode: 'no-cors',
                         cache: 'no-store',
                         credentials: 'omit',
-                        redirect: 'manual',
+                        redirect: 'follow',
                         referrerPolicy: 'no-referrer',
                         signal: controller.signal
                     });
                     setCardState(card, 'online', '可连接');
                     return true;
                 } catch (error) {
+                    console.warn(`入口检测失败：${card.href}`, error);
                     setCardState(card, 'offline', '不可连接');
                     return false;
                 } finally {
