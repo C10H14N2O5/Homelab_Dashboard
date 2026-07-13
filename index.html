@@ -478,12 +478,37 @@
             box-shadow: 0 32px 90px rgba(2, 8, 23, 0.62);
             -webkit-backdrop-filter: blur(24px) saturate(125%);
             backdrop-filter: blur(24px) saturate(125%);
+            opacity: 0;
+            transform: translateY(12px) scale(0.98);
+            transform-origin: center;
+            transition: opacity 180ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+            will-change: opacity, transform;
+        }
+
+        .background-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .background-dialog.is-closing {
+            pointer-events: none;
+            transition-duration: 180ms;
         }
 
         .background-dialog::backdrop {
             background: rgba(2, 8, 23, 0.58);
             -webkit-backdrop-filter: blur(6px);
             backdrop-filter: blur(6px);
+            opacity: 0;
+            transition: opacity 220ms ease;
+        }
+
+        .background-dialog.is-visible::backdrop {
+            opacity: 1;
+        }
+
+        .background-dialog.is-closing::backdrop {
+            transition-duration: 180ms;
         }
 
         .dialog-shell {
@@ -890,6 +915,10 @@
                 opacity: 1;
             }
 
+            .background-dialog {
+                transform: none;
+            }
+
             html.intro-first .background-layer,
             html.intro-first .shade-layer,
             html.intro-first .hero-copy,
@@ -1102,9 +1131,12 @@
             const backgroundLayer = document.querySelector('.background-layer');
             const backgroundPickerButton = document.getElementById('background-picker-button');
             const backgroundDialog = document.getElementById('background-dialog');
+            const backgroundDialogCloseForm = backgroundDialog.querySelector('form[method="dialog"]');
             const backgroundGrid = document.getElementById('background-grid');
             const backgroundPickerStatus = document.getElementById('background-picker-status');
             let backgroundScanSequence = 0;
+            let backgroundDialogAnimationToken = 0;
+            let backgroundDialogCloseTimer = 0;
 
             function normalizeBackgroundUrl(value) {
                 if (!value) return null;
@@ -1325,17 +1357,95 @@
                 });
             }
 
-            backgroundPickerButton.addEventListener('click', () => {
+            function backgroundDialogIsOpen() {
+                return backgroundDialog.open || backgroundDialog.hasAttribute('open');
+            }
+
+            function finishBackgroundDialogClose(returnValue = '') {
+                window.clearTimeout(backgroundDialogCloseTimer);
+                backgroundDialogCloseTimer = 0;
+                backgroundDialog.classList.remove('is-visible', 'is-closing');
+
+                if (typeof backgroundDialog.close === 'function' && backgroundDialog.open) {
+                    backgroundDialog.close(returnValue);
+                } else {
+                    backgroundDialog.removeAttribute('open');
+                    backgroundPickerButton.focus({ preventScroll: true });
+                }
+            }
+
+            function closeBackgroundDialog(returnValue = '') {
+                if (!backgroundDialogIsOpen() || backgroundDialog.classList.contains('is-closing')) return;
+
+                const animationToken = ++backgroundDialogAnimationToken;
+                const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                if (reduceMotion) {
+                    finishBackgroundDialogClose(returnValue);
+                    return;
+                }
+
+                backgroundDialog.classList.add('is-closing');
+                backgroundDialog.classList.remove('is-visible');
+
+                const finishAfterTransition = (event) => {
+                    if (event && (event.target !== backgroundDialog || event.propertyName !== 'opacity')) return;
+                    if (animationToken !== backgroundDialogAnimationToken) return;
+                    backgroundDialog.removeEventListener('transitionend', finishAfterTransition);
+                    finishBackgroundDialogClose(returnValue);
+                };
+
+                backgroundDialog.addEventListener('transitionend', finishAfterTransition);
+                backgroundDialogCloseTimer = window.setTimeout(finishAfterTransition, 300);
+            }
+
+            function openBackgroundDialog() {
+                const animationToken = ++backgroundDialogAnimationToken;
+                window.clearTimeout(backgroundDialogCloseTimer);
+                backgroundDialogCloseTimer = 0;
+                backgroundDialog.classList.remove('is-visible', 'is-closing');
+
                 if (typeof backgroundDialog.showModal === 'function') {
                     if (!backgroundDialog.open) backgroundDialog.showModal();
                 } else {
                     backgroundDialog.setAttribute('open', '');
                 }
+
+                if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    backgroundDialog.classList.add('is-visible');
+                } else {
+                    window.requestAnimationFrame(() => {
+                        window.requestAnimationFrame(() => {
+                            if (animationToken === backgroundDialogAnimationToken && backgroundDialogIsOpen()) {
+                                backgroundDialog.classList.add('is-visible');
+                            }
+                        });
+                    });
+                }
+
                 scanBackgroundDirectory();
+            }
+
+            backgroundPickerButton.addEventListener('click', openBackgroundDialog);
+
+            backgroundDialogCloseForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                closeBackgroundDialog(event.submitter?.value || '');
+            });
+
+            backgroundDialog.addEventListener('cancel', (event) => {
+                event.preventDefault();
+                closeBackgroundDialog('cancel');
             });
 
             backgroundDialog.addEventListener('click', (event) => {
-                if (event.target === backgroundDialog) backgroundDialog.close();
+                if (event.target === backgroundDialog) closeBackgroundDialog('backdrop');
+            });
+
+            backgroundDialog.addEventListener('close', () => {
+                ++backgroundDialogAnimationToken;
+                window.clearTimeout(backgroundDialogCloseTimer);
+                backgroundDialogCloseTimer = 0;
+                backgroundDialog.classList.remove('is-visible', 'is-closing');
             });
 
             validateSavedBackground();
