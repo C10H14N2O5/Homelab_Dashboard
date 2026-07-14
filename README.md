@@ -1,6 +1,6 @@
 # Zoraxy HomeLab Service Dashboard
 
-这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。项目采用单页结构，运行时只需要 `index.html` 和 `backgrounds/` 图片目录，不需要 Node.js、构建工具、数据库或外部图标 CDN。
+这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。页面主体仍是无外部依赖的单页；横屏与竖屏壁纸的跨设备偏好由一个仅监听本机回环地址的轻量 Go 状态服务保存，不需要用户数据库。
 
 本 README 主要面向 Codex 和其他自动化 Agent，同时尽量使用非技术人员也能理解的语言。维护者应先阅读本文，再修改页面或执行部署。
 
@@ -10,6 +10,8 @@
 | --- | --- |
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/` 目录自动发现，资源由部署机器本地保存，不进入 Git |
+| 壁纸同步 | 服务器保存横屏、竖屏两个共享槽位；其它设备刷新后同步 |
+| 状态服务 | Windows x64 单文件 EXE，仅监听 `127.0.0.1:8787` |
 | 服务数量 | 11 个 |
 | 图标 | 内联 SVG，无外部依赖 |
 | 桌面布局 | 背景主视觉 + 底部居中毛玻璃网格 |
@@ -22,16 +24,20 @@
 
 ```text
 Zoraxy_StaticWebSite/
+├── .gitignore      # 忽略构建产物、运行状态和误放的日志
 ├── backgrounds/    # 部署机器本地保存的公开背景目录
 │   ├── .gitignore  # 阻止目录内资源进入 Git
 │   └── bg.jpg      # 本地默认背景；被 Git 忽略，不随仓库分发
+├── state-service/  # Go 状态服务源码与测试
+├── scripts/        # Windows 验证、构建、安装和卸载脚本
+├── dist/           # 本地 EXE 构建目录，被 Git 忽略
 ├── index.html      # 实际运行的页面，包含 HTML、CSS、JavaScript 和 SVG
 ├── CHANGELOG.md    # 面向维护者的变更记录
 ├── README.md       # 项目结构、维护流程和 Agent 操作规范
 └── index.txt       # Zoraxy 原始示例页面，不参与当前网站运行
 ```
 
-仓库只分发页面代码和 `backgrounds/.gitignore`，不会分发任何背景图片。更新网站时复制 `index.html`，并保留 Zoraxy 运行目录中已有的 `backgrounds/`；首次部署时需从独立的本地来源放入至少一张 `backgrounds/bg.jpg`。README、Changelog、`.git`、`.gitignore` 和 `index.txt` 不应复制到公开 Web 根目录。Zoraxy 必须开启 directory listing，且 `backgrounds/` 中不能存在任何 index 文件。
+仓库分发页面、状态服务源码和运维脚本，但不分发背景图片、构建出的 EXE 或部署机状态。更新网站时复制 `index.html`，并保留 Zoraxy 运行目录中已有的 `backgrounds/`；首次部署时需从独立的本地来源放入至少一张 `backgrounds/bg.jpg`。README、Changelog、`.git`、`.gitignore`、`scripts/`、`state-service/` 和 `index.txt` 不应复制到公开 Web 根目录。Zoraxy 必须开启 directory listing，且 `backgrounds/` 中不能存在任何 index 文件。
 
 ## `index.html` 代码结构
 
@@ -43,6 +49,7 @@ Zoraxy_StaticWebSite/
 
 - 用户是否启用了“减少动态效果”；
 - 本次标签页会话是否已经播放过完整动画；
+- 当前方向对应的最近一次有效共享壁纸缓存；
 - 应使用完整动画 `intro-first`，还是快速淡入 `intro-skip`。
 
 会话标记保存在：
@@ -66,6 +73,7 @@ CSS 位于 `<style>` 中，主要分为：
 - `:root`：颜色、卡片背景、文字、状态颜色和内容宽度；
 - `.background-layer`：当前背景图片、统一居中裁切及切换淡入；
 - `.background-dialog`、`::backdrop`：背景选择器的毛玻璃弹窗、遮罩和开合过渡；
+- `.background-mode-switcher`：横屏、竖屏共享槽位切换；
 - `.shade-layer`：保护可读性的径向和底部渐变遮罩；
 - `.hero`：HomeLab 标题区；
 - `.dashboard`、`.service-grid`：服务网格；
@@ -116,13 +124,14 @@ CSS 位于 `<style>` 中，主要分为：
 
 ### 5. 运行时 JavaScript
 
-文件末尾脚本负责三件事：
+文件末尾脚本负责四件事：
 
 1. 在背景加载完成或安全超时后启动入场动画；
-2. 页面打开时检测所有服务，并响应“刷新状态”按钮。
-3. 扫描 `backgrounds/` 的 Zoraxy 目录列表，生成背景选择器并保存用户选择。
+2. 页面打开时检测所有服务，并响应“刷新状态”按钮；
+3. 扫描 `backgrounds/` 的 Zoraxy 目录列表，生成背景选择器；
+4. 读取或更新横屏、竖屏共享壁纸状态，并在设备方向变化时切换对应图片。
 
-背景选择器打开时会以约 220ms 淡入、轻微上浮和缩放，关闭时以约 180ms 反向播放。关闭按钮、Esc 和点击遮罩均经过同一关闭流程；减少动态效果模式下直接显示和关闭。
+背景选择器打开时会以约 220ms 淡入、轻微上浮和缩放，关闭时以约 180ms 反向播放。关闭按钮、Esc 和点击遮罩均经过同一关闭流程；减少动态效果模式下直接显示和关闭。目录扫描约 5 秒超时，图片预加载约 8 秒超时；新扫描会取消旧扫描，避免失败请求永久锁住选择控件。
 
 检测使用默认的 `GET`、`mode: no-cors`、正常跟随重定向和 5 秒超时。`no-cors` 请求不能和 `redirect: manual` 组合使用，否则部分浏览器会在请求发出前直接拒绝。由于跨域响应对浏览器不可读，脚本只能判断请求是否建立，不能读取实际 HTTP 状态码或应用内部状态。
 
@@ -195,7 +204,7 @@ CSS 位于 `<style>` 中，主要分为：
 - `.webp`；
 - `.avif`。
 
-目录只扫描第一层；子目录、SVG、GIF 和其它文件会被忽略。所有图片使用 `cover + center` 居中裁切，因此建议使用构图相近的横向壁纸。
+目录只扫描第一层；子目录、SVG、GIF 和其它文件会被忽略。所有图片使用 `cover + center` 居中裁切；横屏槽建议使用横向构图，竖屏槽建议使用主体居中的竖向或通用构图。
 
 维护要求：
 
@@ -206,19 +215,143 @@ CSS 位于 `<style>` 中，主要分为：
 - 替换同名图片后如果看到缓存旧图，可强制刷新浏览器；
 - 大尺寸 PNG 会增加加载和缩略图流量，优先使用合理压缩的 JPG、WebP 或 AVIF。
 
-当前选择保存在：
+服务器返回的最近一次有效状态会缓存在：
 
 ```js
-localStorage['homelab-background']
+localStorage['homelab-background-state-cache-v1']
 ```
 
-需要恢复默认选择时，在浏览器控制台执行：
+该值只用于首次绘制和 API 暂时不可用时的降级，不是本机覆盖。服务器成功响应后会覆盖缓存并清除旧的 `homelab-background`。需要清除离线缓存时可执行：
 
 ```js
-localStorage.removeItem('homelab-background')
+localStorage.removeItem('homelab-background-state-cache-v1')
 ```
 
-然后刷新页面。
+然后刷新页面；只要状态服务可用，页面仍会重新取得服务器共享设置。
+
+## 横屏与竖屏壁纸跨设备同步
+
+系统共享 `landscape` 与 `portrait` 两个图片文件名。图片仍只保存在部署机器的 `backgrounds/` 中；API 不传输图片，Git 也不保存图片。
+
+请求流程：浏览器从 `/backgrounds/` 发现候选图片，选择后向同源 `PATCH /api/background-preferences` 写入目标槽位；Zoraxy 应先应用首页已有的 Basic Auth，再将请求反向代理到回环状态服务。其它设备刷新时通过 GET 读取完整状态，并按当前视口方向选择图片。已经打开的页面不会接收实时推送。
+
+以电脑把横屏背景从 `bg.jpg` 改为 `test.jpg` 为例：
+
+1. 浏览器打开选择器，从 `/backgrounds/` 目录列表发现并预加载 `test.jpg`；
+2. 浏览器向同源 `/api/background-preferences` 发送：
+
+   ```json
+   {"mode":"landscape","background":"test.jpg"}
+   ```
+
+3. Zoraxy 的 Virtual Directory 在完成首页 Basic Auth 后，将请求转发到 `127.0.0.1:8787`；
+4. 状态服务确认 Origin、请求标记、文件名及物理文件存在，再写入 `state.json` 并返回完整状态：
+
+   ```json
+   {
+     "version": 1,
+     "landscape": "test.jpg",
+     "portrait": "bg.jpg",
+     "updatedAt": "2026-07-14T12:00:00Z"
+   }
+   ```
+
+5. 另一台电脑刷新页面后执行 GET，读取同一状态并显示 `test.jpg`；手机竖屏仍读取 `portrait`，所以继续显示 `bg.jpg`。
+
+API 不可用时，页面继续使用最近缓存或 `bg.jpg`，服务导航和链接不受影响。所选图片会在写入前先预加载；PATCH 中断时页面会立即通过 GET 对账。若立即读取仍是旧值，原 PATCH 仍可能稍后完成，因此页面会提示稍后刷新核对；只有 PATCH 与对账 GET 都失败时才标记同步服务离线。
+
+### 构建 Windows 状态服务
+
+构建要求为 Windows x64 和 Go 1.22 或更高版本。在仓库根目录运行：
+
+```powershell
+.\scripts\build-state-service.ps1
+```
+
+脚本会输出 Go 版本，依次执行 `go test -count=1 ./...` 和 `go vet ./...`，再以 `GOOS=windows`、`GOARCH=amd64`、`GOAMD64=v1`、`CGO_ENABLED=0` 构建并验证临时 EXE，成功后才替换 `dist\HomeLabWallpaperState.exe`，最后输出文件大小和 SHA-256。`dist/` 与所有 EXE 均被 Git 忽略。
+
+### 安装到 Windows 11 Zoraxy 主机
+
+安装脚本不会复制 EXE。先记录构建脚本输出的 SHA-256，再把产物手动复制到 `C:\Program Files\HomeLabWallpaperState\HomeLabWallpaperState.exe`，在目标机用 `Get-FileHash` 核对一致后，以管理员身份运行：
+
+```powershell
+.\scripts\install-state-service.ps1 `
+  -ExePath 'C:\Program Files\HomeLabWallpaperState\HomeLabWallpaperState.exe' `
+  -BackgroundDir '<Zoraxy-Web-Root>\backgrounds' `
+  -ExpectedSha256 '<build-output-sha256>' `
+  -AllowedOrigin 'https://home.c10h14n2o5.com' `
+  -Listen '127.0.0.1:8787' `
+  -StateDir 'C:\ProgramData\HomeLabWallpaperState'
+```
+
+`BackgroundDir` 必须传入真实路径且包含 `bg.jpg`，`ExpectedSha256` 必须使用构建脚本输出的 64 位 SHA-256。为防止普通用户替换 SYSTEM 任务执行文件，安装脚本强制 EXE 位于 `Program Files\HomeLabWallpaperState`，并在注册任务前核对哈希；`StateDir` 应保留在 `ProgramData`。脚本同时拒绝把 EXE 或状态目录放进首页所在的公开 Web 根目录，并强制监听 `127.0.0.1:<端口>`。覆盖旧定义前会等待旧任务停止；新任务启动后会连续两次检查任务状态与 `/healthz`，15 秒内未就绪则停止失败任务并报出任务结果和日志路径。状态位于 `C:\ProgramData\HomeLabWallpaperState\state.json`，日志位于同目录的 `service.log`。
+
+先在物理机验证：
+
+```powershell
+Get-ScheduledTask -TaskName 'HomeLabWallpaperState'
+Invoke-RestMethod 'http://127.0.0.1:8787/healthz'
+Invoke-RestMethod 'http://127.0.0.1:8787/api/background-preferences'
+```
+
+### Zoraxy Virtual Directory
+
+在首页所在 HTTPS Host Proxy 中增加 Virtual Directory。Zoraxy 的字段和界面会随版本变化，部署前先记录实际版本并备份配置；当前官方配置结构使用以下含义：
+
+```text
+MatchingPath： /api/
+Domain：       127.0.0.1:8787/api/
+RequireTLS：   false
+```
+
+官方配置示例见 [Add Routing Via Config File](https://github-wiki-see.page/m/tobychui/zoraxy/wiki/Add-Routing-Via-Config-File)。不要假定 UI 存在方法白名单字段；配置后应实际验证 GET 与 PATCH 都能原样通过。代理必须保留方法、请求体、`Content-Type`、`Origin` 和 `X-Requested-With`，禁止缓存，并复用首页 Basic Auth；确认 Basic Auth exception 没有排除 `/api/`。不要重定向浏览器到回环 HTTP 地址，也不要通过防火墙、局域网端口转发或 Tailscale 暴露 8787。
+
+### 升级、卸载与状态备份
+
+升级前先记录旧 EXE 哈希并导出任务定义：
+
+```powershell
+$backup = Join-Path $env:ProgramData ("HomeLabWallpaperState-backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+New-Item -ItemType Directory -Path $backup
+Export-ScheduledTask -TaskName 'HomeLabWallpaperState' |
+  Out-File (Join-Path $backup 'task.xml') -Encoding Unicode
+Copy-Item 'C:\Program Files\HomeLabWallpaperState\HomeLabWallpaperState.exe' $backup
+Copy-Item 'C:\ProgramData\HomeLabWallpaperState\state.json' $backup
+Get-FileHash 'C:\Program Files\HomeLabWallpaperState\HomeLabWallpaperState.exe' |
+  Out-File (Join-Path $backup 'exe-sha256.txt')
+```
+
+然后停止任务并等待实例退出：
+
+```powershell
+$taskName = 'HomeLabWallpaperState'
+Stop-ScheduledTask -TaskName $taskName
+$deadline = (Get-Date).AddSeconds(15)
+do {
+  $taskState = (Get-ScheduledTask -TaskName $taskName).State
+  if ($taskState -ne 'Running') { break }
+  Start-Sleep -Milliseconds 250
+} while ((Get-Date) -lt $deadline)
+if ($taskState -eq 'Running') { throw "Task $taskName did not stop within 15 seconds." }
+```
+
+确认实例不再运行后，手动替换并核对新 EXE 哈希，使用相同参数重新运行安装脚本；只有回环 API 验证成功后才部署新 `index.html`。若健康检查失败，不要反复覆盖。确认失败任务已停止后，可按备份恢复旧 EXE 和任务：
+
+```powershell
+Copy-Item (Join-Path $backup 'HomeLabWallpaperState.exe') `
+  'C:\Program Files\HomeLabWallpaperState\HomeLabWallpaperState.exe' -Force
+$taskXml = Get-Content -LiteralPath (Join-Path $backup 'task.xml') -Raw
+Register-ScheduledTask -TaskName 'HomeLabWallpaperState' -Xml $taskXml -Force
+Start-ScheduledTask -TaskName 'HomeLabWallpaperState'
+```
+
+`backgrounds/`、EXE、`state.json`、任务 XML 和 Zoraxy 配置都需要在 Git 之外单独备份。
+
+同一个 `StateDir` 只能由一个服务实例使用。计划任务已设置为忽略自身的重复实例，但不要再手工启动第二份 EXE。Windows 计划任务停止可能直接终止进程，因此升级和关机前不能用“已执行优雅退出”替代状态备份。
+
+状态写入会先同步临时文件再同目录替换，但 Windows 不保证该替换在强制终止时严格原子，当前版本也不会自动从损坏 JSON 恢复。壁纸偏好不是业务数据，但仍应备份 `state.json`；若启动日志报告状态解码失败，应先保留损坏文件用于排查，再恢复备份，或在用户确认后移走主文件让服务以两个 `bg.jpg` 槽位重新初始化。不要绕过安装脚本把 `StateDir` 指向任何公开目录。
+
+管理员运行 `.\scripts\uninstall-state-service.ps1` 只会停止并注销计划任务，故意保留 EXE、状态和背景图片。除非用户明确授权，不得删除这些部署机本地数据。
 
 ### 调整配色和卡片
 
@@ -248,6 +381,7 @@ localStorage.removeItem('homelab-background')
 - 上游仓库 URL；
 - 要部署的分支或提交 SHA；
 - Zoraxy 静态网站目标目录；
+- 已安装状态服务 EXE、预期 SHA-256、状态目录和 Zoraxy API 代理的实际配置；
 - Zoraxy 运行账户是否有读取权限；
 - 是否允许创建备份和替换现有文件。
 
@@ -258,11 +392,11 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 1. 使用专用部署工作副本；若工作副本已存在，先确认没有本地改动，再获取远端并检出用户指定的已合并提交；工作区不干净时必须停止；
 2. 输出并记录实际部署的提交 SHA；
 3. 检查工作副本干净，确认来源是上游已合并分支；
-4. 比较目标目录中的现有 `index.html` 与仓库版本，并确认本地 `backgrounds/bg.jpg` 仍然存在；
+4. 比较目标目录中的现有 `index.html` 与仓库版本，并确认本地 `backgrounds/bg.jpg`、状态服务和 API 代理仍然存在；
 5. 如果目标 `index.html` 包含仓库中没有的人工修改，停止并报告差异；
-6. 在 Web 根目录之外创建带时间戳的备份，同时单独备份部署机器上的整个 `backgrounds/`；
+6. 在 Web 根目录之外创建带时间戳的备份，同时单独备份 `backgrounds/`、已安装 EXE、`state.json` 和计划任务参数；
 7. 先复制到同一文件系统的临时位置，再替换目标文件，降低复制中断造成半部署的风险；
-8. 常规更新只替换 `index.html`，不得用仓库中仅含 `.gitignore` 的 `backgrounds/` 覆盖或同步删除部署机器上的背景目录；首次部署或明确更新图片时，背景必须来自用户指定的独立本地来源；
+8. 首次启用同步时必须按“状态服务 → Zoraxy API 代理 → index.html”顺序部署；常规前端更新只替换 `index.html`，不得覆盖部署机器上的背景目录；
 9. 检查文件存在、大小非零、Zoraxy 账户可读；
 10. 访问实际导航页进行冒烟测试；
 11. 向用户报告提交 SHA、源路径、目标路径、代码备份路径、背景备份路径、部署文件和验证结果。
@@ -276,6 +410,8 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 - 页面返回成功且标题显示为 HomeLab；
 - `backgrounds/bg.jpg` 正常加载；
 - `/backgrounds/` 返回目录列表，并且选择器能够发现图片；
+- 回环 `/healthz`、同源 `/api/background-preferences` 均返回成功，API 受与首页相同的 Basic Auth 保护；
+- 横屏和竖屏槽位可以分别保存，第二个浏览器刷新后获得共享选择；
 - 11 个服务卡片全部出现；
 - 桌面端和手机端没有明显横向溢出；
 - 刷新状态按钮可用；
@@ -287,25 +423,29 @@ Agent 不得猜测部署路径，也不得因为“上次路径可能相同”�
 若部署后出现严重问题：
 
 1. 停止继续覆盖或尝试未经验证的临时修复；
-2. 使用本次部署前的备份恢复 `index.html` 和整个 `backgrounds/` 目录；
-3. 确认 Zoraxy 可以读取恢复文件；
-4. 重新访问页面验证；
-5. 报告失败提交 SHA、错误现象、回滚文件和当前运行版本。
+2. 恢复上一个版本的 `index.html`；
+3. 如需回滚同步架构，禁用 API 代理并运行卸载脚本移除计划任务；
+4. 保留 EXE、`state.json` 和整个 `backgrounds/`，除非用户明确要求删除；
+5. 重新访问页面验证，并报告失败提交 SHA、错误现象、回滚内容和当前运行版本。
 
 ## 修改后的验证清单
 
 ### 自动检查
 
 ```powershell
-git diff --check
-git status -sb
+.\scripts\verify-project.ps1
+.\scripts\verify-project.ps1 -Build
 ```
 
-如果本机有 Node.js，可检查两个内联脚本能否解析：
+验证脚本默认要求 Node.js 和 Go，检查 PowerShell 语法、内联 JavaScript、超时行为、11 个服务卡片、Git 空白与忽略规则，并运行 `gofmt`、Go 单元测试和 `go vet`；只有 `-Build` 才生成 EXE。没有 Go 的机器只能运行静态子集：
 
 ```powershell
-node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');const s=h.split('<script>').slice(1).map(x=>x.split('</script>')[0]);s.forEach(x=>new Function(x));console.log('Inline scripts parsed:',s.length)"
+.\scripts\verify-project.ps1 -SkipGo
 ```
+
+`-SkipGo` 不能作为发布构建的完整验证结果；发布前仍必须在带 Go 1.22+ 的 Windows x64 环境运行完整检查和构建。
+
+如果 Node.js 也不可用，可再增加 `-SkipFrontend`，但这只验证 PowerShell、Git 和文档契约，不能证明页面脚本可解析。`-Build` 禁止与任何跳过参数组合。
 
 提交前还应确认：
 
@@ -323,6 +463,8 @@ node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');con
 - 开启操作系统“减少动态效果”后确认内容立即可用；
 - 点击“刷新状态”验证按钮忙碌状态和结果汇总；
 - 临时阻断一个地址时确认超时不会卡死整个页面。
+- 使用两个独立浏览器配置验证横屏、竖屏共享设置在刷新后同步；
+- 临时停止状态服务，确认缓存或 `bg.jpg` 降级且服务导航仍可使用。
 
 ## 常见问题
 
@@ -342,6 +484,10 @@ node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');con
 
 检查 `backgrounds/bg.jpg` 是否存在、目录层级和文件名大小写是否一致，以及 Zoraxy 是否有读取权限。如果默认背景正常但选择器只显示一项，确认 `backgrounds/` 已开启 directory listing 且目录中没有 index 文件。
 
+### 共享壁纸 API 返回 401、403 或无法连接
+
+401 表示 API 路径没有复用正确的 Basic Auth 会话。PATCH 返回 403 时，检查 `AllowedOrigin` 是否与页面来源完全一致，并确认 Zoraxy 保留 `Origin` 和 `X-Requested-With`。无法连接时依次检查计划任务、`service.log`、回环 `/healthz` 和路径代理优先级。不得把 Basic Auth 凭据写进 HTML。
+
 ### 新图标不显示
 
 检查 SVG 是否有正确的 `viewBox`，路径是否放在 `<svg>` 内。现有样式使用 `stroke: currentColor`；只有填充路径的图标需要单独处理 `fill`。
@@ -353,7 +499,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('index.html','utf8');con
 ## Agent 工作原则
 
 1. 修改前完整阅读 `README.md`、`CHANGELOG.md` 和相关 `index.html` 模块；
-2. 保持项目为静态、无构建依赖的单页结构，除非用户明确批准架构变更；
+2. 保持页面为无外部依赖的单页；状态服务只使用 Go 标准库，不得引入数据库或用户系统；
 3. 不读取、提交或输出任何认证信息；
 4. 小修改走分支和 PR，大型重构由用户本机人工主导；
 5. 未得到用户明确的合并与部署确认，不执行物理机覆盖；

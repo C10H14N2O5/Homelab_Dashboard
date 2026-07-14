@@ -15,18 +15,23 @@
             try {
                 const pageBase = new URL('.', document.baseURI);
                 const backgroundDir = new URL('backgrounds/', pageBase);
-                const savedBackground = localStorage.getItem('homelab-background');
-                const savedUrl = savedBackground ? new URL(savedBackground, pageBase) : null;
+                const cachedState = JSON.parse(localStorage.getItem('homelab-background-state-cache-v1') || 'null');
+                const mode = window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape';
+                const fileName = cachedState?.version === 1 ? cachedState[mode] : '';
 
-                if (savedUrl && savedUrl.origin === location.origin && savedUrl.pathname.startsWith(backgroundDir.pathname)) {
-                    const relativePath = decodeURIComponent(savedUrl.pathname.slice(backgroundDir.pathname.length));
-                    if (relativePath && !relativePath.includes('/') && /\.(?:jpe?g|png|webp|avif)$/i.test(relativePath)) {
-                        root.style.setProperty('--background-image', `url("${savedUrl.href}")`);
-                        root.dataset.background = savedUrl.href;
-                    }
+                if (
+                    typeof fileName === 'string'
+                    && fileName.length > 0
+                    && !fileName.includes('/')
+                    && !fileName.includes('\\')
+                    && /\.(?:jpe?g|png|webp|avif)$/i.test(fileName)
+                ) {
+                    const savedUrl = new URL(encodeURIComponent(fileName), backgroundDir);
+                    root.style.setProperty('--background-image', `url("${savedUrl.href}")`);
+                    root.dataset.background = savedUrl.href;
                 }
             } catch (error) {
-                // Invalid or unavailable storage must never prevent the page from loading.
+                // Invalid, stale or unavailable cache must never prevent the page from loading.
             }
 
             if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -448,6 +453,7 @@
 
         .background-picker-button:focus-visible,
         .dialog-close:focus-visible,
+        .background-mode-button:focus-visible,
         .background-option:focus-visible {
             outline: 3px solid rgba(125, 211, 252, 0.9);
             outline-offset: 3px;
@@ -559,6 +565,63 @@
             border-color: rgba(125, 211, 252, 0.38);
         }
 
+        .background-mode-switcher {
+            margin: 0.85rem 1.15rem 0;
+            padding: 0.24rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.25rem;
+            background: rgba(3, 12, 24, 0.68);
+            border: 1px solid rgba(226, 232, 240, 0.1);
+            border-radius: 0.85rem;
+        }
+
+        .background-mode-button {
+            min-width: 0;
+            min-height: 2.75rem;
+            padding: 0.42rem 0.65rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            color: var(--subtle);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 0.65rem;
+            cursor: pointer;
+            transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+        }
+
+        .background-mode-button span {
+            color: inherit;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .background-mode-button small {
+            color: inherit;
+            font-size: 0.66rem;
+            font-weight: 500;
+            opacity: 0.76;
+        }
+
+        .background-mode-button:hover {
+            color: var(--muted);
+            background: rgba(22, 45, 72, 0.52);
+        }
+
+        .background-mode-button[aria-pressed="true"] {
+            color: var(--text);
+            background: rgba(24, 53, 82, 0.9);
+            border-color: rgba(125, 211, 252, 0.34);
+            box-shadow: 0 4px 16px rgba(2, 8, 23, 0.26);
+        }
+
+        .background-mode-button:disabled {
+            cursor: wait;
+            opacity: 0.62;
+        }
+
         .background-picker-status {
             margin: 0;
             padding: 0.75rem 1.15rem 0;
@@ -603,6 +666,12 @@
             color: var(--text);
             border-color: rgba(125, 211, 252, 0.42);
             transform: translateY(-2px);
+        }
+
+        .background-option:disabled {
+            cursor: wait;
+            opacity: 0.62;
+            transform: none;
         }
 
         .background-option[aria-pressed="true"] {
@@ -898,6 +967,15 @@
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 padding-inline: 0.85rem;
             }
+
+            .background-mode-switcher {
+                margin-inline: 0.85rem;
+            }
+
+            .background-mode-button {
+                flex-direction: column;
+                gap: 0.08rem;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -1091,12 +1169,22 @@
             <header class="dialog-header">
                 <div>
                     <h2 id="background-dialog-title">选择背景</h2>
-                    <p>自动读取 backgrounds 目录中的图片，选择会保存在当前浏览器。</p>
+                    <p>设置会同步到所有设备；横屏与竖屏使用彼此独立的背景。</p>
                 </div>
                 <form method="dialog">
                     <button class="dialog-close" type="submit" aria-label="关闭背景选择器">✕</button>
                 </form>
             </header>
+            <div class="background-mode-switcher" role="group" aria-label="选择要设置的显示方向">
+                <button class="background-mode-button" type="button" data-background-mode="landscape" aria-pressed="true">
+                    <span>横屏</span>
+                    <small>电脑 / 横向视口</small>
+                </button>
+                <button class="background-mode-button" type="button" data-background-mode="portrait" aria-pressed="false">
+                    <span>竖屏</span>
+                    <small>手机 / 纵向视口</small>
+                </button>
+            </div>
             <p class="background-picker-status" id="background-picker-status" role="status" aria-live="polite">准备扫描背景目录…</p>
             <div class="background-grid" id="background-grid" aria-busy="false"></div>
         </div>
@@ -1126,17 +1214,35 @@
             const pageBase = new URL('.', document.baseURI);
             const backgroundDirectory = new URL('backgrounds/', pageBase);
             const defaultBackground = new URL('bg.jpg', backgroundDirectory);
-            const backgroundStorageKey = 'homelab-background';
+            const defaultBackgroundName = 'bg.jpg';
+            const backgroundPreferencesEndpoint = new URL('/api/background-preferences', document.baseURI);
+            const backgroundPreferencesCacheKey = 'homelab-background-state-cache-v1';
+            const legacyBackgroundStorageKey = 'homelab-background';
             const backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
+            const backgroundModes = ['landscape', 'portrait'];
+            const backgroundModeLabels = {
+                landscape: '横屏',
+                portrait: '竖屏'
+            };
+            const orientationQuery = window.matchMedia('(orientation: portrait)');
             const backgroundLayer = document.querySelector('.background-layer');
             const backgroundPickerButton = document.getElementById('background-picker-button');
             const backgroundDialog = document.getElementById('background-dialog');
             const backgroundDialogCloseForm = backgroundDialog.querySelector('form[method="dialog"]');
             const backgroundGrid = document.getElementById('background-grid');
             const backgroundPickerStatus = document.getElementById('background-picker-status');
+            const backgroundModeButtons = Array.from(backgroundDialog.querySelectorAll('[data-background-mode]'));
             let backgroundScanSequence = 0;
+            let backgroundScanController = null;
+            let backgroundScanPending = false;
             let backgroundDialogAnimationToken = 0;
             let backgroundDialogCloseTimer = 0;
+            let backgroundDisplaySequence = 0;
+            let backgroundPreferencesReadSequence = 0;
+            let backgroundPreferencesWriteSequence = 0;
+            let backgroundWritePending = false;
+            let backgroundPreferencesConnection = 'loading';
+            let editingBackgroundModeTouched = false;
 
             function normalizeBackgroundUrl(value) {
                 if (!value) return null;
@@ -1155,31 +1261,91 @@
                 }
             }
 
-            function readSavedBackground() {
+            function backgroundFileName(url) {
                 try {
-                    return localStorage.getItem(backgroundStorageKey);
+                    return decodeURIComponent(url.pathname.split('/').pop());
+                } catch (error) {
+                    return url.pathname.split('/').pop();
+                }
+            }
+
+            function normalizeBackgroundName(value) {
+                if (
+                    typeof value !== 'string'
+                    || value.length === 0
+                    || value.length > 255
+                    || value.includes('/')
+                    || value.includes('\\')
+                    || /[\u0000-\u001f\u007f]/.test(value)
+                    || !backgroundExtensionPattern.test(value)
+                ) return null;
+
+                return value;
+            }
+
+            function backgroundUrlFromName(value) {
+                const fileName = normalizeBackgroundName(value);
+                if (!fileName) return null;
+                return normalizeBackgroundUrl(new URL(encodeURIComponent(fileName), backgroundDirectory));
+            }
+
+            function normalizeBackgroundPreferences(value) {
+                if (!value || typeof value !== 'object' || value.version !== 1) return null;
+                const landscape = normalizeBackgroundName(value.landscape);
+                const portrait = normalizeBackgroundName(value.portrait);
+                if (!landscape || !portrait) return null;
+
+                return {
+                    version: 1,
+                    landscape,
+                    portrait,
+                    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : ''
+                };
+            }
+
+            function readBackgroundPreferencesCache() {
+                try {
+                    return normalizeBackgroundPreferences(JSON.parse(localStorage.getItem(backgroundPreferencesCacheKey) || 'null'));
                 } catch (error) {
                     return null;
                 }
             }
 
-            function saveBackground(url) {
+            function saveBackgroundPreferencesCache(preferences) {
                 try {
-                    localStorage.setItem(backgroundStorageKey, url.href.slice(pageBase.href.length));
+                    localStorage.setItem(backgroundPreferencesCacheKey, JSON.stringify(preferences));
                 } catch (error) {
-                    console.warn('无法保存背景选择。', error);
+                    console.warn('无法缓存共享背景状态。', error);
                 }
             }
 
-            function clearSavedBackground() {
+            function clearLegacyBackgroundPreference() {
                 try {
-                    localStorage.removeItem(backgroundStorageKey);
+                    localStorage.removeItem(legacyBackgroundStorageKey);
                 } catch (error) {
                     // Storage failure does not affect the current page.
                 }
             }
 
-            let currentBackground = normalizeBackgroundUrl(root.dataset.background) || defaultBackground;
+            function currentOrientationMode() {
+                return orientationQuery.matches ? 'portrait' : 'landscape';
+            }
+
+            const cachedBackgroundPreferences = readBackgroundPreferencesCache();
+            let backgroundPreferences = cachedBackgroundPreferences || {
+                version: 1,
+                landscape: defaultBackgroundName,
+                portrait: defaultBackgroundName,
+                updatedAt: ''
+            };
+            let activeBackgroundMode = currentOrientationMode();
+            let editingBackgroundMode = activeBackgroundMode;
+
+            function backgroundUrlForMode(mode) {
+                return backgroundUrlFromName(backgroundPreferences[mode]) || defaultBackground;
+            }
+
+            let currentBackground = normalizeBackgroundUrl(root.dataset.background) || backgroundUrlForMode(activeBackgroundMode);
 
             function setBackgroundStyle(url) {
                 root.style.setProperty('--background-image', `url("${url.href}")`);
@@ -1196,61 +1362,314 @@
                 }
             }
 
-            function preloadBackground(url) {
+            function focusWithoutScroll(element) {
+                if (!element || typeof element.focus !== 'function') return;
+                try {
+                    element.focus({ preventScroll: true });
+                } catch (error) {
+                    element.focus();
+                }
+            }
+
+            function fetchWithTimeout(
+                resource,
+                options = {},
+                timeoutMs = 5000,
+                controller = null,
+                transformResponse = null
+            ) {
+                const requestController = controller || (
+                    typeof AbortController === 'function' ? new AbortController() : null
+                );
+                const requestOptions = { ...options };
+                if (requestController) requestOptions.signal = requestController.signal;
+
+                let timeout = 0;
+                const timeoutPromise = new Promise((resolve, reject) => {
+                    timeout = window.setTimeout(() => {
+                        if (requestController) requestController.abort();
+                        reject(new Error(`请求超时（${timeoutMs}ms）`));
+                    }, timeoutMs);
+                });
+
+                const request = fetch(resource, requestOptions).then((response) => (
+                    typeof transformResponse === 'function' ? transformResponse(response) : response
+                ));
+                return Promise.race([request, timeoutPromise])
+                    .finally(() => window.clearTimeout(timeout));
+            }
+
+            function preloadBackground(url, timeoutMs = 8000) {
                 return new Promise((resolve, reject) => {
                     const image = new Image();
+                    let settled = false;
+                    let timeout = 0;
+
+                    const finish = (callback, value) => {
+                        if (settled) return;
+                        settled = true;
+                        window.clearTimeout(timeout);
+                        image.onload = null;
+                        image.onerror = null;
+                        callback(value);
+                    };
+
                     image.decoding = 'async';
-                    image.onload = () => resolve(url);
-                    image.onerror = () => reject(new Error(`图片无法加载：${url.pathname}`));
+                    image.onload = () => finish(resolve, url);
+                    image.onerror = () => finish(reject, new Error(`图片无法加载：${url.pathname}`));
+                    timeout = window.setTimeout(() => {
+                        finish(reject, new Error(`图片加载超时：${url.pathname}`));
+                        image.src = 'data:,';
+                    }, timeoutMs);
                     image.src = url.href;
                 });
             }
 
-            function updateBackgroundSelection() {
+            function syncBackgroundControlsBusy() {
+                const isBusy = backgroundScanPending || backgroundWritePending;
+                backgroundGrid.setAttribute('aria-busy', String(isBusy));
+                backgroundModeButtons.forEach((button) => {
+                    button.disabled = isBusy;
+                });
                 backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
-                    option.setAttribute('aria-pressed', String(option.dataset.url === currentBackground.href));
+                    option.disabled = isBusy;
                 });
             }
 
-            async function applyBackground(url, persist = true) {
+            function updateBackgroundModeControls() {
+                backgroundModeButtons.forEach((button) => {
+                    button.setAttribute('aria-pressed', String(button.dataset.backgroundMode === editingBackgroundMode));
+                });
+            }
+
+            function updateBackgroundSelection() {
+                const selectedUrl = backgroundUrlForMode(editingBackgroundMode);
+                backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
+                    const isSelected = option.dataset.url === selectedUrl.href;
+                    option.setAttribute('aria-pressed', String(isSelected));
+                    option.setAttribute(
+                        'aria-label',
+                        `将 ${backgroundFileName(new URL(option.dataset.url))} 设置为${backgroundModeLabels[editingBackgroundMode]}背景${isSelected ? '，当前已选' : ''}`
+                    );
+                });
+            }
+
+            async function applyDisplayedBackground(url, options = {}) {
                 const candidate = normalizeBackgroundUrl(url);
                 if (!candidate) {
-                    setBackgroundStatus('该图片地址无效，已保留当前背景。', 'error');
+                    if (options.announce) setBackgroundStatus('该图片地址无效，已保留当前背景。', 'error');
                     return false;
                 }
 
+                const displayId = ++backgroundDisplaySequence;
+                backgroundLayer.classList.remove('is-changing');
+
                 try {
-                    setBackgroundStatus(`正在加载 ${decodeURIComponent(candidate.pathname.split('/').pop())}…`);
+                    if (options.announce) setBackgroundStatus(`正在加载 ${backgroundFileName(candidate)}…`);
                     await preloadBackground(candidate);
+                    if (displayId !== backgroundDisplaySequence) return false;
 
                     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                    if (!reduceMotion) {
+                    const shouldAnimate = options.animate !== false && !reduceMotion && candidate.href !== currentBackground.href;
+                    if (shouldAnimate) {
                         backgroundLayer.classList.add('is-changing');
                         await new Promise((resolve) => window.setTimeout(resolve, 150));
+                        if (displayId !== backgroundDisplaySequence) return false;
                     }
 
                     setBackgroundStyle(candidate);
-                    if (persist) saveBackground(candidate);
                     updateBackgroundSelection();
 
-                    window.requestAnimationFrame(() => {
-                        window.requestAnimationFrame(() => backgroundLayer.classList.remove('is-changing'));
-                    });
-                    setBackgroundStatus(`已切换为 ${decodeURIComponent(candidate.pathname.split('/').pop())}`, 'success');
+                    if (shouldAnimate) {
+                        window.requestAnimationFrame(() => {
+                            window.requestAnimationFrame(() => {
+                                if (displayId === backgroundDisplaySequence) backgroundLayer.classList.remove('is-changing');
+                            });
+                        });
+                    }
+                    if (options.announce) {
+                        setBackgroundStatus(options.successMessage || `已切换为 ${backgroundFileName(candidate)}`, 'success');
+                    }
                     return true;
                 } catch (error) {
+                    if (displayId !== backgroundDisplaySequence) return false;
                     backgroundLayer.classList.remove('is-changing');
                     console.warn('背景切换失败。', error);
-                    setBackgroundStatus('图片加载失败，已保留当前背景。', 'error');
+                    if (options.fallbackToDefault) {
+                        setBackgroundStyle(defaultBackground);
+                        updateBackgroundSelection();
+                    }
+                    if (options.announce) setBackgroundStatus('图片加载失败，已保留当前背景。', 'error');
                     return false;
                 }
             }
 
-            function backgroundFileName(url) {
+            async function requestBackgroundPreferences(method = 'GET', body = null) {
+                const headers = {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'homelab-dashboard'
+                };
+
+                if (body) headers['Content-Type'] = 'application/json';
+
+                const result = await fetchWithTimeout(backgroundPreferencesEndpoint.href, {
+                    method,
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers,
+                    body: body ? JSON.stringify(body) : null
+                }, 5000, null, async (response) => {
+                    if (!response.ok) throw new Error(`背景状态接口返回 ${response.status}`);
+                    return {
+                        response,
+                        payload: await response.json()
+                    };
+                });
+
+                const preferences = normalizeBackgroundPreferences(result.payload);
+                if (!preferences) throw new Error('背景状态接口返回了无效数据');
+                return preferences;
+            }
+
+            function acceptSharedBackgroundPreferences(preferences) {
+                backgroundPreferences = preferences;
+                backgroundPreferencesConnection = 'online';
+                saveBackgroundPreferencesCache(preferences);
+                clearLegacyBackgroundPreference();
+                activeBackgroundMode = currentOrientationMode();
+                updateBackgroundModeControls();
+                updateBackgroundSelection();
+            }
+
+            async function loadSharedBackgroundPreferences() {
+                const requestId = ++backgroundPreferencesReadSequence;
                 try {
-                    return decodeURIComponent(url.pathname.split('/').pop());
+                    const preferences = await requestBackgroundPreferences();
+                    if (requestId !== backgroundPreferencesReadSequence) return;
+                    acceptSharedBackgroundPreferences(preferences);
+                    await applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
+                        fallbackToDefault: true
+                    });
+                    if (requestId !== backgroundPreferencesReadSequence) return;
+                    if (backgroundDialogIsOpen()) {
+                        setBackgroundStatus(`已读取共享设置，正在配置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
+                    }
                 } catch (error) {
-                    return url.pathname.split('/').pop();
+                    if (requestId !== backgroundPreferencesReadSequence) return;
+                    backgroundPreferencesConnection = 'offline';
+                    console.warn('无法读取共享背景状态，继续使用本地缓存或默认背景。', error);
+                    if (backgroundDialogIsOpen()) {
+                        setBackgroundStatus('跨设备同步服务暂不可用，已继续使用最近缓存或默认背景。', 'error');
+                    }
+                }
+            }
+
+            async function reconcileSharedBackgroundPreference(mode, fileName, writeId, patchError) {
+                const requestId = ++backgroundPreferencesReadSequence;
+                try {
+                    const preferences = await requestBackgroundPreferences();
+                    if (writeId !== backgroundPreferencesWriteSequence || requestId !== backgroundPreferencesReadSequence) {
+                        return false;
+                    }
+
+                    acceptSharedBackgroundPreferences(preferences);
+                    await applyDisplayedBackground(backgroundUrlForMode(currentOrientationMode()), {
+                        fallbackToDefault: true
+                    });
+                    if (writeId !== backgroundPreferencesWriteSequence || requestId !== backgroundPreferencesReadSequence) {
+                        return false;
+                    }
+
+                    if (preferences[mode] === fileName) {
+                        setBackgroundStatus(`连接中断后已核对：${backgroundModeLabels[mode]}背景已同步为 ${fileName}`, 'success');
+                        return true;
+                    }
+
+                    setBackgroundStatus('当前读取仍为服务器原设置；原同步请求结果可能尚未确认，请稍后刷新核对。', 'error');
+                    return false;
+                } catch (reconcileError) {
+                    if (writeId !== backgroundPreferencesWriteSequence || requestId !== backgroundPreferencesReadSequence) {
+                        return false;
+                    }
+                    backgroundPreferencesConnection = 'offline';
+                    console.warn('共享背景设置失败，且无法向服务器核对最终状态。', patchError, reconcileError);
+                    setBackgroundStatus('同步请求结果暂时无法确认；请恢复连接后刷新页面核对。', 'error');
+                    return false;
+                }
+            }
+
+            async function saveSharedBackgroundPreference(mode, url) {
+                if (backgroundWritePending || !backgroundModes.includes(mode)) return false;
+                const candidate = normalizeBackgroundUrl(url);
+                if (!candidate) {
+                    setBackgroundStatus('该图片地址无效，未修改共享设置。', 'error');
+                    return false;
+                }
+
+                const fileName = normalizeBackgroundName(backgroundFileName(candidate));
+                if (!fileName) {
+                    setBackgroundStatus('该图片文件名无效，未修改共享设置。', 'error');
+                    return false;
+                }
+
+                backgroundWritePending = true;
+                const writeId = ++backgroundPreferencesWriteSequence;
+                syncBackgroundControlsBusy();
+                setBackgroundStatus(`正在将 ${fileName} 同步为${backgroundModeLabels[mode]}背景…`);
+
+                try {
+                    try {
+                        await preloadBackground(candidate);
+                    } catch (imageError) {
+                        console.warn('所选背景图片无法加载，未发送同步请求。', imageError);
+                        setBackgroundStatus('所选图片无法加载，未修改共享设置。', 'error');
+                        return false;
+                    }
+
+                    ++backgroundPreferencesReadSequence;
+                    ++backgroundDisplaySequence;
+                    backgroundLayer.classList.remove('is-changing');
+
+                    let preferences;
+                    try {
+                        preferences = await requestBackgroundPreferences('PATCH', {
+                            mode,
+                            background: fileName
+                        });
+                    } catch (patchError) {
+                        console.warn('共享背景写入请求失败，正在读取服务器状态进行核对。', patchError);
+                        setBackgroundStatus('同步连接中断，正在核对服务器最终状态…');
+                        return await reconcileSharedBackgroundPreference(mode, fileName, writeId, patchError);
+                    }
+                    if (writeId !== backgroundPreferencesWriteSequence) return false;
+                    acceptSharedBackgroundPreferences(preferences);
+
+                    activeBackgroundMode = currentOrientationMode();
+                    const displayed = await applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
+                        fallbackToDefault: true
+                    });
+                    const storedName = preferences[mode];
+                    if (!displayed && activeBackgroundMode === mode) {
+                        setBackgroundStatus(`${backgroundModeLabels[mode]}设置已同步，但图片暂时无法加载。`, 'error');
+                    } else if (storedName === fileName) {
+                        setBackgroundStatus(`${backgroundModeLabels[mode]}背景已同步为 ${fileName}`, 'success');
+                    } else {
+                        setBackgroundStatus('服务器状态已更新，当前选择已按服务器结果刷新。', 'success');
+                    }
+                    return true;
+                } finally {
+                    backgroundWritePending = false;
+                    if (backgroundDialogIsOpen() && !editingBackgroundModeTouched) {
+                        setEditingBackgroundMode(currentOrientationMode(), false);
+                    }
+                    syncBackgroundControlsBusy();
+                    updateBackgroundModeControls();
+                    updateBackgroundSelection();
+                    if (backgroundDialogIsOpen()) {
+                        const focusTarget = Array.from(backgroundGrid.querySelectorAll('.background-option'))
+                            .find((option) => option.dataset.url === candidate.href && !option.disabled);
+                        focusWithoutScroll(focusTarget);
+                    }
                 }
             }
 
@@ -1262,8 +1681,7 @@
                     option.type = 'button';
                     option.className = 'background-option';
                     option.dataset.url = url.href;
-                    option.setAttribute('aria-pressed', String(url.href === currentBackground.href));
-                    option.setAttribute('aria-label', `切换背景为 ${backgroundFileName(url)}`);
+                    option.setAttribute('aria-pressed', 'false');
 
                     const thumbnail = document.createElement('img');
                     thumbnail.src = url.href;
@@ -1281,31 +1699,42 @@
                     check.textContent = '✓';
 
                     option.append(thumbnail, label, check);
-                    option.addEventListener('click', () => applyBackground(url));
+                    option.addEventListener('click', () => saveSharedBackgroundPreference(editingBackgroundMode, url));
                     fragment.append(option);
                 });
 
                 backgroundGrid.replaceChildren(fragment);
+                updateBackgroundSelection();
+                syncBackgroundControlsBusy();
             }
 
             async function scanBackgroundDirectory() {
+                if (backgroundScanController) backgroundScanController.abort();
                 const scanId = ++backgroundScanSequence;
-                backgroundGrid.setAttribute('aria-busy', 'true');
+                const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                backgroundScanController = controller;
+                backgroundScanPending = true;
+                syncBackgroundControlsBusy();
                 setBackgroundStatus('正在扫描 backgrounds 目录…');
 
                 try {
-                    const response = await fetch(backgroundDirectory.href, {
+                    const result = await fetchWithTimeout(backgroundDirectory.href, {
                         cache: 'no-store',
                         credentials: 'same-origin'
+                    }, 5000, controller, async (response) => {
+                        if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
+                        return {
+                            response,
+                            listingText: await response.text()
+                        };
                     });
-                    if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
 
-                    const listing = new DOMParser().parseFromString(await response.text(), 'text/html');
+                    const listing = new DOMParser().parseFromString(result.listingText, 'text/html');
                     const discovered = new Map();
 
                     listing.querySelectorAll('a[href]').forEach((anchor) => {
                         try {
-                            const url = normalizeBackgroundUrl(new URL(anchor.getAttribute('href'), response.url));
+                            const url = normalizeBackgroundUrl(new URL(anchor.getAttribute('href'), result.response.url));
                             if (url) discovered.set(url.href, url);
                         } catch (error) {
                             // Ignore malformed links in the server-generated directory listing.
@@ -1315,47 +1744,59 @@
                     if (scanId !== backgroundScanSequence) return;
                     if (discovered.size === 0) throw new Error('目录列表中没有支持的图片链接');
 
+                    backgroundModes.forEach((mode) => {
+                        const configuredUrl = backgroundUrlForMode(mode);
+                        discovered.set(configuredUrl.href, configuredUrl);
+                    });
+
                     const urls = Array.from(discovered.values()).sort((left, right) => {
                         if (left.href === defaultBackground.href) return -1;
                         if (right.href === defaultBackground.href) return 1;
                         return backgroundFileName(left).localeCompare(backgroundFileName(right), 'zh-CN', { numeric: true });
                     });
 
-                    if (!urls.some((url) => url.href === currentBackground.href)) {
-                        clearSavedBackground();
-                        await applyBackground(defaultBackground, false);
-                    }
-
                     renderBackgroundOptions(urls);
-                    setBackgroundStatus(`发现 ${urls.length} 张背景图片。`, 'success');
+                    if (backgroundPreferencesConnection === 'offline') {
+                        setBackgroundStatus(`发现 ${urls.length} 张背景图片，但跨设备同步服务暂不可用。`, 'error');
+                    } else {
+                        setBackgroundStatus(`发现 ${urls.length} 张背景图片，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
+                    }
                 } catch (error) {
                     if (scanId !== backgroundScanSequence) return;
                     console.warn('背景目录扫描失败。', error);
                     const fallbackUrls = new Map([[defaultBackground.href, defaultBackground]]);
                     if (currentBackground.href !== defaultBackground.href) fallbackUrls.set(currentBackground.href, currentBackground);
+                    backgroundModes.forEach((mode) => {
+                        const configuredUrl = backgroundUrlForMode(mode);
+                        fallbackUrls.set(configuredUrl.href, configuredUrl);
+                    });
                     renderBackgroundOptions(Array.from(fallbackUrls.values()));
                     setBackgroundStatus('无法读取目录列表，已保留可用背景。请确认 Zoraxy 已开启 directory listing。', 'error');
                 } finally {
-                    if (scanId === backgroundScanSequence) backgroundGrid.setAttribute('aria-busy', 'false');
+                    if (scanId === backgroundScanSequence) {
+                        backgroundScanController = null;
+                        backgroundScanPending = false;
+                        syncBackgroundControlsBusy();
+                    }
                 }
             }
 
-            function validateSavedBackground() {
-                const savedValue = readSavedBackground();
-                if (!savedValue) return;
-                const savedUrl = normalizeBackgroundUrl(savedValue);
-                if (!savedUrl) {
-                    clearSavedBackground();
-                    setBackgroundStyle(defaultBackground);
-                    return;
-                }
+            function setEditingBackgroundMode(mode, announce = true) {
+                if (!backgroundModes.includes(mode) || backgroundWritePending) return false;
+                editingBackgroundMode = mode;
+                updateBackgroundModeControls();
+                updateBackgroundSelection();
+                if (announce) setBackgroundStatus(`请选择一张图片作为${backgroundModeLabels[mode]}背景。`);
+                return true;
+            }
 
-                preloadBackground(savedUrl).catch((error) => {
-                    console.warn('已保存的背景不存在，恢复默认背景。', error);
-                    clearSavedBackground();
-                    setBackgroundStyle(defaultBackground);
+            backgroundModeButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    if (setEditingBackgroundMode(button.dataset.backgroundMode)) {
+                        editingBackgroundModeTouched = true;
+                    }
                 });
-            }
+            });
 
             function backgroundDialogIsOpen() {
                 return backgroundDialog.open || backgroundDialog.hasAttribute('open');
@@ -1370,7 +1811,7 @@
                     backgroundDialog.close(returnValue);
                 } else {
                     backgroundDialog.removeAttribute('open');
-                    backgroundPickerButton.focus({ preventScroll: true });
+                    focusWithoutScroll(backgroundPickerButton);
                 }
             }
 
@@ -1403,6 +1844,8 @@
                 window.clearTimeout(backgroundDialogCloseTimer);
                 backgroundDialogCloseTimer = 0;
                 backgroundDialog.classList.remove('is-visible', 'is-closing');
+                editingBackgroundModeTouched = false;
+                setEditingBackgroundMode(currentOrientationMode(), false);
 
                 if (typeof backgroundDialog.showModal === 'function') {
                     if (!backgroundDialog.open) backgroundDialog.showModal();
@@ -1448,7 +1891,27 @@
                 backgroundDialog.classList.remove('is-visible', 'is-closing');
             });
 
-            validateSavedBackground();
+            function handleOrientationChange() {
+                activeBackgroundMode = currentOrientationMode();
+                if (backgroundDialogIsOpen() && !editingBackgroundModeTouched && !backgroundWritePending) {
+                    setEditingBackgroundMode(activeBackgroundMode, false);
+                }
+                applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
+                    fallbackToDefault: true
+                });
+            }
+
+            if (typeof orientationQuery.addEventListener === 'function') {
+                orientationQuery.addEventListener('change', handleOrientationChange);
+            } else if (typeof orientationQuery.addListener === 'function') {
+                orientationQuery.addListener(handleOrientationChange);
+            }
+
+            applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
+                animate: false,
+                fallbackToDefault: true
+            });
+            loadSharedBackgroundPreferences();
 
             const cards = Array.from(document.querySelectorAll('.service-card'));
             const refreshButton = document.getElementById('refresh-status');
@@ -1463,17 +1926,14 @@
 
             async function probe(card) {
                 setCardState(card, 'checking', '检测中');
-                const controller = new AbortController();
-                const timeout = window.setTimeout(() => controller.abort(), 5000);
 
                 try {
-                    await fetch(card.href, {
+                    await fetchWithTimeout(card.href, {
                         mode: 'no-cors',
                         cache: 'no-store',
                         credentials: 'omit',
                         redirect: 'follow',
-                        referrerPolicy: 'no-referrer',
-                        signal: controller.signal
+                        referrerPolicy: 'no-referrer'
                     });
                     setCardState(card, 'online', '可连接');
                     return true;
@@ -1481,8 +1941,6 @@
                     console.warn(`入口检测失败：${card.href}`, error);
                     setCardState(card, 'offline', '不可连接');
                     return false;
-                } finally {
-                    window.clearTimeout(timeout);
                 }
             }
 
@@ -1491,14 +1949,21 @@
                 refreshButton.setAttribute('aria-busy', 'true');
                 lastChecked.textContent = `正在检测 ${cards.length} 个入口…`;
 
-                const results = await Promise.all(cards.map(probe));
-                const onlineCount = results.filter(Boolean).length;
-                const offlineCount = cards.length - onlineCount;
+                try {
+                    const results = await Promise.all(cards.map(probe));
+                    const onlineCount = results.filter(Boolean).length;
+                    const offlineCount = cards.length - onlineCount;
 
-                lastChecked.textContent = `刚刚更新 · ${onlineCount}/${cards.length} 可连接`;
-                statusSummary.textContent = `入口检测完成，${onlineCount} 个可连接，${offlineCount} 个不可连接。`;
-                refreshButton.disabled = false;
-                refreshButton.setAttribute('aria-busy', 'false');
+                    lastChecked.textContent = `刚刚更新 · ${onlineCount}/${cards.length} 可连接`;
+                    statusSummary.textContent = `入口检测完成，${onlineCount} 个可连接，${offlineCount} 个不可连接。`;
+                } catch (error) {
+                    console.warn('入口检测流程意外中断。', error);
+                    lastChecked.textContent = '入口检测未能完成';
+                    statusSummary.textContent = '入口检测发生异常，可稍后手动重试；服务链接仍可正常使用。';
+                } finally {
+                    refreshButton.disabled = false;
+                    refreshButton.setAttribute('aria-busy', 'false');
+                }
             }
 
             refreshButton.addEventListener('click', refreshStatuses);

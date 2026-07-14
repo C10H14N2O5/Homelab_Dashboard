@@ -1,0 +1,10 @@
+# Local build output and Windows binaries must not be committed.
+/dist/
+*.exe
+
+# Runtime state belongs on the deployment host, never in source control.
+state.json
+state.json.bak
+state.json.corrupt-*
+service.log
+.state-*.tmp
