@@ -69,7 +69,9 @@ $maintenanceContracts = @(
     @{ Name = 'uncached Go tests'; Source = $buildSource; Marker = 'go test -count=1 ./...' },
     @{ Name = 'Go vet'; Source = $buildSource; Marker = 'go vet ./...' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
-    @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' }
+    @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
+    @{ Name = 'service probe CORS header documentation'; Source = $readmeSource; Marker = 'Access-Control-Allow-Origin' },
+    @{ Name = 'service probe downstream direction documentation'; Source = $readmeSource; Marker = 'Client << Zoraxy' }
 )
 foreach ($contract in $maintenanceContracts) {
     if (-not $contract.Source.Contains($contract.Marker)) {
@@ -145,6 +147,9 @@ const requiredMarkers = [
     'data-background-mode="landscape"',
     'data-background-mode="portrait"',
     'fetchWithTimeout',
+    'classifyServiceStatus',
+    'data-state="warning"',
+    "mode: 'cors'",
     'backgroundScanPending',
     'reconcileSharedBackgroundPreference',
     "'X-Requested-With': 'homelab-dashboard'"
@@ -160,6 +165,7 @@ if (helperStart < 0 || helperEnd < 0) throw new Error('Unable to extract timeout
 
 const context = vm.createContext({
     AbortController,
+    console: { warn() {} },
     Error,
     Promise,
     fetch: null,
@@ -210,6 +216,76 @@ await expectRejection(
 );
 if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.currentSource !== 'data:,') {
     throw new Error('Image timeout did not clean up handlers and cancel the source.');
+}
+
+const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
+const serviceHelperEnd = runtimeScript.indexOf('async function refreshStatuses(', serviceHelperStart);
+if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
+    throw new Error('Unable to extract service status helpers for behavior checks.');
+}
+vm.runInContext(
+    runtimeScript.slice(serviceHelperStart, serviceHelperEnd)
+        + '\nglobalThis.__serviceHelpers = { classifyServiceStatus, serviceStatusLabel, probe };',
+    context
+);
+
+const statusCases = [
+    [200, 'online', '\u53ef\u8fde\u63a5'],
+    [204, 'online', '\u53ef\u8fde\u63a5'],
+    [301, 'online', '\u53ef\u8fde\u63a5'],
+    [302, 'online', '\u53ef\u8fde\u63a5'],
+    [401, 'warning', '\u5f02\u5e38 \u00b7 HTTP 401'],
+    [404, 'warning', '\u5f02\u5e38 \u00b7 HTTP 404'],
+    [500, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 500'],
+    [502, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 502'],
+    [521, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 521']
+];
+let observedOptions = null;
+let canceledBodies = 0;
+const stateElement = {
+    dataset: {},
+    label: { textContent: '' },
+    querySelector() { return this.label; }
+};
+const card = {
+    href: 'https://service.home.example/',
+    querySelector() { return stateElement; }
+};
+
+for (const [status, expectedState, expectedLabel] of statusCases) {
+    context.fetch = (resource, options) => {
+        observedOptions = options;
+        return Promise.resolve({
+            status,
+            body: {
+                cancel() {
+                    canceledBodies += 1;
+                    return Promise.resolve();
+                }
+            }
+        });
+    };
+    const result = await context.__serviceHelpers.probe(card);
+    if (result.state !== expectedState || result.status !== status) {
+        throw new Error(`HTTP ${status} classified as ${result.state}, expected ${expectedState}.`);
+    }
+    if (stateElement.dataset.state !== expectedState || stateElement.label.textContent !== expectedLabel) {
+        throw new Error(`HTTP ${status} rendered an unexpected card state or label.`);
+    }
+}
+if (!observedOptions || observedOptions.mode !== 'cors' || observedOptions.credentials !== 'omit'
+    || observedOptions.redirect !== 'follow' || observedOptions.cache !== 'no-store') {
+    throw new Error('Service probe fetch options do not enforce the CORS status contract.');
+}
+if (canceledBodies !== statusCases.length) {
+    throw new Error('Service probe did not cancel every unused response body.');
+}
+
+context.fetch = () => Promise.reject(new Error('simulated network failure'));
+const failedProbe = await context.__serviceHelpers.probe(card);
+if (failedProbe.state !== 'offline' || failedProbe.status !== null
+    || stateElement.dataset.state !== 'offline' || stateElement.label.textContent !== '\u4e0d\u53ef\u8fde\u63a5') {
+    throw new Error('Service probe request failure did not render the offline fallback.');
 }
 
 console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} cards, ${ids.length} unique ids.`);

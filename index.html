@@ -63,6 +63,7 @@
             --accent: #7dd3fc;
             --accent-strong: #38bdf8;
             --online: #4ade80;
+            --warning: #fbbf24;
             --offline: #fb7185;
             --checking: #fbbf24;
             --shadow: 0 18px 45px rgba(2, 8, 23, 0.22);
@@ -401,6 +402,10 @@
 
         .service-state[data-state="online"] {
             color: var(--online);
+        }
+
+        .service-state[data-state="warning"] {
+            color: var(--warning);
         }
 
         .service-state[data-state="offline"] {
@@ -1026,7 +1031,7 @@
             <div class="dashboard-head">
                 <div>
                     <h2 class="dashboard-title" id="service-heading">Services</h2>
-                    <p class="dashboard-note">状态仅表示此浏览器可连接入口，不代表应用内部健康。</p>
+                    <p class="dashboard-note">状态仅表示入口最终响应，不代表应用内部健康。</p>
                 </div>
                 <button class="refresh-button" id="refresh-status" type="button" aria-busy="false">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1924,23 +1929,49 @@
                 stateElement.querySelector('.state-label').textContent = label;
             }
 
+            function classifyServiceStatus(status) {
+                if (Number.isInteger(status) && status >= 200 && status < 400) return 'online';
+                if (Number.isInteger(status) && status >= 400 && status < 500) return 'warning';
+                return 'offline';
+            }
+
+            function serviceStatusLabel(state, status = null) {
+                if (state === 'online') return '可连接';
+                if (state === 'warning') return `异常 · HTTP ${status}`;
+                if (Number.isInteger(status)) return `不可用 · HTTP ${status}`;
+                return '不可连接';
+            }
+
+            function cancelResponseBody(response) {
+                if (!response || !response.body || typeof response.body.cancel !== 'function') return;
+                response.body.cancel().catch(() => {});
+            }
+
             async function probe(card) {
                 setCardState(card, 'checking', '检测中');
+                let response = null;
 
                 try {
-                    await fetchWithTimeout(card.href, {
-                        mode: 'no-cors',
+                    response = await fetchWithTimeout(card.href, {
+                        mode: 'cors',
                         cache: 'no-store',
                         credentials: 'omit',
                         redirect: 'follow',
                         referrerPolicy: 'no-referrer'
                     });
-                    setCardState(card, 'online', '可连接');
-                    return true;
+
+                    const state = classifyServiceStatus(response.status);
+                    setCardState(card, state, serviceStatusLabel(state, response.status));
+                    if (state !== 'online') {
+                        console.warn(`入口响应异常：${card.href} HTTP ${response.status}`);
+                    }
+                    return { state, status: response.status };
                 } catch (error) {
                     console.warn(`入口检测失败：${card.href}`, error);
                     setCardState(card, 'offline', '不可连接');
-                    return false;
+                    return { state: 'offline', status: null };
+                } finally {
+                    cancelResponseBody(response);
                 }
             }
 
@@ -1951,11 +1982,13 @@
 
                 try {
                     const results = await Promise.all(cards.map(probe));
-                    const onlineCount = results.filter(Boolean).length;
-                    const offlineCount = cards.length - onlineCount;
+                    const counts = results.reduce((summary, result) => {
+                        summary[result.state] += 1;
+                        return summary;
+                    }, { online: 0, warning: 0, offline: 0 });
 
-                    lastChecked.textContent = `刚刚更新 · ${onlineCount}/${cards.length} 可连接`;
-                    statusSummary.textContent = `入口检测完成，${onlineCount} 个可连接，${offlineCount} 个不可连接。`;
+                    lastChecked.textContent = `刚刚更新 · ${counts.online}/${cards.length} 可连接 · ${counts.warning} 响应异常 · ${counts.offline} 不可用`;
+                    statusSummary.textContent = `入口检测完成，${counts.online} 个可连接，${counts.warning} 个响应异常，${counts.offline} 个不可用。`;
                 } catch (error) {
                     console.warn('入口检测流程意外中断。', error);
                     lastChecked.textContent = '入口检测未能完成';
