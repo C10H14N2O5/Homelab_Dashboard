@@ -149,6 +149,7 @@ const requiredMarkers = [
     'fetchWithTimeout',
     'classifyServiceStatus',
     'data-state="warning"',
+    'data-probe-url="https://cliproxy.home.c10h14n2o5.com/management.html/"',
     "mode: 'cors'",
     'backgroundScanPending',
     'reconcileSharedBackgroundPreference',
@@ -241,6 +242,7 @@ const statusCases = [
     [521, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 521']
 ];
 let observedOptions = null;
+let observedResource = null;
 let canceledBodies = 0;
 const stateElement = {
     dataset: {},
@@ -249,11 +251,13 @@ const stateElement = {
 };
 const card = {
     href: 'https://service.home.example/',
+    dataset: { probeUrl: 'https://probe.home.example/health' },
     querySelector() { return stateElement; }
 };
 
 for (const [status, expectedState, expectedLabel] of statusCases) {
     context.fetch = (resource, options) => {
+        observedResource = resource;
         observedOptions = options;
         return Promise.resolve({
             status,
@@ -277,15 +281,25 @@ if (!observedOptions || observedOptions.mode !== 'cors' || observedOptions.crede
     || observedOptions.redirect !== 'follow' || observedOptions.cache !== 'no-store') {
     throw new Error('Service probe fetch options do not enforce the CORS status contract.');
 }
+if (observedResource !== card.dataset.probeUrl) {
+    throw new Error('Service probe did not use the card-specific probe URL override.');
+}
 if (canceledBodies !== statusCases.length) {
     throw new Error('Service probe did not cancel every unused response body.');
 }
 
-context.fetch = () => Promise.reject(new Error('simulated network failure'));
+delete card.dataset.probeUrl;
+context.fetch = (resource) => {
+    observedResource = resource;
+    return Promise.reject(new Error('simulated network failure'));
+};
 const failedProbe = await context.__serviceHelpers.probe(card);
 if (failedProbe.state !== 'offline' || failedProbe.status !== null
     || stateElement.dataset.state !== 'offline' || stateElement.label.textContent !== '\u4e0d\u53ef\u8fde\u63a5') {
     throw new Error('Service probe request failure did not render the offline fallback.');
+}
+if (observedResource !== card.href) {
+    throw new Error('Service probe did not fall back to the card href.');
 }
 
 console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} cards, ${ids.length} unique ids.`);

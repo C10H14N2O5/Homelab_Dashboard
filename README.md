@@ -115,6 +115,7 @@ CSS 位于 `<style>` 中，主要分为：
 卡片必须保留以下信息：
 
 - `href`：服务的完整 HTTPS 地址；
+- 可选的 `data-probe-url`：仅在入口重定向响应无法提供 CORS 头时使用，状态检测请求该地址，但点击卡片仍使用 `href`；
 - `target="_blank"`；
 - `rel="noopener noreferrer"`；
 - `--card-index`：从 0 开始的动画顺序；
@@ -158,7 +159,8 @@ Header Value: https://home.c10h14n2o5.com
 - 必须使用上面的精确 Origin，不使用 `*`，也不添加 `Access-Control-Allow-Credentials`；
 - 因为响应值固定，不需要添加 `Vary: Origin`；
 - 11 个 Host Rule 应先全部完成配置，再部署使用 CORS 检测的新 `index.html`；
-- 如果请求跨域重定向到另一个 hostname，最终 hostname 也必须返回同一 CORS 头；`301 → 200` 会按最终 200 显示绿色，脚本不会尝试读取原始 301；
+- CORS 请求的重定向链不能在首个 301/302 响应上缺少允许首页 Origin 的响应头，否则浏览器会在跟随前终止请求；如果跳往另一个 hostname，最终 hostname 也必须返回同一 CORS 头；成功完成的 `301 → 200` 会按最终 200 显示绿色，脚本不会尝试读取原始 301；
+- CLIProxy 根路径的 301 响应不包含 CORS 头，因此其卡片通过 `data-probe-url` 直接检测 `https://cliproxy.home.c10h14n2o5.com/management.html/`；卡片点击目标仍保留为根地址；
 - Zoraxy 自己生成的 521 故障页不经过正常上游响应头注入时，浏览器会因缺少 CORS 头拒绝请求，卡片安全地显示红色“不可连接”；如果某个 5xx 响应带有正确 CORS 头，则显示其实际状态码；
 - 漏配响应头只会使对应卡片显示红色，不影响其它卡片，也不会禁用链接；
 - 卡片即使显示不可连接也保持可点击；
