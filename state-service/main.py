@@ -29,9 +29,11 @@ HEALTH_PATH = "/healthz"
 CONTROL_PATH = "/_control/shutdown"
 DEFAULT_CONFIG_NAME = "HomeLabWallpaperState.json"
 DEFAULT_DATA_DIRECTORY = "HomeLabWallpaperState-data"
+DEFAULT_BACKGROUND_DIRECTORY = r"D:\Zoraxy\www\html\backgrounds"
 DEFAULT_BACKGROUND = "bg.jpg"
 DEFAULT_ORIGIN = "https://home.c10h14n2o5.com"
 DEFAULT_LISTEN = "127.0.0.1:8787"
+MONITOR_REFRESH_SECONDS = 60.0
 SERVICE_NAME = "HomeLabWallpaperState"
 SERVICE_VERSION = 1
 STATE_VERSION = 1
@@ -696,7 +698,7 @@ def monitor(config: AppConfig) -> int:
 
         waited = 0.0
         force_refresh = False
-        while waited < 2.0 and not force_refresh:
+        while waited < MONITOR_REFRESH_SECONDS and not force_refresh:
             if msvcrt and msvcrt.kbhit():
                 key = msvcrt.getwch().lower()
                 if key == "q":
@@ -766,7 +768,7 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
             existing = json.loads(config_path.read_text(encoding="utf-8"))
         except Exception:
             existing = {}
-    background_default = str(existing.get("backgroundDir", r"web\html\backgrounds"))
+    background_default = str(existing.get("backgroundDir", DEFAULT_BACKGROUND_DIRECTORY))
     origin_default = ",".join(existing.get("allowedOrigins", [DEFAULT_ORIGIN]))
     listen_default = str(existing.get("listen", DEFAULT_LISTEN))
     state_default = str(existing.get("stateDir", DEFAULT_DATA_DIRECTORY))

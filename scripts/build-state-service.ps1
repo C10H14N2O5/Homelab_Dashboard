@@ -131,9 +131,8 @@ try {
     )
 
     Write-Host 'Checking packaged console UTF-8 output...'
-    $consoleRootName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('5o6n5Yi25Y+w5rWL6K+V'))
     $consoleConfigName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('5Lit5paH6YWN572uLmpzb24='))
-    $consoleRoot = Join-Path $smokeRoot $consoleRootName
+    $consoleRoot = Join-Path $smokeRoot 'console-test'
     $consoleBackgrounds = Join-Path $consoleRoot 'web\html\backgrounds'
     $consoleState = Join-Path $consoleRoot 'HomeLabWallpaperState-data'
     $consoleConfig = Join-Path $consoleRoot $consoleConfigName
@@ -162,7 +161,7 @@ try {
         if (-not $consoleProcess.Start()) {
             throw 'Packaged console encoding smoke test did not start.'
         }
-        $consoleProcess.StandardInput.Write("`n`n`n`n" + "n`n")
+        $consoleProcess.StandardInput.Write($consoleBackgrounds + "`n`n`n`n" + "n`n")
         $consoleProcess.StandardInput.Close()
         $consoleOutput = $consoleProcess.StandardOutput.ReadToEnd()
         $consoleError = $consoleProcess.StandardError.ReadToEnd()
@@ -173,7 +172,7 @@ try {
         foreach ($encodedText in @(
             'SG9tZUxhYiBXYWxscGFwZXIgU3RhdGUg6aaW5qyh6YWN572u',
             '6YWN572u44CB54q25oCB5ZKM5pel5b+X5LiN5Lya5pS+5YWl5YWs5byA55qEIHdlYlxodG1sIOebruW9leOAgg==',
-            '6IOM5pmv55uu5b2VIFt3ZWJcaHRtbFxiYWNrZ3JvdW5kc13vvJo='
+            '6IOM5pmv55uu5b2VIFtEOlxab3JheHlcd3d3XGh0bWxcYmFja2dyb3VuZHNd77ya'
         )) {
             $expectedText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedText))
             if (-not $consoleOutput.Contains($expectedText)) {

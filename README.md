@@ -141,9 +141,9 @@ HomeLabWallpaperState.exe restart
 4. API 已运行时不创建第二个后端；
 5. 进入可见监视器。
 
-监视器每两秒显示 API、PID、背景槽位、目录和最近日志。按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `R` 立即刷新。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE即可检查并恢复。
+监视器每 60 秒显示 API、PID、背景槽位、目录和最近日志。按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `R` 立即刷新。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE即可检查并恢复。
 
-首次引导默认采用以下相对布局：
+首次引导默认将壁纸目录设为 `D:\Zoraxy\www\html\backgrounds`；配置和状态仍保存在 EXE 所在目录：
 
 ```text
 <Zoraxy程序目录>/
@@ -152,7 +152,8 @@ HomeLabWallpaperState.exe restart
 ├── HomeLabWallpaperState-data/
 │   ├── state.json
 │   └── service.log
-└── web/html/backgrounds/
+
+D:/Zoraxy/www/html/backgrounds/
 ```
 
 引导会验证 `bg.jpg` 和公开目录边界；检测到旧的 `C:\ProgramData\HomeLabWallpaperState\state.json` 时可选择导入；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。

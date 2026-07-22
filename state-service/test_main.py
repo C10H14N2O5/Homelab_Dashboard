@@ -53,6 +53,26 @@ class ConfigTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.project.close()
 
+    def test_interactive_defaults(self) -> None:
+        self.assertEqual(main.DEFAULT_BACKGROUND_DIRECTORY, r"D:\Zoraxy\www\html\backgrounds")
+        self.assertEqual(main.MONITOR_REFRESH_SECONDS, 60.0)
+
+    def test_wizard_preserves_existing_background_default(self) -> None:
+        existing = self.project.write_config()
+        prompts: list[tuple[str, str]] = []
+
+        def accept_default(label: str, default: str) -> str:
+            prompts.append((label, default))
+            return default
+
+        with mock.patch.object(main, "prompt_value", side_effect=accept_default), mock.patch.object(
+            main, "prompt_yes_no", return_value=False
+        ), mock.patch.object(main.sys, "frozen", False, create=True), mock.patch("builtins.print"):
+            configured = main.run_configuration_wizard(self.project.config_path)
+
+        self.assertEqual(prompts[0], ("背景目录", r"web\html\backgrounds"))
+        self.assertEqual(configured.background_dir, existing.background_dir)
+
     def test_load_config_resolves_relative_paths(self) -> None:
         config = self.project.write_config()
         self.assertEqual(config.background_dir, self.project.backgrounds.resolve())
@@ -268,6 +288,30 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(command[0], sys.executable)
         self.assertTrue(command[1].endswith("main.py"))
         self.assertEqual(command[-3:], ["serve", "--config", "config.json"])
+
+    def test_monitor_refresh_and_quit_keys_remain_immediate(self) -> None:
+        keyboard = mock.Mock()
+        keyboard.kbhit.return_value = True
+        keyboard.getwch.side_effect = ["r", "q"]
+        config = mock.Mock()
+        config.listen = "127.0.0.1:8787"
+        config.background_dir = Path("backgrounds")
+        config.state_dir = Path("state")
+        config.log_file = Path("service.log")
+        status = {"status": "ok", "pid": 123}
+
+        with mock.patch.dict(sys.modules, {"msvcrt": keyboard}), mock.patch.object(
+            main, "health", return_value=status
+        ) as health, mock.patch.object(main, "read_preferences", return_value=None), mock.patch.object(
+            main, "clear_console"
+        ), mock.patch.object(main, "tail_lines", return_value=[]), mock.patch.object(
+            main.time, "sleep"
+        ) as sleep, mock.patch("builtins.print"):
+            self.assertEqual(main.monitor(config), 0)
+
+        self.assertEqual(health.call_count, 2)
+        self.assertEqual(keyboard.getwch.call_count, 2)
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":
