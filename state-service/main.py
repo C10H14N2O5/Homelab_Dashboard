@@ -64,15 +64,21 @@ def default_config_path() -> Path:
 def configure_console_encoding() -> None:
     if os.name != "nt":
         return
-    kernel32 = ctypes.windll.kernel32
-    input_code_page = int(kernel32.GetConsoleCP())
-    output_code_page = int(kernel32.GetConsoleOutputCP())
-    if input_code_page and hasattr(sys.stdin, "reconfigure"):
-        sys.stdin.reconfigure(encoding=f"cp{input_code_page}", errors="replace")
-    if output_code_page:
-        for stream in (sys.stdout, sys.stderr):
-            if hasattr(stream, "reconfigure"):
-                stream.reconfigure(encoding=f"cp{output_code_page}", errors="replace")
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleCP(65001)
+        kernel32.SetConsoleOutputCP(65001)
+    except (AttributeError, OSError):
+        # Redirected and detached processes may not have an attached console.
+        pass
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            # Keep startup working for streams supplied by non-console hosts.
+            pass
 
 
 def utc_timestamp() -> str:

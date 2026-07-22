@@ -232,6 +232,20 @@ class APITests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    def test_console_encoding_is_forced_to_utf8_on_windows(self) -> None:
+        kernel32 = mock.Mock()
+        windll = mock.Mock(kernel32=kernel32)
+        streams = [mock.Mock() for _ in range(3)]
+        with mock.patch.object(main.os, "name", "nt"), mock.patch.object(main.ctypes, "windll", windll), mock.patch.object(
+            main.sys, "stdin", streams[0]
+        ), mock.patch.object(main.sys, "stdout", streams[1]), mock.patch.object(main.sys, "stderr", streams[2]):
+            main.configure_console_encoding()
+
+        kernel32.SetConsoleCP.assert_called_once_with(65001)
+        kernel32.SetConsoleOutputCP.assert_called_once_with(65001)
+        for stream in streams:
+            stream.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
     def test_ensure_backend_reuses_healthy_service(self) -> None:
         config = mock.Mock()
         expected = {"status": "ok", "service": main.SERVICE_NAME, "pid": 123}
