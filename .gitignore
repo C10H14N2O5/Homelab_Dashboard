@@ -1,6 +1,13 @@
 # Local build output and Windows binaries must not be committed.
 /dist/
 *.exe
+/.venv/
+__pycache__/
+*.py[cod]
+*.spec
+/build/
+HomeLabWallpaperState.json
+HomeLabWallpaperState-data/
 
 # Runtime state belongs on the deployment host, never in source control.
 state.json

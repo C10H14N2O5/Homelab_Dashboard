@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [switch]$SkipGo,
+    [switch]$SkipPython,
 
     [Parameter()]
     [switch]$SkipFrontend,
@@ -13,8 +13,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if ($Build -and ($SkipGo -or $SkipFrontend)) {
-    throw '-Build cannot be combined with -SkipGo or -SkipFrontend.'
+if ($Build -and ($SkipPython -or $SkipFrontend)) {
+    throw '-Build cannot be combined with -SkipPython or -SkipFrontend.'
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -43,9 +43,9 @@ $requiredFiles = @(
     'CHANGELOG.md',
     '.gitignore',
     'backgrounds\.gitignore',
-    'state-service\go.mod',
-    'state-service\main.go',
-    'state-service\main_test.go',
+    'requirements.txt',
+    'state-service\main.py',
+    'state-service\test_main.py',
     'scripts\build-state-service.ps1',
     'scripts\install-state-service.ps1',
     'scripts\uninstall-state-service.ps1',
@@ -63,11 +63,11 @@ $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-serv
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
 $maintenanceContracts = @(
-    @{ Name = 'protected SYSTEM executable path'; Source = $installSource; Marker = "Join-Path `$programFilesRoot 'HomeLabWallpaperState'" },
-    @{ Name = 'SYSTEM executable hash check'; Source = $installSource; Marker = 'ExpectedSha256' },
-    @{ Name = 'post-start health check'; Source = $installSource; Marker = '/healthz' },
-    @{ Name = 'uncached Go tests'; Source = $buildSource; Marker = 'go test -count=1 ./...' },
-    @{ Name = 'Go vet'; Source = $buildSource; Marker = 'go vet ./...' },
+    @{ Name = 'deployment executable hash check'; Source = $installSource; Marker = 'ExpectedSha256' },
+    @{ Name = 'PyInstaller one-file build'; Source = $buildSource; Marker = '--onefile' },
+    @{ Name = 'packaged executable health check'; Source = $buildSource; Marker = '/healthz' },
+    @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
+    @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'service probe CORS header documentation'; Source = $readmeSource; Marker = 'Access-Control-Allow-Origin' },
@@ -338,7 +338,7 @@ try {
         $leafName = [IO.Path]::GetFileName($normalized).ToLowerInvariant()
         if ($normalized.StartsWith('dist/', [StringComparison]::OrdinalIgnoreCase) -or
             $blockedMediaExtensions -contains $extension -or
-            $leafName -in @('state.json', 'state.json.bak', 'service.log') -or
+            $leafName -in @('state.json', 'state.json.bak', 'service.log', 'homelabwallpaperstate.json') -or
             $leafName -like 'state.json.corrupt-*' -or
             $leafName -like '.state-*.tmp') {
             throw "Runtime or multimedia file would enter source control: $candidateFile"
@@ -357,6 +357,8 @@ try {
         'state.json.corrupt-verify',
         '.state-verify.tmp',
         'service.log'
+        'HomeLabWallpaperState.json'
+        'HomeLabWallpaperState-data/state.json'
     )
     foreach ($probe in $ignoreProbes) {
         & $git.Source check-ignore --no-index --quiet -- $probe
@@ -369,33 +371,27 @@ finally {
     Pop-Location
 }
 
-if ($SkipGo) {
-    Write-Warning 'Go formatting, unit tests, and vet were skipped by request.'
+if ($SkipPython) {
+    Write-Warning 'Python syntax and unit tests were skipped by request.'
 } else {
-    $go = Get-Command go -ErrorAction SilentlyContinue
-    if ($null -eq $go) {
-        throw 'Go was not found in PATH. Install the documented Go version or rerun with -SkipGo for static checks only.'
-    }
-    $gofmt = Get-Command gofmt -ErrorAction SilentlyContinue
-    if ($null -eq $gofmt) {
-        throw 'gofmt was not found in PATH.'
+    $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
+        $pythonPath = (Resolve-Path -LiteralPath $venvPython).Path
+    } else {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -eq $python) {
+            throw 'Python was not found. Create .venv, install Python, or rerun with -SkipPython for static checks only.'
+        }
+        $pythonPath = $python.Source
     }
 
     Push-Location -LiteralPath $stateServicePath
     try {
-        Write-Host 'Checking gofmt...'
-        $unformatted = @(& $gofmt.Source -l .\main.go .\main_test.go)
-        if ($LASTEXITCODE -ne 0) {
-            throw 'gofmt failed.'
+        Invoke-CheckedCommand -Name 'Python syntax' -Command {
+            & $pythonPath -m py_compile .\main.py .\test_main.py
         }
-        if ($unformatted.Count -gt 0) {
-            throw "gofmt reported unformatted files: $($unformatted -join ', ')"
-        }
-        Invoke-CheckedCommand -Name 'Go unit tests' -Command {
-            & $go.Source test -count=1 ./...
-        }
-        Invoke-CheckedCommand -Name 'go vet' -Command {
-            & $go.Source vet ./...
+        Invoke-CheckedCommand -Name 'Python unit tests' -Command {
+            & $pythonPath -m unittest discover -s . -p 'test_*.py' -v
         }
     }
     finally {

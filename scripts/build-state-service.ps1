@@ -10,7 +10,11 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$OutputName = 'HomeLabWallpaperState.exe'
+    [string]$OutputName = 'HomeLabWallpaperState.exe',
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$PythonPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,84 +24,180 @@ if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
     throw 'OutputName must be a simple Windows file name ending in .exe.'
 }
-$outputBaseName = [IO.Path]::GetFileNameWithoutExtension($OutputName).TrimEnd('.', ' ')
-if ($outputBaseName -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
-    throw "OutputName uses a reserved Windows device name: $OutputName"
-}
 
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-    throw 'Go was not found in PATH. Install Go and open a new PowerShell session before building.'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($PythonPath)) {
+    $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
+        $PythonPath = $venvPython
+    } else {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -eq $pythonCommand) {
+            throw 'Python was not found. Create .venv or install Python 3.11 or newer.'
+        }
+        $PythonPath = $pythonCommand.Source
+    }
 }
-
+$resolvedPython = (Resolve-Path -LiteralPath $PythonPath).Path
 $resolvedSourceDir = (Resolve-Path -LiteralPath $SourceDir).Path
-$goModulePath = Join-Path $resolvedSourceDir 'go.mod'
-if (-not (Test-Path -LiteralPath $goModulePath -PathType Leaf)) {
-    throw "No go.mod was found in SourceDir: $resolvedSourceDir"
+$entryPoint = Join-Path $resolvedSourceDir 'main.py'
+$testFile = Join-Path $resolvedSourceDir 'test_main.py'
+if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $testFile -PathType Leaf)) {
+    throw "Python service source or tests are missing in: $resolvedSourceDir"
+}
+
+& $resolvedPython --version
+if ($LASTEXITCODE -ne 0) {
+    throw "Python failed with exit code $LASTEXITCODE"
+}
+& $resolvedPython -c 'import PyInstaller; print(PyInstaller.__version__)'
+if ($LASTEXITCODE -ne 0) {
+    throw 'PyInstaller is unavailable. Install the pinned requirements with: python -m pip install -r requirements.txt'
+}
+
+Write-Host 'Checking Python syntax...'
+& $resolvedPython -m py_compile $entryPoint $testFile
+if ($LASTEXITCODE -ne 0) {
+    throw "Python syntax check failed with exit code $LASTEXITCODE"
+}
+
+Write-Host 'Running Python unit tests...'
+& $resolvedPython -m unittest discover -s $resolvedSourceDir -p 'test_*.py' -v
+if ($LASTEXITCODE -ne 0) {
+    throw "Python unit tests failed with exit code $LASTEXITCODE"
 }
 
 $null = New-Item -ItemType Directory -Path $OutputDir -Force
 $resolvedOutputDir = (Resolve-Path -LiteralPath $OutputDir).Path
 $outputPath = Join-Path $resolvedOutputDir $OutputName
-$temporaryOutputPath = Join-Path $resolvedOutputDir ".$OutputName.$PID.tmp"
+$buildRoot = Join-Path $resolvedOutputDir ".pyinstaller-$PID"
+$temporaryDist = Join-Path $buildRoot 'dist'
+$temporaryWork = Join-Path $buildRoot 'work'
+$temporarySpec = Join-Path $buildRoot 'spec'
+$temporaryArtifactPath = Join-Path $temporaryDist $OutputName
 
-$environmentNames = @('GOOS', 'GOARCH', 'GOAMD64', 'CGO_ENABLED')
-$previousEnvironment = @{}
-foreach ($name in $environmentNames) {
-    $item = Get-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
-    $previousEnvironment[$name] = @{
-        Exists = $null -ne $item
-        Value  = if ($null -ne $item) { $item.Value } else { $null }
-    }
-}
-
-Push-Location -LiteralPath $resolvedSourceDir
 try {
-    $env:GOOS = 'windows'
-    $env:GOARCH = 'amd64'
-    $env:GOAMD64 = 'v1'
-    $env:CGO_ENABLED = '0'
-
-    & go version
+    $null = New-Item -ItemType Directory -Path $temporaryDist, $temporaryWork, $temporarySpec -Force
+    Write-Host "Building one-file Windows executable: $outputPath"
+    & $resolvedPython -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --onefile `
+        --console `
+        --noupx `
+        --name ([IO.Path]::GetFileNameWithoutExtension($OutputName)) `
+        --distpath $temporaryDist `
+        --workpath $temporaryWork `
+        --specpath $temporarySpec `
+        $entryPoint
     if ($LASTEXITCODE -ne 0) {
-        throw "go version failed with exit code $LASTEXITCODE"
+        throw "PyInstaller failed with exit code $LASTEXITCODE"
     }
-
-    Write-Host "Testing Go service in $resolvedSourceDir"
-    & go test -count=1 ./...
-    if ($LASTEXITCODE -ne 0) {
-        throw "go test failed with exit code $LASTEXITCODE"
+    if (-not (Test-Path -LiteralPath $temporaryArtifactPath -PathType Leaf)) {
+        throw "PyInstaller did not create the expected artifact: $temporaryArtifactPath"
     }
-
-    Write-Host 'Running go vet'
-    & go vet ./...
-    if ($LASTEXITCODE -ne 0) {
-        throw "go vet failed with exit code $LASTEXITCODE"
-    }
-
-    Write-Host "Building Windows amd64 executable: $outputPath"
-    & go build -buildvcs=false -trimpath -ldflags '-s -w' -o $temporaryOutputPath .
-    if ($LASTEXITCODE -ne 0) {
-        throw "go build failed with exit code $LASTEXITCODE"
-    }
-    $temporaryArtifact = Get-Item -LiteralPath $temporaryOutputPath
+    $temporaryArtifact = Get-Item -LiteralPath $temporaryArtifactPath
     if ($temporaryArtifact.Length -le 0) {
-        throw 'go build produced an empty executable.'
+        throw 'PyInstaller produced an empty executable.'
     }
-    $temporaryHash = Get-FileHash -LiteralPath $temporaryOutputPath -Algorithm SHA256
+
+    Write-Host 'Running packaged executable smoke test...'
+    $smokeRoot = Join-Path $buildRoot 'smoke'
+    $smokeBackgrounds = Join-Path $smokeRoot 'web\html\backgrounds'
+    $smokeState = Join-Path $smokeRoot 'HomeLabWallpaperState-data'
+    $smokeConfig = Join-Path $smokeRoot 'HomeLabWallpaperState.json'
+    $null = New-Item -ItemType Directory -Path $smokeBackgrounds, $smokeState -Force
+    [IO.File]::WriteAllBytes((Join-Path $smokeBackgrounds 'bg.jpg'), [byte[]](1, 2, 3))
+    [IO.File]::WriteAllBytes((Join-Path $smokeBackgrounds 'test.jpg'), [byte[]](4, 5, 6))
+
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $smokePort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+    $listener.Stop()
+    $smokeToken = 'build-smoke-control-token-0123456789abcdef'
+    $smokeSettings = [ordered]@{
+        version        = 1
+        backgroundDir  = $smokeBackgrounds
+        allowedOrigins = @('https://home.example.test')
+        listen         = "127.0.0.1:$smokePort"
+        stateDir       = $smokeState
+        controlToken   = $smokeToken
+    }
+    [IO.File]::WriteAllText(
+        $smokeConfig,
+        (($smokeSettings | ConvertTo-Json -Depth 4) + [Environment]::NewLine),
+        [Text.UTF8Encoding]::new($false)
+    )
+
+    $smokeProcess = Start-Process `
+        -FilePath $temporaryArtifactPath `
+        -ArgumentList @('serve', '--config', ('"' + $smokeConfig + '"')) `
+        -WorkingDirectory $smokeRoot `
+        -WindowStyle Hidden `
+        -PassThru
+    try {
+        $healthUri = "http://127.0.0.1:$smokePort/healthz"
+        $deadline = (Get-Date).AddSeconds(20)
+        $health = $null
+        do {
+            try {
+                $health = Invoke-RestMethod -UseBasicParsing -Uri $healthUri -TimeoutSec 2
+            } catch {
+                Start-Sleep -Milliseconds 250
+            }
+        } while (($null -eq $health -or $health.status -ne 'ok') -and (Get-Date) -lt $deadline)
+        if ($null -eq $health -or $health.status -ne 'ok' -or $health.service -ne 'HomeLabWallpaperState') {
+            throw 'Packaged executable did not become healthy during the smoke test.'
+        }
+
+        $preferences = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/background-preferences" `
+            -TimeoutSec 2
+        if ($preferences.landscape -ne 'bg.jpg' -or $preferences.portrait -ne 'bg.jpg') {
+            throw 'Packaged executable returned an unexpected initial state.'
+        }
+
+        $patchBody = @{ mode = 'landscape'; background = 'test.jpg' } | ConvertTo-Json -Compress
+        $patched = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Patch `
+            -Uri "http://127.0.0.1:$smokePort/api/background-preferences" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $patchBody `
+            -TimeoutSec 2
+        if ($patched.landscape -ne 'test.jpg') {
+            throw 'Packaged executable failed the PATCH compatibility smoke test.'
+        }
+
+        $null = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/_control/shutdown" `
+            -Headers @{ 'X-Control-Token' = $smokeToken } `
+            -TimeoutSec 2
+        if (-not $smokeProcess.WaitForExit(10000)) {
+            throw 'Packaged executable did not stop after the control request.'
+        }
+        if ($smokeProcess.ExitCode -ne 0) {
+            throw "Packaged executable exited with code $($smokeProcess.ExitCode)."
+        }
+    } finally {
+        if (-not $smokeProcess.HasExited) {
+            Stop-Process -Id $smokeProcess.Id -Force -ErrorAction SilentlyContinue
+            $smokeProcess.WaitForExit()
+        }
+        $smokeProcess.Dispose()
+    }
+
+    $temporaryHash = Get-FileHash -LiteralPath $temporaryArtifactPath -Algorithm SHA256
     Write-Host "Verified temporary artifact: $($temporaryArtifact.Length) bytes, SHA256 $($temporaryHash.Hash)"
-    Move-Item -LiteralPath $temporaryOutputPath -Destination $outputPath -Force
-}
-finally {
-    Pop-Location
-    Remove-Item -LiteralPath $temporaryOutputPath -Force -ErrorAction SilentlyContinue
-    foreach ($name in $environmentNames) {
-        $previous = $previousEnvironment[$name]
-        if ($previous.Exists) {
-            Set-Item -LiteralPath "Env:$name" -Value $previous.Value
-        }
-        else {
-            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
-        }
+    Move-Item -LiteralPath $temporaryArtifactPath -Destination $outputPath -Force
+} finally {
+    if (Test-Path -LiteralPath $buildRoot) {
+        Remove-Item -LiteralPath $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
