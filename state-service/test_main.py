@@ -163,6 +163,64 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(any(path.name.startswith(".state.json.") for path in self.config.state_dir.iterdir()))
 
 
+class LoggingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.log_file = Path(self.temporary.name) / "service.log"
+
+    def tearDown(self) -> None:
+        logger = main.logging.getLogger(main.SERVICE_NAME)
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+        self.temporary.cleanup()
+
+    def flush_handlers(self, logger: main.logging.Logger) -> None:
+        for handler in logger.handlers:
+            handler.flush()
+
+    def test_logging_uses_one_small_rotating_backup(self) -> None:
+        logger = main.configure_logging(self.log_file, include_console=False)
+        handler = logger.handlers[0]
+        self.assertIsInstance(handler, main.RotatingFileHandler)
+        self.assertEqual(handler.maxBytes, 48 * 1024)
+        self.assertEqual(handler.backupCount, 1)
+
+        for index in range(20):
+            logger.info("entry %d %s", index, "x" * 8192)
+        self.flush_handlers(logger)
+
+        backup = Path(f"{self.log_file}.1")
+        self.assertTrue(self.log_file.is_file())
+        self.assertTrue(backup.is_file())
+        self.assertLessEqual(self.log_file.stat().st_size, main.LOG_MAX_BYTES)
+        self.assertLessEqual(backup.stat().st_size, main.LOG_MAX_BYTES)
+        self.assertEqual({path.name for path in self.log_file.parent.iterdir()}, {"service.log", "service.log.1"})
+
+    def test_http_access_is_suppressed_but_lifecycle_is_logged(self) -> None:
+        logger = main.configure_logging(self.log_file, include_console=False)
+        request_handler = main.StateRequestHandler.__new__(main.StateRequestHandler)
+        request_handler.server = mock.Mock(logger=logger)
+        with mock.patch.object(request_handler, "address_string", return_value="127.0.0.1"):
+            request_handler.log_message('"%s" %s', "GET /healthz HTTP/1.1", "200")
+        self.flush_handlers(logger)
+        self.assertEqual(self.log_file.read_text(encoding="utf-8"), "")
+
+        logger.info("wallpaper state service listening")
+        self.flush_handlers(logger)
+        self.assertIn("wallpaper state service listening", self.log_file.read_text(encoding="utf-8"))
+
+    def test_oversized_legacy_logs_are_discarded(self) -> None:
+        backup = Path(f"{self.log_file}.1")
+        self.log_file.write_bytes(b"x" * (main.LOG_MAX_BYTES + 1))
+        backup.write_bytes(b"y" * (main.LOG_MAX_BYTES + 1))
+
+        main.configure_logging(self.log_file, include_console=False)
+
+        self.assertEqual(self.log_file.stat().st_size, 0)
+        self.assertFalse(backup.exists())
+
+
 class APITests(unittest.TestCase):
     def setUp(self) -> None:
         self.project = TemporaryProject()

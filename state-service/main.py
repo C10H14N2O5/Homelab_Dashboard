@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import secrets
 import shutil
@@ -34,6 +35,8 @@ DEFAULT_BACKGROUND = "bg.jpg"
 DEFAULT_ORIGIN = "https://home.c10h14n2o5.com"
 DEFAULT_LISTEN = "127.0.0.1:8787"
 MONITOR_REFRESH_SECONDS = 60.0
+LOG_MAX_BYTES = 48 * 1024
+LOG_BACKUP_COUNT = 1
 SERVICE_NAME = "HomeLabWallpaperState"
 SERVICE_VERSION = 1
 STATE_VERSION = 1
@@ -355,7 +358,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, format_string: str, *args: Any) -> None:
-        self.server.logger.info("%s - %s", self.address_string(), format_string % args)
+        self.server.logger.debug("%s - %s", self.address_string(), format_string % args)
 
     def _common_headers(self) -> None:
         self.send_header("Cache-Control", "no-store, max-age=0")
@@ -486,10 +489,23 @@ class StateRequestHandler(BaseHTTPRequestHandler):
 
 def configure_logging(log_file: Path, include_console: bool = True) -> logging.Logger:
     logger = logging.getLogger(SERVICE_NAME)
-    logger.handlers.clear()
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)sZ %(levelname)s %(message)s", "%Y-%m-%dT%H:%M:%S")
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    for path in (log_file, Path(f"{log_file}.1")):
+        try:
+            if path.stat().st_size > LOG_MAX_BYTES:
+                path.unlink()
+        except FileNotFoundError:
+            pass
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     if include_console:

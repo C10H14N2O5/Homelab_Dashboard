@@ -143,6 +143,8 @@ HomeLabWallpaperState.exe restart
 
 监视器每 60 秒显示 API、PID、背景槽位、目录和最近日志。按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `R` 立即刷新。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE即可检查并恢复。
 
+`service.log` 只记录服务启动、停止和异常，不记录正常 HTTP 请求。日志按 48 KiB 轮转并只保留一个 `service.log.1` 备份，总量约 96 KiB。
+
 首次引导默认将壁纸目录设为 `D:\Zoraxy\www\html\backgrounds`；配置和状态仍保存在 EXE 所在目录：
 
 ```text
