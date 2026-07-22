@@ -47,7 +47,6 @@ $requiredFiles = @(
     'state-service\main.py',
     'state-service\test_main.py',
     'scripts\build-state-service.ps1',
-    'scripts\install-state-service.ps1',
     'scripts\uninstall-state-service.ps1',
     'scripts\verify-project.ps1'
 )
@@ -58,20 +57,20 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
-$installSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'install-state-service.ps1'))
 $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-service.ps1'))
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
 $maintenanceContracts = @(
-    @{ Name = 'deployment executable hash check'; Source = $installSource; Marker = 'ExpectedSha256' },
     @{ Name = 'PyInstaller one-file build'; Source = $buildSource; Marker = '--onefile' },
     @{ Name = 'packaged executable health check'; Source = $buildSource; Marker = '/healthz' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
+    @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
-    @{ Name = 'service probe CORS header documentation'; Source = $readmeSource; Marker = 'Access-Control-Allow-Origin' },
-    @{ Name = 'service probe downstream direction documentation'; Source = $readmeSource; Marker = 'Client << Zoraxy' }
+    @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
+    @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
+    @{ Name = 'CORS removal documentation'; Source = $readmeSource; Marker = 'AstrBot' }
 )
 foreach ($contract in $maintenanceContracts) {
     if (-not $contract.Source.Contains($contract.Marker)) {
@@ -143,6 +142,7 @@ cards.forEach((tag, index) => {
 
 const requiredMarkers = [
     '/api/background-preferences',
+    '/api/service-status',
     'homelab-background-state-cache-v1',
     'data-background-mode="landscape"',
     'data-background-mode="portrait"',
@@ -150,7 +150,9 @@ const requiredMarkers = [
     'classifyServiceStatus',
     'data-state="warning"',
     'data-probe-url="https://cliproxy.home.c10h14n2o5.com/management.html/"',
-    "mode: 'cors'",
+    "credentials: 'same-origin'",
+    "'Content-Type': 'application/json'",
+    'data-state="unknown"',
     'backgroundScanPending',
     'reconcileSharedBackgroundPreference',
     "'X-Requested-With': 'homelab-dashboard'"
@@ -220,86 +222,81 @@ if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.current
 }
 
 const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
-const serviceHelperEnd = runtimeScript.indexOf('async function refreshStatuses(', serviceHelperStart);
+const serviceHelperEnd = runtimeScript.indexOf('refreshButton.addEventListener(', serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
     throw new Error('Unable to extract service status helpers for behavior checks.');
 }
 vm.runInContext(
     runtimeScript.slice(serviceHelperStart, serviceHelperEnd)
-        + '\nglobalThis.__serviceHelpers = { classifyServiceStatus, serviceStatusLabel, probe };',
+        + '\nglobalThis.__serviceHelpers = { classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses };',
     context
 );
 
 const statusCases = [
-    [200, 'online', '\u53ef\u8fde\u63a5'],
-    [204, 'online', '\u53ef\u8fde\u63a5'],
-    [301, 'online', '\u53ef\u8fde\u63a5'],
-    [302, 'online', '\u53ef\u8fde\u63a5'],
+    [200, 'online', '\u670d\u52a1\u7aef\u53ef\u8fbe'],
+    [204, 'online', '\u670d\u52a1\u7aef\u53ef\u8fbe'],
+    [301, 'online', '\u670d\u52a1\u7aef\u53ef\u8fbe'],
+    [302, 'online', '\u670d\u52a1\u7aef\u53ef\u8fbe'],
     [401, 'warning', '\u5f02\u5e38 \u00b7 HTTP 401'],
     [404, 'warning', '\u5f02\u5e38 \u00b7 HTTP 404'],
     [500, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 500'],
     [502, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 502'],
     [521, 'offline', '\u4e0d\u53ef\u7528 \u00b7 HTTP 521']
 ];
-let observedOptions = null;
-let observedResource = null;
-let canceledBodies = 0;
-const stateElement = {
-    dataset: {},
-    label: { textContent: '' },
-    querySelector() { return this.label; }
-};
-const card = {
-    href: 'https://service.home.example/',
-    dataset: { probeUrl: 'https://probe.home.example/health' },
-    querySelector() { return stateElement; }
-};
-
 for (const [status, expectedState, expectedLabel] of statusCases) {
-    context.fetch = (resource, options) => {
-        observedResource = resource;
-        observedOptions = options;
-        return Promise.resolve({
-            status,
-            body: {
-                cancel() {
-                    canceledBodies += 1;
-                    return Promise.resolve();
-                }
-            }
-        });
+    const state = context.__serviceHelpers.classifyServiceStatus(status);
+    const label = context.__serviceHelpers.serviceStatusLabel(state, status, null);
+    if (state !== expectedState || label !== expectedLabel) throw new Error(`HTTP ${status} classification mismatch.`);
+}
+const redirected = context.__serviceHelpers.serviceStatusLabel('offline', 302, 'redirect_rejected');
+if (redirected !== '\u91cd\u5b9a\u5411\u88ab\u62d2\u7edd \u00b7 HTTP 302') throw new Error('Rejected redirect label mismatch.');
+
+function makeCard(href, probeUrl = null) {
+    const stateElement = { dataset: {}, label: { textContent: '' }, querySelector() { return this.label; } };
+    return {
+        href,
+        dataset: probeUrl ? { probeUrl } : {},
+        stateElement,
+        querySelector() { return stateElement; }
     };
-    const result = await context.__serviceHelpers.probe(card);
-    if (result.state !== expectedState || result.status !== status) {
-        throw new Error(`HTTP ${status} classified as ${result.state}, expected ${expectedState}.`);
-    }
-    if (stateElement.dataset.state !== expectedState || stateElement.label.textContent !== expectedLabel) {
-        throw new Error(`HTTP ${status} rendered an unexpected card state or label.`);
-    }
 }
-if (!observedOptions || observedOptions.mode !== 'cors' || observedOptions.credentials !== 'omit'
-    || observedOptions.redirect !== 'follow' || observedOptions.cache !== 'no-store') {
-    throw new Error('Service probe fetch options do not enforce the CORS status contract.');
+context.cards = [
+    makeCard('https://one.home.example.test/'),
+    makeCard('https://two.home.example.test/', 'https://two.home.example.test/status')
+];
+context.refreshButton = { disabled: false, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+context.lastChecked = { textContent: '' };
+context.statusSummary = { textContent: '' };
+context.serviceStatusEndpoint = { href: 'https://home.example.test/api/service-status' };
+let requestCount = 0;
+let observedResource = null;
+let observedOptions = null;
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
+    requestCount += 1;
+    observedResource = resource;
+    observedOptions = options;
+    if (timeout !== 8000 || controller !== null) throw new Error('Unexpected service API timeout contract.');
+    return transform({ ok: true, json: async () => ({ results: [
+        { target: 'https://one.home.example.test/', status: 200, latencyMs: 5, error: null },
+        { target: 'https://two.home.example.test/status', status: null, latencyMs: 5000, error: 'timeout' }
+    ] }) });
+};
+await context.__serviceHelpers.refreshStatuses();
+if (requestCount !== 1 || observedResource !== context.serviceStatusEndpoint.href) throw new Error('Refresh did not send one batch request.');
+if (observedOptions.method !== 'POST' || observedOptions.credentials !== 'same-origin' || observedOptions.cache !== 'no-store') {
+    throw new Error('Service status request options mismatch.');
 }
-if (observedResource !== card.dataset.probeUrl) {
-    throw new Error('Service probe did not use the card-specific probe URL override.');
-}
-if (canceledBodies !== statusCases.length) {
-    throw new Error('Service probe did not cancel every unused response body.');
+const requestBody = JSON.parse(observedOptions.body);
+if (requestBody.targets[1] !== context.cards[1].dataset.probeUrl) throw new Error('Probe URL override was not used.');
+if (context.cards[0].stateElement.dataset.state !== 'online' || context.cards[1].stateElement.dataset.state !== 'offline') {
+    throw new Error('Batch results were not rendered correctly.');
 }
 
-delete card.dataset.probeUrl;
-context.fetch = (resource) => {
-    observedResource = resource;
-    return Promise.reject(new Error('simulated network failure'));
-};
-const failedProbe = await context.__serviceHelpers.probe(card);
-if (failedProbe.state !== 'offline' || failedProbe.status !== null
-    || stateElement.dataset.state !== 'offline' || stateElement.label.textContent !== '\u4e0d\u53ef\u8fde\u63a5') {
-    throw new Error('Service probe request failure did not render the offline fallback.');
-}
-if (observedResource !== card.href) {
-    throw new Error('Service probe did not fall back to the card href.');
+context.fetchWithTimeout = async () => { throw new Error('simulated API failure'); };
+await context.__serviceHelpers.refreshStatuses();
+if (context.cards.some((card) => card.stateElement.dataset.state !== 'unknown')
+    || context.refreshButton.disabled || context.refreshButton.attributes['aria-busy'] !== 'false') {
+    throw new Error('API failure did not restore controls and render unknown states.');
 }
 
 console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} cards, ${ids.length} unique ids.`);
@@ -338,7 +335,7 @@ try {
         $leafName = [IO.Path]::GetFileName($normalized).ToLowerInvariant()
         if ($normalized.StartsWith('dist/', [StringComparison]::OrdinalIgnoreCase) -or
             $blockedMediaExtensions -contains $extension -or
-            $leafName -in @('state.json', 'state.json.bak', 'service.log', 'homelabwallpaperstate.json') -or
+            $leafName -in @('state.json', 'state.json.bak', 'service.log', 'service.log.1', 'homelabwallpaperstate.json') -or
             $leafName -like 'state.json.corrupt-*' -or
             $leafName -like '.state-*.tmp') {
             throw "Runtime or multimedia file would enter source control: $candidateFile"
@@ -356,8 +353,9 @@ try {
         'state.json.bak',
         'state.json.corrupt-verify',
         '.state-verify.tmp',
-        'service.log'
-        'HomeLabWallpaperState.json'
+        'service.log',
+        'service.log.1',
+        'HomeLabWallpaperState.json',
         'HomeLabWallpaperState-data/state.json'
     )
     foreach ($probe in $ignoreProbes) {

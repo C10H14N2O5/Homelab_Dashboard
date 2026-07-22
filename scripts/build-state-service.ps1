@@ -117,12 +117,15 @@ try {
     $listener.Stop()
     $smokeToken = 'build-smoke-control-token-0123456789abcdef'
     $smokeSettings = [ordered]@{
-        version        = 1
-        backgroundDir  = $smokeBackgrounds
-        allowedOrigins = @('https://home.example.test')
-        listen         = "127.0.0.1:$smokePort"
-        stateDir       = $smokeState
-        controlToken   = $smokeToken
+        version                 = 2
+        backgroundDir           = $smokeBackgrounds
+        allowedOrigins          = @('https://home.example.test')
+        listen                  = "127.0.0.1:$smokePort"
+        stateDir                = $smokeState
+        controlToken            = $smokeToken
+        probeConnectAddress     = '127.0.0.1:443'
+        probeDomainSuffix       = 'home.example.test'
+        probeTimeoutSeconds     = 5
     }
     [IO.File]::WriteAllText(
         $smokeConfig,
@@ -161,7 +164,7 @@ try {
         if (-not $consoleProcess.Start()) {
             throw 'Packaged console encoding smoke test did not start.'
         }
-        $consoleProcess.StandardInput.Write($consoleBackgrounds + "`n`n`n`n" + "n`n")
+        $consoleProcess.StandardInput.Write($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
         $consoleProcess.StandardInput.Close()
         $consoleOutput = $consoleProcess.StandardOutput.ReadToEnd()
         $consoleError = $consoleProcess.StandardError.ReadToEnd()
@@ -227,6 +230,21 @@ try {
             -TimeoutSec 2
         if ($patched.landscape -ne 'test.jpg') {
             throw 'Packaged executable failed the PATCH compatibility smoke test.'
+        }
+
+        $serviceStatusBody = @{ targets = @('https://outside.example.test/') } | ConvertTo-Json -Compress
+        $serviceStatus = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/api/service-status" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $serviceStatusBody `
+            -TimeoutSec 2
+        if ($serviceStatus.results.Count -ne 1 -or
+            $serviceStatus.results[0].target -ne 'https://outside.example.test/' -or
+            $serviceStatus.results[0].error -ne 'invalid_target') {
+            throw 'Packaged executable failed the service-status API smoke test.'
         }
 
         $null = Invoke-RestMethod `

@@ -14,4 +14,5 @@ state.json
 state.json.bak
 state.json.corrupt-*
 service.log
+service.log.*
 .state-*.tmp

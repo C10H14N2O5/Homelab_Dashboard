@@ -412,6 +412,10 @@
             color: var(--offline);
         }
 
+        .service-state[data-state="unknown"] {
+            color: var(--subtle);
+        }
+
         .dashboard-footer {
             min-height: 1.5rem;
             margin-top: 0.85rem;
@@ -1031,7 +1035,7 @@
             <div class="dashboard-head">
                 <div>
                     <h2 class="dashboard-title" id="service-heading">Services</h2>
-                    <p class="dashboard-note">状态仅表示入口最终响应，不代表应用内部健康。</p>
+                    <p class="dashboard-note">状态表示入口节点经 Zoraxy 到上游的服务端链路，不代表应用内部健康。</p>
                 </div>
                 <button class="refresh-button" id="refresh-status" type="button" aria-busy="false">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1221,6 +1225,7 @@
             const defaultBackground = new URL('bg.jpg', backgroundDirectory);
             const defaultBackgroundName = 'bg.jpg';
             const backgroundPreferencesEndpoint = new URL('/api/background-preferences', document.baseURI);
+            const serviceStatusEndpoint = new URL('/api/service-status', document.baseURI);
             const backgroundPreferencesCacheKey = 'homelab-background-state-cache-v1';
             const legacyBackgroundStorageKey = 'homelab-background';
             const backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
@@ -1935,65 +1940,81 @@
                 return 'offline';
             }
 
-            function serviceStatusLabel(state, status = null) {
-                if (state === 'online') return '可连接';
+            function serviceStatusLabel(state, status = null, error = null) {
+                if (error === 'redirect_rejected') return `重定向被拒绝 · HTTP ${status}`;
+                if (error !== null && Number.isInteger(status)) return `探测失败 · HTTP ${status}`;
+                if (state === 'online') return '服务端可达';
                 if (state === 'warning') return `异常 · HTTP ${status}`;
                 if (Number.isInteger(status)) return `不可用 · HTTP ${status}`;
                 return '不可连接';
             }
 
-            function cancelResponseBody(response) {
-                if (!response || !response.body || typeof response.body.cancel !== 'function') return;
-                response.body.cancel().catch(() => {});
-            }
-
-            async function probe(card) {
-                setCardState(card, 'checking', '检测中');
-                const probeUrl = card.dataset.probeUrl || card.href;
-                let response = null;
-
-                try {
-                    response = await fetchWithTimeout(probeUrl, {
-                        mode: 'cors',
-                        cache: 'no-store',
-                        credentials: 'omit',
-                        redirect: 'follow',
-                        referrerPolicy: 'no-referrer'
-                    });
-
-                    const state = classifyServiceStatus(response.status);
-                    setCardState(card, state, serviceStatusLabel(state, response.status));
-                    if (state !== 'online') {
-                        console.warn(`入口响应异常：${probeUrl} HTTP ${response.status}`);
-                    }
-                    return { state, status: response.status };
-                } catch (error) {
-                    console.warn(`入口检测失败：${probeUrl}`, error);
-                    setCardState(card, 'offline', '不可连接');
-                    return { state: 'offline', status: null };
-                } finally {
-                    cancelResponseBody(response);
-                }
+            function normalizeServiceStatusResult(value, target) {
+                if (!value || typeof value !== 'object' || value.target !== target) return null;
+                const status = value.status;
+                const latencyMs = value.latencyMs;
+                const error = value.error;
+                const validStatus = status === null || (Number.isInteger(status) && status >= 100 && status <= 599);
+                const validLatency = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0;
+                const validErrors = new Set([
+                    'invalid_target',
+                    'timeout',
+                    'tls_error',
+                    'redirect_rejected',
+                    'connection_error',
+                    'request_error'
+                ]);
+                if (!validStatus || !validLatency || (error !== null && !validErrors.has(error))) return null;
+                if (status === null && error === null) return null;
+                return { target, status, latencyMs, error };
             }
 
             async function refreshStatuses() {
                 refreshButton.disabled = true;
                 refreshButton.setAttribute('aria-busy', 'true');
                 lastChecked.textContent = `正在检测 ${cards.length} 个入口…`;
+                cards.forEach((card) => setCardState(card, 'checking', '检测中'));
+                const targets = cards.map((card) => card.dataset.probeUrl || card.href);
 
                 try {
-                    const results = await Promise.all(cards.map(probe));
+                    const payload = await fetchWithTimeout(serviceStatusEndpoint.href, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'homelab-dashboard'
+                        },
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        body: JSON.stringify({ targets })
+                    }, 8000, null, async (response) => {
+                        if (!response.ok) throw new Error(`状态 API 返回 HTTP ${response.status}`);
+                        return response.json();
+                    });
+                    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.results)
+                        || payload.results.length !== targets.length) {
+                        throw new Error('状态 API 返回结构不符合契约');
+                    }
+                    const results = payload.results.map((value, index) => {
+                        const result = normalizeServiceStatusResult(value, targets[index]);
+                        if (!result) throw new Error(`状态 API 第 ${index + 1} 项不符合契约`);
+                        const state = result.error === null
+                            ? classifyServiceStatus(result.status)
+                            : 'offline';
+                        setCardState(cards[index], state, serviceStatusLabel(state, result.status, result.error));
+                        return { ...result, state };
+                    });
                     const counts = results.reduce((summary, result) => {
                         summary[result.state] += 1;
                         return summary;
                     }, { online: 0, warning: 0, offline: 0 });
 
-                    lastChecked.textContent = `刚刚更新 · ${counts.online}/${cards.length} 可连接 · ${counts.warning} 响应异常 · ${counts.offline} 不可用`;
-                    statusSummary.textContent = `入口检测完成，${counts.online} 个可连接，${counts.warning} 个响应异常，${counts.offline} 个不可用。`;
+                    lastChecked.textContent = `刚刚更新 · ${counts.online}/${cards.length} 服务端可达 · ${counts.warning} 响应异常 · ${counts.offline} 不可用`;
+                    statusSummary.textContent = `入口检测完成，${counts.online} 个服务端可达，${counts.warning} 个响应异常，${counts.offline} 个不可用。`;
                 } catch (error) {
-                    console.warn('入口检测流程意外中断。', error);
-                    lastChecked.textContent = '入口检测未能完成';
-                    statusSummary.textContent = '入口检测发生异常，可稍后手动重试；服务链接仍可正常使用。';
+                    console.warn('状态检测服务不可用。', error);
+                    cards.forEach((card) => setCardState(card, 'unknown', '状态未知'));
+                    lastChecked.textContent = '状态检测服务不可用';
+                    statusSummary.textContent = '状态检测服务不可用，所有入口状态未知；服务链接仍可正常使用。';
                 } finally {
                     refreshButton.disabled = false;
                     refreshButton.setAttribute('aria-busy', 'false');
