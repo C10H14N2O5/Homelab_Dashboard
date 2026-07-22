@@ -334,14 +334,14 @@ try {
         $extension = [IO.Path]::GetExtension($normalized).ToLowerInvariant()
         $leafName = [IO.Path]::GetFileName($normalized).ToLowerInvariant()
         if ($normalized.StartsWith('dist/', [StringComparison]::OrdinalIgnoreCase) -or
-            $blockedMediaExtensions -contains $extension -or
+            ($blockedMediaExtensions -contains $extension -and $normalized -ne 'backgrounds/bg.jpg') -or
             $leafName -in @('state.json', 'state.json.bak', 'service.log', 'service.log.1', 'homelabwallpaperstate.json') -or
             $leafName -like 'state.json.corrupt-*' -or
             $leafName -like '.state-*.tmp') {
             throw "Runtime or multimedia file would enter source control: $candidateFile"
         }
         if ($normalized.StartsWith('backgrounds/', [StringComparison]::OrdinalIgnoreCase) -and
-            $normalized -ne 'backgrounds/.gitignore') {
+            $normalized -notin @('backgrounds/.gitignore', 'backgrounds/bg.jpg')) {
             throw "Unexpected source-controlled background file: $candidateFile"
         }
     }

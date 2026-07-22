@@ -7,7 +7,7 @@
 | 项目 | 当前实现 |
 | --- | --- |
 | 页面入口 | `index.html` |
-| 背景图片 | `backgrounds/` 自动发现，部署机器本地保存，不进入 Git |
+| 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余图片由部署机器本地保存 |
 | 服务入口 | 11 个 HomeLab 子域名 |
 | 状态服务 | Python 标准库实现；提供壁纸偏好与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
@@ -20,7 +20,9 @@
 
 ```text
 Zoraxy_StaticWebSite/
-├── backgrounds/.gitignore       # 阻止部署机图片进入 Git
+├── backgrounds/
+│   ├── .gitignore               # 仅放行兜底 bg.jpg
+│   └── bg.jpg                   # 拉取后即可使用的默认壁纸
 ├── state-service/
 │   ├── main.py                  # API、入口探测、状态存储、启动器、监视器和首次引导
 │   └── test_main.py             # Python 单元测试
@@ -35,7 +37,7 @@ Zoraxy_StaticWebSite/
 └── README.md
 ```
 
-仓库不分发背景图片、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和本地维护的 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
+仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
 
 ## 运行架构
 
@@ -277,6 +279,6 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 
 - 修改后先运行统一验证，不要跳过失败项。
 - 新增服务卡片时同步更新硬编码总数、动画序号、README 和前端验证契约。
-- 背景文件不进入 Git，应独立备份。
+- `backgrounds/bg.jpg` 作为兜底进入 Git；其它背景文件不进入 Git，应独立备份。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。

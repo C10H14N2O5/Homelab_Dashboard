@@ -1,3 +1,4 @@
-# Background assets are deployment-local and must not be committed.
+# Keep the fallback background in Git; all other assets remain deployment-local.
 *
 !.gitignore
+!bg.jpg
