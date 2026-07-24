@@ -130,13 +130,16 @@ const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
 if (duplicateIds.length) throw new Error(`Duplicate ids: ${[...new Set(duplicateIds)].join(', ')}`);
 
 const cards = [...html.matchAll(/<a\b[^>]*class="service-card"[^>]*>/g)].map((match) => match[0]);
-if (cards.length !== 11) throw new Error(`Expected 11 service cards, found ${cards.length}.`);
+if (cards.length === 0) throw new Error('Expected at least one service card.');
 cards.forEach((tag, index) => {
     if (!/\btarget="_blank"/.test(tag)) throw new Error(`Service card ${index + 1} does not open in a new tab.`);
     const rel = tag.match(/\brel="([^"]+)"/);
     const tokens = rel ? rel[1].split(/\s+/) : [];
     if (!tokens.includes('noopener') || !tokens.includes('noreferrer')) {
         throw new Error(`Service card ${index + 1} is missing safe rel tokens.`);
+    }
+    if (/--card-index\s*:/.test(tag)) {
+        throw new Error(`Service card ${index + 1} contains a manually assigned animation index.`);
     }
 });
 
@@ -155,6 +158,8 @@ const requiredMarkers = [
     'data-state="unknown"',
     'backgroundScanPending',
     'reconcileSharedBackgroundPreference',
+    'id="service-count-label"',
+    'initializeServiceCards',
     "'X-Requested-With': 'homelab-dashboard'"
 ];
 requiredMarkers.forEach((marker) => {
@@ -222,13 +227,13 @@ if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.current
 }
 
 const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
-const serviceHelperEnd = runtimeScript.indexOf('refreshButton.addEventListener(', serviceHelperStart);
+const serviceHelperEnd = runtimeScript.indexOf('initializeServiceCards();', serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
     throw new Error('Unable to extract service status helpers for behavior checks.');
 }
 vm.runInContext(
     runtimeScript.slice(serviceHelperStart, serviceHelperEnd)
-        + '\nglobalThis.__serviceHelpers = { classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses };',
+        + '\nglobalThis.__serviceHelpers = { initializeServiceCards, classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses };',
     context
 );
 
@@ -257,6 +262,10 @@ function makeCard(href, probeUrl = null) {
         href,
         dataset: probeUrl ? { probeUrl } : {},
         stateElement,
+        style: {
+            properties: {},
+            setProperty(name, value) { this.properties[name] = value; }
+        },
         querySelector() { return stateElement; }
     };
 }
@@ -264,10 +273,19 @@ context.cards = [
     makeCard('https://one.home.example.test/'),
     makeCard('https://two.home.example.test/', 'https://two.home.example.test/status')
 ];
+context.serviceCountLabel = { textContent: '' };
 context.refreshButton = { disabled: false, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
 context.lastChecked = { textContent: '' };
 context.statusSummary = { textContent: '' };
 context.serviceStatusEndpoint = { href: 'https://home.example.test/api/service-status' };
+context.__serviceHelpers.initializeServiceCards();
+if (context.serviceCountLabel.textContent !== '\u0032 \u4e2a\u5bb6\u5ead\u670d\u52a1\u5165\u53e3') {
+    throw new Error('Dynamic service count label mismatch.');
+}
+if (context.cards[0].style.properties['--card-index'] !== '0'
+    || context.cards[1].style.properties['--card-index'] !== '1') {
+    throw new Error('Service card animation indexes were not assigned from DOM order.');
+}
 let requestCount = 0;
 let observedResource = null;
 let observedOptions = null;
@@ -275,6 +293,9 @@ context.fetchWithTimeout = async (resource, options, timeout, controller, transf
     requestCount += 1;
     observedResource = resource;
     observedOptions = options;
+    if (context.lastChecked.textContent !== '\u6b63\u5728\u68c0\u6d4b \u0032 \u4e2a\u5165\u53e3\u2026') {
+        throw new Error('In-progress service count label mismatch.');
+    }
     if (timeout !== 8000 || controller !== null) throw new Error('Unexpected service API timeout contract.');
     return transform({ ok: true, json: async () => ({ results: [
         { target: 'https://one.home.example.test/', status: 200, latencyMs: 5, error: null },

@@ -769,7 +769,7 @@
         }
 
         html.intro-first.intro-play .service-card {
-            animation: card-reveal 500ms cubic-bezier(0.18, 0.8, 0.25, 1) calc(500ms + var(--card-index) * 40ms) both;
+            animation: card-reveal 500ms cubic-bezier(0.18, 0.8, 0.25, 1) calc(500ms + var(--card-index, 0) * 40ms) both;
         }
 
         html.intro-first.intro-play .dashboard-footer {
@@ -1027,7 +1027,7 @@
             <div class="hero-copy">
                 <p class="eyebrow">Private Infrastructure</p>
                 <h1>HomeLab</h1>
-                <p class="hero-subtitle">Service Dashboard · 11 个家庭服务入口</p>
+                <p class="hero-subtitle">Service Dashboard · <span id="service-count-label">家庭服务入口</span></p>
             </div>
         </header>
 
@@ -1046,7 +1046,7 @@
             </div>
 
             <div class="service-grid" id="service-grid">
-                <a href="https://nas.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 0" aria-label="打开 Synology NAS，数据存储中心">
+                <a href="https://nas.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Synology NAS，数据存储中心">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></svg>
                     </span>
@@ -1056,7 +1056,7 @@
                     </span>
                 </a>
 
-                <a href="https://qbit.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 1" aria-label="打开 qBittorrent，PT 和 BT 下载管理">
+                <a href="https://qbit.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 qBittorrent，PT 和 BT 下载管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0 0 12 0V4M6 8h5M13 8h5"/><path d="M6 4h5v4H6zM13 4h5v4h-5z"/></svg>
                     </span>
@@ -1066,7 +1066,7 @@
                     </span>
                 </a>
 
-                <a href="https://pbh.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 2" aria-label="打开 PeerBanHelper，恶意 Peer 封禁管理">
+                <a href="https://pbh.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 PeerBanHelper，恶意 Peer 封禁管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.9 8 7 10 4.1-2 7-5.2 7-10V6l-7-3Z"/><circle cx="12" cy="9" r="2.2"/><path d="M8.5 15.8c.7-2 2-3 3.5-3s2.8 1 3.5 3"/></svg>
                     </span>
@@ -1076,7 +1076,7 @@
                     </span>
                 </a>
 
-                <a href="https://route.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 3" aria-label="打开 Router OS，核心网关管理">
+                <a href="https://route.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Router OS，核心网关管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="3" y="15" width="18" height="5" rx="1.5"/><path d="M7 15v-3M17 15v-3M5.5 17.5h.01M9 17.5h.01M8 9a6 6 0 0 1 8 0M10.5 11.5a2.5 2.5 0 0 1 3 0"/></svg>
                     </span>
@@ -1086,7 +1086,7 @@
                     </span>
                 </a>
 
-                <a href="https://speed.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 4" aria-label="打开 SpeedTest，内网和外网测速">
+                <a href="https://speed.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 SpeedTest，内网和外网测速">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M4.9 19a9 9 0 1 1 14.2 0"/><path d="m12 13 4-4M8 19h8"/><circle cx="12" cy="13" r="1.5"/></svg>
                     </span>
@@ -1096,7 +1096,7 @@
                     </span>
                 </a>
 
-                <a href="https://anon.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 5" aria-label="打开 Astrbot，智能助理">
+                <a href="https://anon.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Astrbot，智能助理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M9 12h.01M15 12h.01M9 16h6M12 7V4M10 4h4M4 11H2M22 11h-2"/></svg>
                     </span>
@@ -1106,7 +1106,7 @@
                     </span>
                 </a>
 
-                <a href="https://git.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 6" aria-label="打开 Gitea，代码版本管理">
+                <a href="https://git.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Gitea，代码版本管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 10h5a5 5 0 0 0 5-2"/></svg>
                     </span>
@@ -1116,7 +1116,7 @@
                     </span>
                 </a>
 
-                <a href="https://jellyfin.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 7" aria-label="打开 Jellyfin，媒体服务器">
+                <a href="https://jellyfin.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Jellyfin，媒体服务器">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4"/><path d="m11 9 4 3-4 3V9Z"/></svg>
                     </span>
@@ -1126,7 +1126,7 @@
                     </span>
                 </a>
 
-                <a href="https://zoraxy.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 8" aria-label="打开 Zoraxy，反向代理管理">
+                <a href="https://zoraxy.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Zoraxy，反向代理管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.9 8 7 10 4.1-2 7-5.2 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg>
                     </span>
@@ -1136,7 +1136,7 @@
                     </span>
                 </a>
 
-                <a href="https://cliproxy.home.c10h14n2o5.com/" data-probe-url="https://cliproxy.home.c10h14n2o5.com/management.html/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 9" aria-label="打开 CLIProxy，CLI 代理管理">
+                <a href="https://cliproxy.home.c10h14n2o5.com/" data-probe-url="https://cliproxy.home.c10h14n2o5.com/management.html/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 CLIProxy，CLI 代理管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
                     </span>
@@ -1146,7 +1146,7 @@
                     </span>
                 </a>
 
-                <a href="https://kvm.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" style="--card-index: 10" aria-label="打开 IPMI 或 KVM，带外管理">
+                <a href="https://kvm.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 IPMI 或 KVM，带外管理">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 1v3M14 1v3M10 20v3M14 20v3M20 10h3M20 14h3M1 10h3M1 14h3"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg>
                     </span>
@@ -1167,7 +1167,7 @@
                     </svg>
                     <span>切换背景</span>
                 </button>
-                <p id="last-checked">正在检测 11 个入口…</p>
+                <p id="last-checked">正在检测服务入口…</p>
                 <p class="sr-only" id="status-summary" role="status" aria-live="polite"></p>
             </footer>
         </section>
@@ -1924,6 +1924,7 @@
             loadSharedBackgroundPreferences();
 
             const cards = Array.from(document.querySelectorAll('.service-card'));
+            const serviceCountLabel = document.getElementById('service-count-label');
             const refreshButton = document.getElementById('refresh-status');
             const lastChecked = document.getElementById('last-checked');
             const statusSummary = document.getElementById('status-summary');
@@ -1932,6 +1933,13 @@
                 const stateElement = card.querySelector('.service-state');
                 stateElement.dataset.state = state;
                 stateElement.querySelector('.state-label').textContent = label;
+            }
+
+            function initializeServiceCards() {
+                serviceCountLabel.textContent = `${cards.length} 个家庭服务入口`;
+                cards.forEach((card, index) => {
+                    card.style.setProperty('--card-index', String(index));
+                });
             }
 
             function classifyServiceStatus(status) {
@@ -2021,6 +2029,7 @@
                 }
             }
 
+            initializeServiceCards();
             refreshButton.addEventListener('click', refreshStatuses);
             refreshStatuses();
         }());

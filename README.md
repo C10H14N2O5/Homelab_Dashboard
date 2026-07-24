@@ -59,7 +59,7 @@ API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录�
 
 ### 服务入口状态
 
-11 张 `.service-card` 提供导航，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。每次刷新只发送一次同源批量请求。最终 HTTP 状态分类如下：
+当前 11 张 `.service-card` 提供导航，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。页面标题、检测中数量和卡片入场动画序号均根据实际卡片集合自动生成；每次刷新只发送一次同源批量请求。最终 HTTP 状态分类如下：
 
 - 2xx/3xx：绿色“服务端可达”；
 - 4xx：黄色“异常 · HTTP 状态码”；
@@ -262,7 +262,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端两段脚本、11 张卡片、单次批量请求、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则以及维护契约。`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试。
+验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、单次批量请求、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试。
 
 人工部署后还应检查：
 
@@ -278,7 +278,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 ## 维护原则
 
 - 修改后先运行统一验证，不要跳过失败项。
-- 新增服务卡片时同步更新硬编码总数、动画序号、README 和前端验证契约。
+- 新增或删除服务卡片时只需维护卡片 HTML，并手动更新 README 中的当前数量和架构说明；页面数量文案、动画序号和前端验证会根据实际卡片自动适配。
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它背景文件不进入 Git，应独立备份。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。
