@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import socket
 import ssl
@@ -29,6 +30,12 @@ def pem(label: str, der_base64: str) -> str:
 
 TEST_CERTIFICATE_PEM = pem("CERTIFICATE", TEST_CERTIFICATE_DER)
 TEST_PRIVATE_KEY_PEM = pem("PRIVATE KEY", TEST_PRIVATE_KEY_DER)
+
+
+def image_bytes(image_format: str = "PNG") -> bytes:
+    output = io.BytesIO()
+    main.Image.new("RGB", (3, 2), (35, 110, 180)).save(output, format=image_format)
+    return output.getvalue()
 
 
 class TemporaryProject:
@@ -188,6 +195,131 @@ class StoreTests(unittest.TestCase):
         persisted = json.loads(self.config.state_file.read_text(encoding="utf-8"))
         self.assertEqual(set(persisted), {"version", "landscape", "portrait", "updatedAt"})
         self.assertFalse(any(path.name.startswith(".state.json.") for path in self.config.state_dir.iterdir()))
+
+    def test_upload_validates_image_and_uses_collision_safe_names(self) -> None:
+        payload = image_bytes()
+        first = self.store.upload_background("holiday.png", io.BytesIO(payload), len(payload))
+        second = self.store.upload_background("holiday.png", io.BytesIO(payload), len(payload))
+
+        self.assertEqual(first, {"background": "holiday.png", "size": len(payload), "width": 3, "height": 2})
+        self.assertEqual(second["background"], "holiday (2).png")
+        self.assertEqual((self.project.backgrounds / first["background"]).read_bytes(), payload)
+        self.assertEqual((self.project.backgrounds / second["background"]).read_bytes(), payload)
+        self.assertFalse(any(path.name.startswith(".upload-") for path in self.project.backgrounds.iterdir()))
+        self.assertEqual(self.store.get()["landscape"], "bg.jpg")
+
+    def test_upload_rejects_invalid_size_name_format_and_incomplete_body(self) -> None:
+        payload = image_bytes()
+        cases = (
+            ("../holiday.png", io.BytesIO(payload), len(payload), main.InvalidBackground),
+            ("holiday.png", io.BytesIO(payload), main.MAX_BACKGROUND_UPLOAD_BODY + 1, main.UploadTooLarge),
+            ("holiday.jpg", io.BytesIO(payload), len(payload), main.InvalidImage),
+            ("holiday.png", io.BytesIO(b"not an image"), 12, main.InvalidImage),
+            ("holiday.png", io.BytesIO(payload[:-1]), len(payload), main.InvalidImage),
+        )
+        for name, stream, length, expected in cases:
+            with self.subTest(name=name, expected=expected), self.assertRaises(expected):
+                self.store.upload_background(name, stream, length)
+        self.assertFalse(any(path.name.startswith(".upload-") for path in self.project.backgrounds.iterdir()))
+
+    def test_upload_enforces_exact_100_megapixel_limit(self) -> None:
+        class FakeImage:
+            format = "PNG"
+
+            def __init__(self, size: tuple[int, int]) -> None:
+                self.size = size
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def verify(self) -> None:
+                pass
+
+            def load(self) -> None:
+                pass
+
+        at_limit = FakeImage((10_000, 10_000))
+
+        def open_at_limit(path: Path):
+            main.warnings.warn("Pillow threshold", main.Image.DecompressionBombWarning)
+            return at_limit
+
+        with mock.patch.object(main.Image, "open", side_effect=open_at_limit):
+            self.assertEqual(self.store._validate_uploaded_image(Path("ignored"), ".png"), (10_000, 10_000))
+
+        above_limit = FakeImage((10_001, 10_000))
+        with mock.patch.object(main.Image, "open", return_value=above_limit):
+            with self.assertRaisesRegex(main.InvalidImage, "dimensions"):
+                self.store._validate_uploaded_image(Path("ignored"), ".png")
+
+    def test_remove_uses_trash_and_repairs_every_referenced_mode(self) -> None:
+        self.store.update("landscape", "test.jpg")
+        self.store.update("portrait", "test.jpg")
+
+        def simulate_trash(path: str) -> None:
+            Path(path).unlink()
+
+        with mock.patch.object(main, "send2trash", side_effect=simulate_trash) as send_to_trash:
+            disposition, preferences = self.store.remove_background("test.jpg")
+
+        self.assertEqual(disposition, "trash")
+        self.assertEqual(preferences["landscape"], "bg.jpg")
+        self.assertEqual(preferences["portrait"], "bg.jpg")
+        self.assertFalse((self.project.backgrounds / "test.jpg").exists())
+        send_to_trash.assert_called_once_with(str(self.project.backgrounds / "test.jpg"))
+        self.assertEqual(json.loads(self.config.state_file.read_text(encoding="utf-8")), preferences)
+        with self.assertRaises(main.ProtectedBackground):
+            self.store.remove_background("bg.jpg")
+
+    def test_remove_requires_bound_single_use_unexpired_token_for_permanent_delete(self) -> None:
+        now = [100.0]
+        store = main.StateStore(
+            self.config.background_dir,
+            self.config.state_file,
+            lambda: FIXED_TIME,
+            monotonic=lambda: now[0],
+        )
+        store.update("landscape", "test.jpg")
+
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            with self.assertRaises(main.TrashUnavailable) as issued:
+                store.remove_background("test.jpg")
+        token = issued.exception.confirmation_token
+
+        with self.assertRaises(main.InvalidConfirmationToken):
+            store.remove_background("alternate.webp", token)
+        self.assertTrue((self.project.backgrounds / "alternate.webp").exists())
+        with self.assertRaises(main.InvalidConfirmationToken):
+            store.remove_background("test.jpg", token)
+
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            with self.assertRaises(main.TrashUnavailable) as issued:
+                store.remove_background("test.jpg")
+        token = issued.exception.confirmation_token
+        disposition, preferences = store.remove_background("test.jpg", token)
+        self.assertEqual(disposition, "permanent")
+        self.assertEqual(preferences["landscape"], "bg.jpg")
+        self.assertFalse((self.project.backgrounds / "test.jpg").exists())
+
+        expired_payload = image_bytes("JPEG")
+        (self.project.backgrounds / "expiring.jpg").write_bytes(expired_payload)
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            with self.assertRaises(main.TrashUnavailable) as issued:
+                store.remove_background("expiring.jpg")
+        now[0] += main.REMOVAL_TOKEN_TTL_SECONDS + 1
+        with self.assertRaises(main.InvalidConfirmationToken):
+            store.remove_background("expiring.jpg", issued.exception.confirmation_token)
+        self.assertTrue((self.project.backgrounds / "expiring.jpg").exists())
+
+    def test_remove_token_store_is_bounded(self) -> None:
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            for _ in range(main.MAX_REMOVAL_TOKENS + 5):
+                with self.assertRaises(main.TrashUnavailable):
+                    self.store.remove_background("test.jpg")
+        self.assertEqual(len(self.store._removal_tokens), main.MAX_REMOVAL_TOKENS)
 
 
 class FakeResponse:
@@ -515,6 +647,35 @@ class APITests(unittest.TestCase):
             request_headers.update(headers)
         return self.request("POST", main.SERVICE_STATUS_PATH, json.dumps(value).encode(), request_headers)
 
+    def upload(
+        self,
+        name: str,
+        body: bytes,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/octet-stream",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request("POST", f"{main.BACKGROUND_UPLOAD_PATH}?name={name}", body, request_headers)
+
+    def remove(
+        self,
+        value: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request("POST", main.BACKGROUND_REMOVE_PATH, json.dumps(value).encode(), request_headers)
+
     def test_health_and_get_contract(self) -> None:
         status, health = self.request("GET", main.HEALTH_PATH)
         self.assertEqual(status, 200)
@@ -544,6 +705,112 @@ class APITests(unittest.TestCase):
             with self.subTest(value=value, headers=headers):
                 status, _ = self.patch(value, headers)
                 self.assertEqual(status, expected)
+
+    def test_background_upload_contract_and_collision_naming(self) -> None:
+        payload = image_bytes()
+        status, uploaded = self.upload("from-browser.png", payload)
+        self.assertEqual(status, 201)
+        self.assertEqual(
+            uploaded,
+            {
+                "background": "from-browser.png",
+                "size": len(payload),
+                "width": 3,
+                "height": 2,
+            },
+        )
+        self.assertEqual((self.project.backgrounds / "from-browser.png").read_bytes(), payload)
+
+        status, duplicate = self.upload("from-browser.png", payload)
+        self.assertEqual(status, 201)
+        self.assertEqual(duplicate["background"], "from-browser (2).png")
+        self.assertEqual(self.store.get()["landscape"], "bg.jpg")
+
+    def test_background_upload_request_validation(self) -> None:
+        payload = image_bytes()
+        cases = (
+            ("from-browser.png", payload, {"Origin": "https://evil.test"}, 403),
+            ("from-browser.png", payload, {"X-Requested-With": "wrong"}, 403),
+            ("from-browser.png", payload, {"Content-Type": "image/png"}, 415),
+            ("../from-browser.png", payload, None, 400),
+            ("from-browser.jpg", payload, None, 400),
+            ("from-browser.png", b"not an image", None, 400),
+            ("from-browser.png&extra=value", payload, None, 400),
+        )
+        for name, body, headers, expected in cases:
+            with self.subTest(name=name, headers=headers):
+                status, _ = self.upload(name, body, headers)
+                self.assertEqual(status, expected)
+
+        connection = HTTPConnection(self.host, self.port, timeout=2)
+        connection.putrequest("POST", f"{main.BACKGROUND_UPLOAD_PATH}?name=too-large.png")
+        connection.putheader("Origin", TEST_ORIGIN)
+        connection.putheader("X-Requested-With", "homelab-dashboard")
+        connection.putheader("Content-Type", "application/octet-stream")
+        connection.putheader("Content-Length", str(main.MAX_BACKGROUND_UPLOAD_BODY + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read()
+        connection.close()
+
+        status, _ = self.request("GET", main.BACKGROUND_UPLOAD_PATH)
+        self.assertEqual(status, 405)
+
+    def test_background_remove_trash_and_permanent_fallback_contract(self) -> None:
+        self.store.update("landscape", "test.jpg")
+        self.store.update("portrait", "test.jpg")
+
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            status, conflict = self.remove({"background": "test.jpg"})
+        self.assertEqual(status, 409)
+        self.assertEqual(conflict["error"], "trash_unavailable")
+        self.assertEqual(conflict["expiresIn"], main.REMOVAL_TOKEN_TTL_SECONDS)
+        self.assertIsInstance(conflict["confirmationToken"], str)
+        self.assertTrue((self.project.backgrounds / "test.jpg").exists())
+
+        status, removed = self.remove(
+            {
+                "background": "test.jpg",
+                "confirmationToken": conflict["confirmationToken"],
+            }
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(removed["background"], "test.jpg")
+        self.assertEqual(removed["disposition"], "permanent")
+        self.assertEqual(removed["preferences"]["landscape"], "bg.jpg")
+        self.assertEqual(removed["preferences"]["portrait"], "bg.jpg")
+        self.assertFalse((self.project.backgrounds / "test.jpg").exists())
+
+    def test_background_remove_validation_and_trash_success(self) -> None:
+        cases = (
+            ({"background": "bg.jpg"}, None, 400),
+            ({"background": "../test.jpg"}, None, 400),
+            ({"background": "missing.jpg"}, None, 404),
+            ({"background": "test.jpg", "confirmationToken": "invalid"}, None, 403),
+            ({"background": "test.jpg", "extra": True}, None, 400),
+            ({"background": ["test.jpg"]}, None, 400),
+            ({"background": "test.jpg"}, {"Origin": "https://evil.test"}, 403),
+            ({"background": "test.jpg"}, {"Content-Type": "text/plain"}, 415),
+        )
+        for value, headers, expected in cases:
+            with self.subTest(value=value, headers=headers):
+                status, _ = self.remove(value, headers)
+                self.assertEqual(status, expected)
+
+        self.store.update("landscape", "alternate.webp")
+
+        def simulate_trash(path: str) -> None:
+            Path(path).unlink()
+
+        with mock.patch.object(main, "send2trash", side_effect=simulate_trash):
+            status, removed = self.remove({"background": "alternate.webp"})
+        self.assertEqual(status, 200)
+        self.assertEqual(removed["disposition"], "trash")
+        self.assertEqual(removed["preferences"]["landscape"], "bg.jpg")
+
+        status, _ = self.request("GET", main.BACKGROUND_REMOVE_PATH)
+        self.assertEqual(status, 405)
 
     def test_service_status_contract_and_partial_failure(self) -> None:
         targets = ["https://one.home.example.test/", "https://two.home.example.test/"]

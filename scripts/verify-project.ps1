@@ -65,6 +65,7 @@ $maintenanceContracts = @(
     @{ Name = 'packaged executable health check'; Source = $buildSource; Marker = '/healthz' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
+    @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
@@ -145,10 +146,15 @@ cards.forEach((tag, index) => {
 
 const requiredMarkers = [
     '/api/background-preferences',
+    '/api/background-files/upload',
+    '/api/background-files/remove',
     '/api/service-status',
     'homelab-background-state-cache-v1',
     'data-background-mode="landscape"',
     'data-background-mode="portrait"',
+    'id="background-upload-button"',
+    'id="background-delete-button"',
+    'id="background-delete-dialog"',
     'fetchWithTimeout',
     'classifyServiceStatus',
     'data-state="warning"',
@@ -158,6 +164,11 @@ const requiredMarkers = [
     'data-state="unknown"',
     'backgroundScanPending',
     'reconcileSharedBackgroundPreference',
+    'validateBackgroundUploadFile',
+    'backgroundModesUsingFile',
+    "'Content-Type': 'application/octet-stream'",
+    "errorCode === 'trash_unavailable'",
+    'result.payload && result.payload.preferences',
     'id="service-count-label"',
     'initializeServiceCards',
     "'X-Requested-With': 'homelab-dashboard'"
@@ -224,6 +235,112 @@ await expectRejection(
 );
 if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.currentSource !== 'data:,') {
     throw new Error('Image timeout did not clean up handlers and cancel the source.');
+}
+
+const backgroundManagerHelperStart = runtimeScript.indexOf('function validateBackgroundUploadFile(');
+const backgroundManagerHelperEnd = runtimeScript.indexOf('function backgroundUrlFromName(', backgroundManagerHelperStart);
+if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
+    throw new Error('Unable to extract background file manager helpers for behavior checks.');
+}
+vm.runInContext(
+    runtimeScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
+        + '\nglobalThis.__backgroundManagerHelpers = { validateBackgroundUploadFile, backgroundModesUsingFile };',
+    context
+);
+
+const validUpload = { name: 'wallpaper.avif', size: 50 * 1024 * 1024 };
+if (context.__backgroundManagerHelpers.validateBackgroundUploadFile(validUpload) !== '') {
+    throw new Error('A supported upload at the 50 MiB boundary was rejected.');
+}
+if (!context.__backgroundManagerHelpers.validateBackgroundUploadFile({ name: 'wallpaper.gif', size: 1024 })) {
+    throw new Error('An unsupported upload extension was accepted.');
+}
+if (!context.__backgroundManagerHelpers.validateBackgroundUploadFile({ name: 'wallpaper.png', size: 0 })) {
+    throw new Error('An empty upload was accepted.');
+}
+if (!context.__backgroundManagerHelpers.validateBackgroundUploadFile({
+    name: 'wallpaper.webp',
+    size: 50 * 1024 * 1024 + 1
+})) {
+    throw new Error('An upload larger than 50 MiB was accepted.');
+}
+const affectedModes = context.__backgroundManagerHelpers.backgroundModesUsingFile('shared.jpg', {
+    landscape: 'shared.jpg',
+    portrait: 'shared.jpg'
+});
+if (JSON.stringify(Array.from(affectedModes)) !== JSON.stringify(['landscape', 'portrait'])) {
+    throw new Error('Background deletion impact modes were not derived from both preferences.');
+}
+
+const uploadFunctionStart = runtimeScript.indexOf('async function uploadBackgroundFile(');
+const uploadFunctionEnd = runtimeScript.indexOf('function backgroundDeleteDialogIsOpen(', uploadFunctionStart);
+if (uploadFunctionStart < 0 || uploadFunctionEnd < 0) {
+    throw new Error('Unable to extract the background upload implementation.');
+}
+const uploadFunctionSource = runtimeScript.slice(uploadFunctionStart, uploadFunctionEnd);
+if (!uploadFunctionSource.includes('endpoint.searchParams.set(\'name\', file.name)')
+    || !uploadFunctionSource.includes("method: 'POST'")
+    || !uploadFunctionSource.includes("'Content-Type': 'application/octet-stream'")
+    || !uploadFunctionSource.includes('}, 60000, null')
+    || uploadFunctionSource.includes("requestBackgroundPreferences('PATCH'")) {
+    throw new Error('Background upload request or no-auto-select contract mismatch.');
+}
+
+const removalRequestStart = runtimeScript.indexOf('async function requestBackgroundRemoval(');
+const removalRequestEnd = runtimeScript.indexOf('async function confirmBackgroundDeletion(', removalRequestStart);
+if (removalRequestStart < 0 || removalRequestEnd < 0) {
+    throw new Error('Unable to extract the background removal request for behavior checks.');
+}
+vm.runInContext(
+    runtimeScript.slice(removalRequestStart, removalRequestEnd)
+        + '\nglobalThis.__requestBackgroundRemoval = requestBackgroundRemoval;',
+    context
+);
+context.backgroundRemoveEndpoint = { href: 'https://home.example.test/api/background-files/remove' };
+let observedRemovalOptions = null;
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
+    observedRemovalOptions = { resource, options, timeout, controller };
+    return transform({
+        ok: false,
+        status: 409,
+        json: async () => ({
+            error: 'trash_unavailable',
+            confirmationToken: 'single-use-token',
+            expiresIn: 60
+        })
+    });
+};
+const permanentConfirmation = await context.__requestBackgroundRemoval({ background: 'shared.jpg' });
+if (!permanentConfirmation.requiresPermanentConfirmation
+    || permanentConfirmation.confirmationToken !== 'single-use-token'
+    || permanentConfirmation.expiresIn !== 60) {
+    throw new Error('Trash failure did not produce the permanent-delete confirmation state.');
+}
+if (observedRemovalOptions.resource !== context.backgroundRemoveEndpoint.href
+    || observedRemovalOptions.options.method !== 'POST'
+    || observedRemovalOptions.options.credentials !== 'same-origin'
+    || observedRemovalOptions.timeout !== 10000
+    || observedRemovalOptions.controller !== null
+    || JSON.parse(observedRemovalOptions.options.body).background !== 'shared.jpg') {
+    throw new Error('Background removal request contract mismatch.');
+}
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => transform({
+    ok: true,
+    status: 200,
+    json: async () => ({
+        deletionMode: 'trash',
+        preferences: {
+            version: 1,
+            landscape: 'bg.jpg',
+            portrait: 'bg.jpg',
+            updatedAt: '2026-07-24T00:00:00Z'
+        }
+    })
+});
+const successfulRemoval = await context.__requestBackgroundRemoval({ background: 'shared.jpg' });
+if (successfulRemoval.requiresPermanentConfirmation
+    || successfulRemoval.payload.preferences.landscape !== 'bg.jpg') {
+    throw new Error('Successful removal did not retain the nested preference response.');
 }
 
 const serviceHelperStart = runtimeScript.indexOf('function setCardState(');

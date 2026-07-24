@@ -463,6 +463,8 @@
         .background-picker-button:focus-visible,
         .dialog-close:focus-visible,
         .background-mode-button:focus-visible,
+        .background-action-button:focus-visible,
+        .background-delete-dialog button:focus-visible,
         .background-option:focus-visible {
             outline: 3px solid rgba(125, 211, 252, 0.9);
             outline-offset: 3px;
@@ -631,6 +633,55 @@
             opacity: 0.62;
         }
 
+        .background-action-bar {
+            margin: 0.7rem 1.15rem 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+
+        .background-action-button {
+            min-height: 2.35rem;
+            padding: 0.48rem 0.82rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            color: var(--muted);
+            background: rgba(15, 31, 51, 0.72);
+            border: 1px solid rgba(226, 232, 240, 0.13);
+            border-radius: 0.72rem;
+            cursor: pointer;
+            transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+        }
+
+        .background-action-button:hover:not(:disabled) {
+            color: var(--text);
+            background: rgba(22, 45, 72, 0.78);
+            border-color: rgba(125, 211, 252, 0.38);
+        }
+
+        .background-action-button:active:not(:disabled) {
+            transform: translateY(1px);
+        }
+
+        .background-action-button[data-kind="danger"] {
+            color: #fecdd3;
+            border-color: rgba(251, 113, 133, 0.28);
+        }
+
+        .background-action-button[data-kind="danger"]:hover:not(:disabled) {
+            color: #ffe4e6;
+            background: rgba(127, 29, 29, 0.34);
+            border-color: rgba(251, 113, 133, 0.52);
+        }
+
+        .background-action-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.48;
+            transform: none;
+        }
+
         .background-picker-status {
             margin: 0;
             padding: 0.75rem 1.15rem 0;
@@ -723,6 +774,62 @@
 
         .background-option[aria-pressed="true"] .background-option-check {
             display: grid;
+        }
+
+        .background-delete-dialog {
+            width: min(28rem, calc(100vw - 2rem));
+            max-width: none;
+            margin: auto;
+            padding: 0;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.98);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1rem;
+            box-shadow: 0 28px 80px rgba(2, 8, 23, 0.7);
+            opacity: 0;
+            transform: translateY(8px) scale(0.98);
+            transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .background-delete-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .background-delete-dialog::backdrop {
+            background: rgba(2, 8, 23, 0.72);
+            -webkit-backdrop-filter: blur(5px);
+            backdrop-filter: blur(5px);
+        }
+
+        .background-delete-shell {
+            padding: 1.15rem;
+        }
+
+        .background-delete-shell h2 {
+            margin: 0;
+            font-size: 1.05rem;
+            line-height: 1.35;
+        }
+
+        .background-delete-shell p {
+            margin: 0.65rem 0 0;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.65;
+            overflow-wrap: anywhere;
+        }
+
+        .background-delete-shell .background-delete-status {
+            min-height: 1.3rem;
+            color: #fda4af;
+        }
+
+        .background-delete-actions {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.55rem;
         }
 
         .sr-only {
@@ -981,6 +1088,14 @@
                 margin-inline: 0.85rem;
             }
 
+            .background-action-bar {
+                margin-inline: 0.85rem;
+            }
+
+            .background-action-button {
+                flex: 1 1 9rem;
+            }
+
             .background-mode-button {
                 flex-direction: column;
                 gap: 0.08rem;
@@ -1003,6 +1118,10 @@
             }
 
             .background-dialog {
+                transform: none;
+            }
+
+            .background-delete-dialog {
                 transform: none;
             }
 
@@ -1194,8 +1313,29 @@
                     <small>手机 / 纵向视图</small>
                 </button>
             </div>
+            <div class="background-action-bar" aria-label="管理背景图片">
+                <button class="background-action-button" id="background-upload-button" type="button" disabled>
+                    上传图片
+                </button>
+                <input class="sr-only" id="background-upload-input" type="file" accept=".jpg,.jpeg,.png,.webp,.avif,image/jpeg,image/png,image/webp,image/avif">
+                <button class="background-action-button" id="background-delete-button" type="button" data-kind="danger" disabled>
+                    删除当前背景
+                </button>
+            </div>
             <p class="background-picker-status" id="background-picker-status" role="status" aria-live="polite">准备扫描背景目录…</p>
             <div class="background-grid" id="background-grid" aria-busy="false"></div>
+        </div>
+    </dialog>
+
+    <dialog class="background-delete-dialog" id="background-delete-dialog" aria-labelledby="background-delete-title" aria-describedby="background-delete-description">
+        <div class="background-delete-shell">
+            <h2 id="background-delete-title">删除背景图片？</h2>
+            <p id="background-delete-description"></p>
+            <p class="background-delete-status" id="background-delete-status" role="status" aria-live="polite"></p>
+            <div class="background-delete-actions">
+                <button class="background-action-button" id="background-delete-cancel" type="button">取消</button>
+                <button class="background-action-button" id="background-delete-confirm" type="button" data-kind="danger">移入回收站</button>
+            </div>
         </div>
     </dialog>
 
@@ -1225,6 +1365,8 @@
             const defaultBackground = new URL('bg.jpg', backgroundDirectory);
             const defaultBackgroundName = 'bg.jpg';
             const backgroundPreferencesEndpoint = new URL('/api/background-preferences', document.baseURI);
+            const backgroundUploadEndpoint = new URL('/api/background-files/upload', document.baseURI);
+            const backgroundRemoveEndpoint = new URL('/api/background-files/remove', document.baseURI);
             const serviceStatusEndpoint = new URL('/api/service-status', document.baseURI);
             const backgroundPreferencesCacheKey = 'homelab-background-state-cache-v1';
             const legacyBackgroundStorageKey = 'homelab-background';
@@ -1242,6 +1384,15 @@
             const backgroundGrid = document.getElementById('background-grid');
             const backgroundPickerStatus = document.getElementById('background-picker-status');
             const backgroundModeButtons = Array.from(backgroundDialog.querySelectorAll('[data-background-mode]'));
+            const backgroundUploadButton = document.getElementById('background-upload-button');
+            const backgroundUploadInput = document.getElementById('background-upload-input');
+            const backgroundDeleteButton = document.getElementById('background-delete-button');
+            const backgroundDeleteDialog = document.getElementById('background-delete-dialog');
+            const backgroundDeleteTitle = document.getElementById('background-delete-title');
+            const backgroundDeleteDescription = document.getElementById('background-delete-description');
+            const backgroundDeleteStatus = document.getElementById('background-delete-status');
+            const backgroundDeleteCancel = document.getElementById('background-delete-cancel');
+            const backgroundDeleteConfirm = document.getElementById('background-delete-confirm');
             let backgroundScanSequence = 0;
             let backgroundScanController = null;
             let backgroundScanPending = false;
@@ -1251,6 +1402,10 @@
             let backgroundPreferencesReadSequence = 0;
             let backgroundPreferencesWriteSequence = 0;
             let backgroundWritePending = false;
+            let backgroundUploadPending = false;
+            let backgroundDeletePending = false;
+            let backgroundDeleteRequest = null;
+            let backgroundDeleteReturnFocus = null;
             let backgroundPreferencesConnection = 'loading';
             let editingBackgroundModeTouched = false;
 
@@ -1291,6 +1446,30 @@
                 ) return null;
 
                 return value;
+            }
+
+            function validateBackgroundUploadFile(file) {
+                const maximumBytes = 50 * 1024 * 1024;
+                const supportedExtension = /\.(?:jpe?g|png|webp|avif)$/i;
+
+                if (!file || typeof file.name !== 'string' || typeof file.size !== 'number') {
+                    return '请选择一张图片。';
+                }
+                if (!supportedExtension.test(file.name)) {
+                    return '仅支持 JPEG、PNG、WebP 或 AVIF 图片。';
+                }
+                if (file.size <= 0) {
+                    return '不能上传空文件。';
+                }
+                if (file.size > maximumBytes) {
+                    return '图片不能超过 50 MiB。';
+                }
+                return '';
+            }
+
+            function backgroundModesUsingFile(fileName, preferences) {
+                if (typeof fileName !== 'string' || !preferences || typeof preferences !== 'object') return [];
+                return ['landscape', 'portrait'].filter((mode) => preferences[mode] === fileName);
             }
 
             function backgroundUrlFromName(value) {
@@ -1436,7 +1615,17 @@
             }
 
             function syncBackgroundControlsBusy() {
-                const isBusy = backgroundScanPending || backgroundWritePending;
+                const isBusy = backgroundScanPending
+                    || backgroundWritePending
+                    || backgroundUploadPending
+                    || backgroundDeletePending;
+                const managerOnline = backgroundPreferencesConnection === 'online';
+                const selectedName = normalizeBackgroundName(backgroundPreferences[editingBackgroundMode]);
+                const canDelete = managerOnline
+                    && !isBusy
+                    && Boolean(selectedName)
+                    && selectedName.toLowerCase() !== defaultBackgroundName;
+
                 backgroundGrid.setAttribute('aria-busy', String(isBusy));
                 backgroundModeButtons.forEach((button) => {
                     button.disabled = isBusy;
@@ -1444,6 +1633,13 @@
                 backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
                     option.disabled = isBusy;
                 });
+                backgroundUploadButton.disabled = isBusy || !managerOnline;
+                backgroundUploadInput.disabled = isBusy || !managerOnline;
+                backgroundDeleteButton.disabled = !canDelete;
+                backgroundDeleteButton.setAttribute(
+                    'aria-label',
+                    canDelete ? `删除当前${backgroundModeLabels[editingBackgroundMode]}背景 ${selectedName}` : '删除当前背景'
+                );
             }
 
             function updateBackgroundModeControls() {
@@ -1462,6 +1658,7 @@
                         `将 ${backgroundFileName(new URL(option.dataset.url))} 设置为${backgroundModeLabels[editingBackgroundMode]}背景${isSelected ? '，当前已选' : ''}`
                     );
                 });
+                syncBackgroundControlsBusy();
             }
 
             async function applyDisplayedBackground(url, options = {}) {
@@ -1567,6 +1764,7 @@
                 } catch (error) {
                     if (requestId !== backgroundPreferencesReadSequence) return;
                     backgroundPreferencesConnection = 'offline';
+                    syncBackgroundControlsBusy();
                     console.warn('无法读取共享背景状态，继续使用本地缓存或默认背景。', error);
                     if (backgroundDialogIsOpen()) {
                         setBackgroundStatus('跨设备同步服务暂不可用，已继续使用最近缓存或默认背景。', 'error');
@@ -1602,6 +1800,7 @@
                         return false;
                     }
                     backgroundPreferencesConnection = 'offline';
+                    syncBackgroundControlsBusy();
                     console.warn('共享背景设置失败，且无法向服务器核对最终状态。', patchError, reconcileError);
                     setBackgroundStatus('同步请求结果暂时无法确认；请恢复连接后刷新页面核对。', 'error');
                     return false;
@@ -1718,7 +1917,299 @@
                 syncBackgroundControlsBusy();
             }
 
-            async function scanBackgroundDirectory() {
+            function focusBackgroundOption(fileName) {
+                const candidate = backgroundUrlFromName(fileName);
+                if (!candidate) return false;
+                const option = Array.from(backgroundGrid.querySelectorAll('.background-option'))
+                    .find((item) => item.dataset.url === candidate.href && !item.disabled);
+                if (!option) return false;
+
+                if (typeof option.scrollIntoView === 'function') {
+                    option.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
+                focusWithoutScroll(option);
+                return true;
+            }
+
+            async function uploadBackgroundFile(file) {
+                const validationError = validateBackgroundUploadFile(file);
+                if (validationError) {
+                    setBackgroundStatus(validationError, 'error');
+                    return false;
+                }
+                if (
+                    backgroundPreferencesConnection !== 'online'
+                    || backgroundScanPending
+                    || backgroundWritePending
+                    || backgroundUploadPending
+                    || backgroundDeletePending
+                ) {
+                    setBackgroundStatus('背景管理服务正忙或暂不可用，请稍后再试。', 'error');
+                    return false;
+                }
+
+                let uploadedName = '';
+                backgroundUploadPending = true;
+                syncBackgroundControlsBusy();
+                setBackgroundStatus(`正在上传 ${file.name}…`);
+
+                try {
+                    const endpoint = new URL(backgroundUploadEndpoint.href);
+                    endpoint.searchParams.set('name', file.name);
+                    const payload = await fetchWithTimeout(endpoint.href, {
+                        method: 'POST',
+                        cache: 'no-store',
+                        credentials: 'same-origin',
+                        headers: {
+                            Accept: 'application/json',
+                            'Content-Type': 'application/octet-stream',
+                            'X-Requested-With': 'homelab-dashboard'
+                        },
+                        body: file
+                    }, 60000, null, async (response) => {
+                        let responsePayload = null;
+                        try {
+                            responsePayload = await response.json();
+                        } catch (error) {
+                            // The status code remains useful when an intermediary returns a non-JSON error page.
+                        }
+                        if (!response.ok) {
+                            const detail = responsePayload && (
+                                responsePayload.message
+                                || responsePayload.error
+                                || responsePayload.code
+                            );
+                            throw new Error(typeof detail === 'string' ? detail : `上传接口返回 ${response.status}`);
+                        }
+                        return responsePayload;
+                    });
+
+                    uploadedName = normalizeBackgroundName(payload && payload.background) || '';
+                    if (!uploadedName) throw new Error('上传接口返回了无效文件名');
+                    await scanBackgroundDirectory({
+                        successMessage: `已上传 ${uploadedName}，未更改当前背景。`
+                    });
+                    return true;
+                } catch (error) {
+                    console.warn('背景图片上传失败。', error);
+                    setBackgroundStatus(`上传失败：${error.message || '未知错误'}`, 'error');
+                    return false;
+                } finally {
+                    backgroundUploadPending = false;
+                    syncBackgroundControlsBusy();
+                    if (uploadedName) focusBackgroundOption(uploadedName);
+                }
+            }
+
+            function backgroundDeleteDialogIsOpen() {
+                return backgroundDeleteDialog.open || backgroundDeleteDialog.hasAttribute('open');
+            }
+
+            function syncBackgroundDeleteDialogControls() {
+                backgroundDeleteCancel.disabled = backgroundDeletePending;
+                backgroundDeleteConfirm.disabled = backgroundDeletePending;
+                backgroundDeleteConfirm.setAttribute('aria-busy', String(backgroundDeletePending));
+            }
+
+            function deletionImpactText(fileName, modes) {
+                const modeText = modes.length
+                    ? `${modes.map((mode) => backgroundModeLabels[mode]).join('、')}设置会回退到 ${defaultBackgroundName}。`
+                    : '当前共享设置不会改变。';
+                return `目标文件：“${fileName}”。${modeText}`;
+            }
+
+            function showBackgroundDeleteStage(stage, confirmationToken = '', expiresIn = 0) {
+                if (!backgroundDeleteRequest) return;
+                backgroundDeleteRequest.stage = stage;
+                backgroundDeleteRequest.confirmationToken = confirmationToken;
+                backgroundDeleteTitle.textContent = stage === 'permanent' ? '永久删除背景图片？' : '删除背景图片？';
+                backgroundDeleteDescription.textContent = stage === 'permanent'
+                    ? `无法将图片移入系统回收站。永久删除后无法恢复。${deletionImpactText(backgroundDeleteRequest.background, backgroundDeleteRequest.modes)}`
+                    : `图片会先移入系统回收站。${deletionImpactText(backgroundDeleteRequest.background, backgroundDeleteRequest.modes)}`;
+                backgroundDeleteConfirm.textContent = stage === 'permanent' ? '永久删除' : '移入回收站';
+                backgroundDeleteStatus.textContent = stage === 'permanent'
+                    ? `请再次确认永久删除${expiresIn > 0 ? `；确认将在 ${expiresIn} 秒后失效` : ''}。`
+                    : '';
+            }
+
+            function closeBackgroundDeleteDialog(returnValue = '', restoreFocus = true) {
+                if (backgroundDeletePending) return;
+                const returnFocus = backgroundDeleteReturnFocus;
+                backgroundDeleteDialog.classList.remove('is-visible');
+                if (typeof backgroundDeleteDialog.close === 'function' && backgroundDeleteDialog.open) {
+                    backgroundDeleteDialog.close(returnValue);
+                } else {
+                    backgroundDeleteDialog.removeAttribute('open');
+                }
+                backgroundDeleteRequest = null;
+                backgroundDeleteReturnFocus = null;
+                backgroundDeleteStatus.textContent = '';
+                if (restoreFocus) {
+                    window.requestAnimationFrame(() => focusWithoutScroll(returnFocus));
+                }
+            }
+
+            function openBackgroundDeleteDialog() {
+                const fileName = normalizeBackgroundName(backgroundPreferences[editingBackgroundMode]);
+                const isBusy = backgroundScanPending
+                    || backgroundWritePending
+                    || backgroundUploadPending
+                    || backgroundDeletePending;
+                if (
+                    !fileName
+                    || fileName.toLowerCase() === defaultBackgroundName
+                    || backgroundPreferencesConnection !== 'online'
+                    || isBusy
+                ) return false;
+
+                backgroundDeleteReturnFocus = document.activeElement || backgroundDeleteButton;
+                backgroundDeleteRequest = {
+                    background: fileName,
+                    modes: backgroundModesUsingFile(fileName, backgroundPreferences),
+                    stage: 'trash',
+                    confirmationToken: ''
+                };
+                showBackgroundDeleteStage('trash');
+                syncBackgroundDeleteDialogControls();
+
+                if (typeof backgroundDeleteDialog.showModal === 'function') {
+                    if (!backgroundDeleteDialog.open) backgroundDeleteDialog.showModal();
+                } else {
+                    backgroundDeleteDialog.setAttribute('open', '');
+                }
+
+                const revealAndFocus = () => {
+                    if (!backgroundDeleteDialogIsOpen()) return;
+                    backgroundDeleteDialog.classList.add('is-visible');
+                    focusWithoutScroll(backgroundDeleteConfirm);
+                };
+                if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    revealAndFocus();
+                } else {
+                    window.requestAnimationFrame(() => window.requestAnimationFrame(revealAndFocus));
+                }
+                return true;
+            }
+
+            async function requestBackgroundRemoval(request) {
+                return fetchWithTimeout(backgroundRemoveEndpoint.href, {
+                    method: 'POST',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'homelab-dashboard'
+                    },
+                    body: JSON.stringify(request)
+                }, 10000, null, async (response) => {
+                    let payload = null;
+                    try {
+                        payload = await response.json();
+                    } catch (error) {
+                        // A non-JSON intermediary error is reported using its HTTP status below.
+                    }
+
+                    const errorCode = payload && (
+                        typeof payload.error === 'string'
+                            ? payload.error
+                            : payload.error && payload.error.code
+                    );
+                    if (response.status === 409 && errorCode === 'trash_unavailable') {
+                        const confirmationToken = payload && payload.confirmationToken;
+                        if (typeof confirmationToken !== 'string' || !confirmationToken) {
+                            throw new Error('删除接口未返回有效的永久删除确认令牌');
+                        }
+                        return {
+                            requiresPermanentConfirmation: true,
+                            confirmationToken,
+                            expiresIn: Number.isFinite(payload.expiresIn) ? payload.expiresIn : 0
+                        };
+                    }
+                    if (!response.ok) {
+                        const detail = payload && (
+                            payload.message
+                            || (typeof payload.error === 'string' ? payload.error : null)
+                            || payload.code
+                        );
+                        throw new Error(typeof detail === 'string' ? detail : `删除接口返回 ${response.status}`);
+                    }
+                    return {
+                        requiresPermanentConfirmation: false,
+                        payload
+                    };
+                });
+            }
+
+            async function confirmBackgroundDeletion() {
+                if (!backgroundDeleteRequest || backgroundDeletePending) return false;
+                const request = backgroundDeleteRequest;
+                const requestBody = { background: request.background };
+                if (request.stage === 'permanent') {
+                    if (!request.confirmationToken) {
+                        backgroundDeleteStatus.textContent = '永久删除确认已失效，请取消后重试。';
+                        return false;
+                    }
+                    requestBody.confirmationToken = request.confirmationToken;
+                }
+
+                backgroundDeletePending = true;
+                syncBackgroundControlsBusy();
+                syncBackgroundDeleteDialogControls();
+                backgroundDeleteStatus.textContent = request.stage === 'permanent'
+                    ? '正在永久删除图片…'
+                    : '正在将图片移入回收站…';
+
+                try {
+                    const result = await requestBackgroundRemoval(requestBody);
+                    if (result.requiresPermanentConfirmation) {
+                        showBackgroundDeleteStage(
+                            'permanent',
+                            result.confirmationToken,
+                            result.expiresIn
+                        );
+                        setBackgroundStatus('系统回收站不可用；如需继续，请在确认窗口中再次确认永久删除。', 'error');
+                        return false;
+                    }
+
+                    const preferences = normalizeBackgroundPreferences(result.payload && result.payload.preferences);
+                    if (!preferences) throw new Error('删除接口返回了无效背景设置');
+
+                    ++backgroundPreferencesReadSequence;
+                    acceptSharedBackgroundPreferences(preferences);
+                    activeBackgroundMode = currentOrientationMode();
+                    await applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
+                        fallbackToDefault: true
+                    });
+
+                    const deletedName = request.background;
+                    const deletionLabel = request.stage === 'permanent' ? '已永久删除' : '已移入回收站';
+                    backgroundDeletePending = false;
+                    syncBackgroundControlsBusy();
+                    syncBackgroundDeleteDialogControls();
+                    closeBackgroundDeleteDialog('deleted', false);
+                    await scanBackgroundDirectory({
+                        successMessage: `${deletedName} ${deletionLabel}；相关设置已回退到 ${defaultBackgroundName}。`
+                    });
+                    focusBackgroundOption(backgroundPreferences[editingBackgroundMode]);
+                    return true;
+                } catch (error) {
+                    console.warn('背景图片删除失败。', error);
+                    const message = `删除失败：${error.message || '未知错误'}`;
+                    backgroundDeleteStatus.textContent = message;
+                    setBackgroundStatus(message, 'error');
+                    return false;
+                } finally {
+                    if (backgroundDeletePending) {
+                        backgroundDeletePending = false;
+                        syncBackgroundControlsBusy();
+                        syncBackgroundDeleteDialogControls();
+                        focusWithoutScroll(backgroundDeleteConfirm);
+                    }
+                }
+            }
+
+            async function scanBackgroundDirectory(options = {}) {
                 if (backgroundScanController) backgroundScanController.abort();
                 const scanId = ++backgroundScanSequence;
                 const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -1766,7 +2257,9 @@
                     });
 
                     renderBackgroundOptions(urls);
-                    if (backgroundPreferencesConnection === 'offline') {
+                    if (options.successMessage) {
+                        setBackgroundStatus(options.successMessage, 'success');
+                    } else if (backgroundPreferencesConnection === 'offline') {
                         setBackgroundStatus(`发现 ${urls.length} 张背景图片，但跨设备同步服务暂不可用。`, 'error');
                     } else {
                         setBackgroundStatus(`发现 ${urls.length} 张背景图片，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
@@ -1792,7 +2285,13 @@
             }
 
             function setEditingBackgroundMode(mode, announce = true) {
-                if (!backgroundModes.includes(mode) || backgroundWritePending) return false;
+                if (
+                    !backgroundModes.includes(mode)
+                    || backgroundScanPending
+                    || backgroundWritePending
+                    || backgroundUploadPending
+                    || backgroundDeletePending
+                ) return false;
                 editingBackgroundMode = mode;
                 updateBackgroundModeControls();
                 updateBackgroundSelection();
@@ -1806,6 +2305,31 @@
                         editingBackgroundModeTouched = true;
                     }
                 });
+            });
+
+            backgroundUploadButton.addEventListener('click', () => {
+                if (!backgroundUploadButton.disabled) backgroundUploadInput.click();
+            });
+
+            backgroundUploadInput.addEventListener('change', () => {
+                const file = backgroundUploadInput.files && backgroundUploadInput.files[0];
+                backgroundUploadInput.value = '';
+                if (file) uploadBackgroundFile(file);
+            });
+
+            backgroundDeleteButton.addEventListener('click', openBackgroundDeleteDialog);
+            backgroundDeleteCancel.addEventListener('click', () => closeBackgroundDeleteDialog('cancel'));
+            backgroundDeleteConfirm.addEventListener('click', confirmBackgroundDeletion);
+
+            backgroundDeleteDialog.addEventListener('cancel', (event) => {
+                event.preventDefault();
+                if (!backgroundDeletePending) closeBackgroundDeleteDialog('cancel');
+            });
+
+            backgroundDeleteDialog.addEventListener('click', (event) => {
+                if (event.target === backgroundDeleteDialog && !backgroundDeletePending) {
+                    closeBackgroundDeleteDialog('backdrop');
+                }
             });
 
             function backgroundDialogIsOpen() {
@@ -1903,7 +2427,13 @@
 
             function handleOrientationChange() {
                 activeBackgroundMode = currentOrientationMode();
-                if (backgroundDialogIsOpen() && !editingBackgroundModeTouched && !backgroundWritePending) {
+                if (
+                    backgroundDialogIsOpen()
+                    && !editingBackgroundModeTouched
+                    && !backgroundWritePending
+                    && !backgroundUploadPending
+                    && !backgroundDeletePending
+                ) {
                     setEditingBackgroundMode(activeBackgroundMode, false);
                 }
                 applyDisplayedBackground(backgroundUrlForMode(activeBackgroundMode), {
@@ -1921,6 +2451,7 @@
                 animate: false,
                 fallbackToDefault: true
             });
+            syncBackgroundControlsBusy();
             loadSharedBackgroundPreferences();
 
             const cards = Array.from(document.querySelectorAll('.service-card'));

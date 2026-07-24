@@ -51,9 +51,9 @@ if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or
 if ($LASTEXITCODE -ne 0) {
     throw "Python failed with exit code $LASTEXITCODE"
 }
-& $resolvedPython -c 'import PyInstaller; print(PyInstaller.__version__)'
+& $resolvedPython -c "import PIL, PyInstaller, send2trash; from PIL import features; required = {'JPEG': 'jpg', 'PNG': 'zlib', 'WebP': 'webp', 'AVIF': 'avif'}; missing = [name for name, feature in required.items() if not features.check(feature)]; assert not missing, 'Pillow is missing required codec support: ' + ', '.join(missing); print('PyInstaller', PyInstaller.__version__); print('Pillow', PIL.__version__, 'codecs:', ', '.join(required)); print('Send2Trash import ok')"
 if ($LASTEXITCODE -ne 0) {
-    throw 'PyInstaller is unavailable. Install the pinned requirements with: python -m pip install -r requirements.txt'
+    throw 'A pinned build/runtime dependency or required Pillow codec is unavailable. Install requirements with: python -m pip install -r requirements.txt'
 }
 
 Write-Host 'Checking Python syntax...'
@@ -230,6 +230,34 @@ try {
             -TimeoutSec 2
         if ($patched.landscape -ne 'test.jpg') {
             throw 'Packaged executable failed the PATCH compatibility smoke test.'
+        }
+
+        $smokePngBytes = [Convert]::FromBase64String(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+        )
+        $uploadResponse = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/api/background-files/upload?name=smoke.png" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/octet-stream' `
+            -Body $smokePngBytes `
+            -TimeoutSec 5
+        if ($uploadResponse.StatusCode -ne 201) {
+            throw "Packaged executable returned HTTP $($uploadResponse.StatusCode) for the upload smoke test."
+        }
+        $uploadedSmokePath = Join-Path $smokeBackgrounds 'smoke.png'
+        if (-not (Test-Path -LiteralPath $uploadedSmokePath -PathType Leaf)) {
+            throw 'Packaged executable accepted the upload but did not create smoke.png.'
+        }
+        $uploadedSmokeBytes = [IO.File]::ReadAllBytes($uploadedSmokePath)
+        if ($uploadedSmokeBytes.Length -ne $smokePngBytes.Length) {
+            throw 'Packaged executable changed the uploaded PNG byte length.'
+        }
+        for ($byteIndex = 0; $byteIndex -lt $smokePngBytes.Length; $byteIndex++) {
+            if ($uploadedSmokeBytes[$byteIndex] -ne $smokePngBytes[$byteIndex]) {
+                throw 'Packaged executable changed the uploaded PNG bytes.'
+            }
         }
 
         $serviceStatusBody = @{ targets = @('https://outside.example.test/') } | ConvertTo-Json -Compress

@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -27,12 +28,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 from urllib.request import Request, urlopen
+
+from PIL import Image, UnidentifiedImageError
+from send2trash import send2trash
 
 
 API_PATH = "/api/background-preferences"
 SERVICE_STATUS_PATH = "/api/service-status"
+BACKGROUND_UPLOAD_PATH = "/api/background-files/upload"
+BACKGROUND_REMOVE_PATH = "/api/background-files/remove"
 HEALTH_PATH = "/healthz"
 CONTROL_PATH = "/_control/shutdown"
 DEFAULT_CONFIG_NAME = "HomeLabWallpaperState.json"
@@ -48,16 +54,30 @@ MONITOR_REFRESH_SECONDS = 60.0
 LOG_MAX_BYTES = 48 * 1024
 LOG_BACKUP_COUNT = 1
 SERVICE_NAME = "HomeLabWallpaperState"
-SERVICE_VERSION = 2
+SERVICE_VERSION = 3
 CONFIG_VERSION = 2
 STATE_VERSION = 1
 MAX_PATCH_BODY = 4 * 1024
 MAX_SERVICE_STATUS_BODY = 16 * 1024
+MAX_BACKGROUND_REMOVE_BODY = 4 * 1024
+MAX_BACKGROUND_UPLOAD_BODY = 50 * 1024 * 1024
+MAX_BACKGROUND_PIXELS = 100_000_000
+BACKGROUND_UPLOAD_CHUNK_SIZE = 1024 * 1024
+REMOVAL_TOKEN_TTL_SECONDS = 60
+MAX_REMOVAL_TOKENS = 32
 MAX_REJECTED_BODY_DRAIN = 64 * 1024
 MAX_PROBE_TARGETS = 32
 MAX_PROBE_WORKERS = 8
 MAX_PROBE_REDIRECTS = 5
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+INVALID_BACKGROUND_NAME_PATTERN = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
+MAX_BACKGROUND_NAME_LENGTH = 255
+IMAGE_FORMAT_EXTENSIONS = {
+    "JPEG": {".jpg", ".jpeg"},
+    "PNG": {".png"},
+    "WEBP": {".webp"},
+    "AVIF": {".avif"},
+}
 DOMAIN_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -71,6 +91,28 @@ class InvalidBackground(ValueError):
 
 class BackgroundMissing(FileNotFoundError):
     pass
+
+
+class InvalidImage(ValueError):
+    pass
+
+
+class UploadTooLarge(ValueError):
+    pass
+
+
+class ProtectedBackground(ValueError):
+    pass
+
+
+class InvalidConfirmationToken(ValueError):
+    pass
+
+
+class TrashUnavailable(RuntimeError):
+    def __init__(self, confirmation_token: str) -> None:
+        super().__init__("trash is unavailable")
+        self.confirmation_token = confirmation_token
 
 
 def application_directory() -> Path:
@@ -323,9 +365,15 @@ def atomic_write_json(path: Path, value: Any) -> None:
 
 
 def validate_background_name(name: str) -> str:
-    if not isinstance(name, str) or not name or name.strip() != name:
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > MAX_BACKGROUND_NAME_LENGTH
+        or name.strip() != name
+        or name.endswith(".")
+    ):
         raise InvalidBackground("invalid background filename")
-    if name in {".", ".."} or any(character in name for character in "/\\:\x00"):
+    if name in {".", ".."} or INVALID_BACKGROUND_NAME_PATTERN.search(name):
         raise InvalidBackground("invalid background filename")
     if Path(name).name != name or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise InvalidBackground("invalid background filename")
@@ -333,11 +381,19 @@ def validate_background_name(name: str) -> str:
 
 
 class StateStore:
-    def __init__(self, background_dir: Path, state_file: Path, clock=utc_timestamp) -> None:
+    def __init__(
+        self,
+        background_dir: Path,
+        state_file: Path,
+        clock=utc_timestamp,
+        monotonic=time.monotonic,
+    ) -> None:
         self._lock = threading.Lock()
         self.background_dir = background_dir.resolve()
         self.state_file = state_file.resolve()
         self.clock = clock
+        self.monotonic = monotonic
+        self._removal_tokens: dict[str, tuple[str, float]] = {}
         self.state = self._load_or_initialize()
 
     def _require_background(self, name: str) -> None:
@@ -426,6 +482,151 @@ class StateStore:
                     self.state = previous
                     raise
             return dict(self.state)
+
+    def _next_available_background_name(self, requested_name: str) -> str:
+        existing = {path.name.casefold() for path in self.background_dir.iterdir()}
+        if requested_name.casefold() not in existing:
+            return requested_name
+        requested = Path(requested_name)
+        index = 2
+        while True:
+            candidate = f"{requested.stem} ({index}){requested.suffix}"
+            if candidate.casefold() not in existing:
+                return candidate
+            index += 1
+
+    def _validate_uploaded_image(self, path: Path, suffix: str) -> tuple[int, int]:
+        try:
+            with warnings.catch_warnings():
+                # Pillow's default warning threshold is lower than this service's
+                # explicit 100 MP contract. Ignore only that warning and enforce
+                # the exact limit before any pixel data is decoded.
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                with Image.open(path) as image:
+                    image_format = image.format
+                    width, height = image.size
+                    if image_format not in IMAGE_FORMAT_EXTENSIONS:
+                        raise InvalidImage("unsupported image format")
+                    if suffix.lower() not in IMAGE_FORMAT_EXTENSIONS[image_format]:
+                        raise InvalidImage("image format does not match filename extension")
+                    if width <= 0 or height <= 0 or width * height > MAX_BACKGROUND_PIXELS:
+                        raise InvalidImage("image dimensions are too large")
+                    image.verify()
+                with Image.open(path) as image:
+                    image.load()
+        except InvalidImage:
+            raise
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise InvalidImage("image dimensions are too large") from None
+        except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+            raise InvalidImage("invalid or damaged image") from None
+        return width, height
+
+    def upload_background(self, requested_name: str, stream: Any, content_length: int) -> dict[str, Any]:
+        validate_background_name(requested_name)
+        if content_length < 0:
+            raise InvalidImage("invalid upload length")
+        if content_length > MAX_BACKGROUND_UPLOAD_BODY:
+            raise UploadTooLarge("uploaded image is too large")
+        with self._lock:
+            final_name = self._next_available_background_name(requested_name)
+            handle, temporary_name = tempfile.mkstemp(prefix=".upload-", suffix=".tmp", dir=self.background_dir)
+            temporary = Path(temporary_name)
+            try:
+                remaining = content_length
+                with os.fdopen(handle, "wb") as output:
+                    while remaining:
+                        chunk = stream.read(min(BACKGROUND_UPLOAD_CHUNK_SIZE, remaining))
+                        if not chunk:
+                            raise InvalidImage("incomplete upload")
+                        output.write(chunk)
+                        remaining -= len(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                width, height = self._validate_uploaded_image(temporary, Path(final_name).suffix)
+                while True:
+                    destination = self.background_dir / final_name
+                    try:
+                        # A hard-link publish is atomic and, unlike replace(), never overwrites
+                        # an external file that wins the destination-name race.
+                        os.link(temporary, destination)
+                        break
+                    except FileExistsError:
+                        # An external writer may have won the name after the directory scan.
+                        final_name = self._next_available_background_name(requested_name)
+                temporary.unlink()
+                return {
+                    "background": final_name,
+                    "size": content_length,
+                    "width": width,
+                    "height": height,
+                }
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    def _purge_expired_removal_tokens(self, now: float) -> None:
+        for token, (_, expires_at) in list(self._removal_tokens.items()):
+            if expires_at <= now:
+                del self._removal_tokens[token]
+
+    def _issue_removal_token(self, background: str, now: float) -> str:
+        self._purge_expired_removal_tokens(now)
+        while len(self._removal_tokens) >= MAX_REMOVAL_TOKENS:
+            oldest = min(self._removal_tokens, key=lambda token: self._removal_tokens[token][1])
+            del self._removal_tokens[oldest]
+        token = secrets.token_urlsafe(32)
+        self._removal_tokens[token] = (background, now + REMOVAL_TOKEN_TTL_SECONDS)
+        return token
+
+    def _require_removable_background(self, background: str) -> Path:
+        validate_background_name(background)
+        if background.casefold() == DEFAULT_BACKGROUND.casefold():
+            raise ProtectedBackground("the default background cannot be removed")
+        path = self.background_dir / background
+        if path.is_symlink():
+            raise InvalidBackground("symbolic links cannot be removed")
+        if not path.is_file():
+            raise BackgroundMissing("background file does not exist")
+        return path
+
+    def _preferences_after_removal(self) -> dict[str, Any]:
+        previous = dict(self.state)
+        changed = self._heal(self.state)
+        if changed:
+            self.state["updatedAt"] = self.clock()
+            try:
+                atomic_write_json(self.state_file, self.state)
+            except OSError:
+                self.state = previous
+                raise
+        return dict(self.state)
+
+    def remove_background(
+        self,
+        background: str,
+        confirmation_token: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        with self._lock:
+            path = self._require_removable_background(background)
+            now = self.monotonic()
+            self._purge_expired_removal_tokens(now)
+            if confirmation_token is not None:
+                token_record = self._removal_tokens.pop(confirmation_token, None)
+                if token_record is None or token_record[0] != background or token_record[1] <= now:
+                    raise InvalidConfirmationToken("invalid or expired confirmation token")
+                if path.is_symlink():
+                    raise InvalidBackground("symbolic links cannot be removed")
+                path.unlink()
+                return "permanent", self._preferences_after_removal()
+
+            try:
+                send2trash(str(path))
+            except Exception:
+                if not path.exists() and not path.is_symlink():
+                    return "trash", self._preferences_after_removal()
+                token = self._issue_removal_token(background, now)
+                raise TrashUnavailable(token) from None
+            return "trash", self._preferences_after_removal()
 
 
 @dataclass(frozen=True)
@@ -676,9 +877,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self.rfile.read(content_length)
             self.close_connection = False
 
-    def _read_dashboard_json(self, maximum_body: int) -> Any | None:
-        # Close rejected requests whose unread body would otherwise be parsed as a second HTTP request.
-        self.close_connection = True
+    def _validate_dashboard_headers(self, expected_content_type: str) -> bool:
         origin_values = self.headers.get_all("Origin", failobj=[])
         try:
             normalized_origin = normalize_origin(origin_values[0]) if len(origin_values) == 1 else ""
@@ -687,16 +886,22 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if normalized_origin not in self.server.config.allowed_origins:
             self._discard_rejected_body()
             self._error(HTTPStatus.FORBIDDEN, "origin is not allowed")
-            return None
+            return False
         if self.headers.get("X-Requested-With") != "homelab-dashboard":
             self._discard_rejected_body()
             self._error(HTTPStatus.FORBIDDEN, "missing dashboard request header")
-            return None
+            return False
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-        if content_type != "application/json":
+        if content_type != expected_content_type:
             self._discard_rejected_body()
-            self._error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json")
-            return None
+            self._error(
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                f"Content-Type must be {expected_content_type}",
+            )
+            return False
+        return True
+
+    def _read_content_length(self, maximum_body: int) -> int | None:
         try:
             content_length = int(self.headers.get("Content-Length", ""))
         except ValueError:
@@ -708,6 +913,16 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if content_length > maximum_body:
             self._discard_rejected_body()
             self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body is too large")
+            return None
+        return content_length
+
+    def _read_dashboard_json(self, maximum_body: int) -> Any | None:
+        # Close rejected requests whose unread body would otherwise be parsed as a second HTTP request.
+        self.close_connection = True
+        if not self._validate_dashboard_headers("application/json"):
+            return None
+        content_length = self._read_content_length(maximum_body)
+        if content_length is None:
             return None
 
         def reject_duplicate_fields(pairs):
@@ -725,6 +940,87 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             self._error(HTTPStatus.BAD_REQUEST, "invalid JSON request")
             return None
+
+    def _handle_background_upload(self, parsed_path) -> None:
+        self.close_connection = True
+        if not self._validate_dashboard_headers("application/octet-stream"):
+            return
+        content_length = self._read_content_length(MAX_BACKGROUND_UPLOAD_BODY)
+        if content_length is None:
+            return
+        query = parse_qsl(parsed_path.query, keep_blank_values=True)
+        if len(query) != 1 or query[0][0] != "name":
+            self._discard_rejected_body()
+            self._error(HTTPStatus.BAD_REQUEST, "query must contain exactly one name")
+            return
+        try:
+            result = self.server.store.upload_background(query[0][1], self.rfile, content_length)
+        except InvalidBackground:
+            self._error(HTTPStatus.BAD_REQUEST, "invalid background filename")
+            return
+        except UploadTooLarge:
+            self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "uploaded image is too large")
+            return
+        except InvalidImage as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        except Exception:
+            self.server.logger.exception("POST %s failed", parsed_path.path)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self.close_connection = False
+        self._write_json(HTTPStatus.CREATED, result)
+
+    def _handle_background_remove(self) -> None:
+        request = self._read_dashboard_json(MAX_BACKGROUND_REMOVE_BODY)
+        if request is None:
+            return
+        if (
+            not isinstance(request, dict)
+            or set(request) not in ({"background"}, {"background", "confirmationToken"})
+            or not isinstance(request.get("background"), str)
+            or ("confirmationToken" in request and not isinstance(request["confirmationToken"], str))
+        ):
+            self._error(
+                HTTPStatus.BAD_REQUEST,
+                "request must contain background and an optional confirmationToken",
+            )
+            return
+        background = request["background"]
+        confirmation_token = request.get("confirmationToken")
+        try:
+            disposition, preferences = self.server.store.remove_background(background, confirmation_token)
+        except (InvalidBackground, ProtectedBackground):
+            self._error(HTTPStatus.BAD_REQUEST, "background cannot be removed")
+            return
+        except BackgroundMissing:
+            self._error(HTTPStatus.NOT_FOUND, "background file does not exist")
+            return
+        except InvalidConfirmationToken:
+            self._error(HTTPStatus.FORBIDDEN, "invalid or expired confirmation token")
+            return
+        except TrashUnavailable as error:
+            self._write_json(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "trash_unavailable",
+                    "confirmationToken": error.confirmation_token,
+                    "expiresIn": REMOVAL_TOKEN_TTL_SECONDS,
+                },
+            )
+            return
+        except Exception:
+            self.server.logger.exception("POST %s failed", BACKGROUND_REMOVE_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            {
+                "background": background,
+                "disposition": disposition,
+                "preferences": preferences,
+            },
+        )
 
     def do_GET(self) -> None:
         if self.path == API_PATH:
@@ -756,10 +1052,16 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == SERVICE_STATUS_PATH:
             self._allow("POST")
             return
+        if urlsplit(self.path).path in {BACKGROUND_UPLOAD_PATH, BACKGROUND_REMOVE_PATH}:
+            self._allow("POST")
+            return
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PATCH(self) -> None:
         if self.path == SERVICE_STATUS_PATH:
+            self._allow("POST")
+            return
+        if urlsplit(self.path).path in {BACKGROUND_UPLOAD_PATH, BACKGROUND_REMOVE_PATH}:
             self._allow("POST")
             return
         if self.path != API_PATH:
@@ -792,6 +1094,13 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._write_json(HTTPStatus.OK, state)
 
     def do_POST(self) -> None:
+        parsed_path = urlsplit(self.path)
+        if parsed_path.path == BACKGROUND_UPLOAD_PATH:
+            self._handle_background_upload(parsed_path)
+            return
+        if self.path == BACKGROUND_REMOVE_PATH:
+            self._handle_background_remove()
+            return
         if self.path == SERVICE_STATUS_PATH:
             request = self._read_dashboard_json(MAX_SERVICE_STATUS_BODY)
             if request is None:
@@ -836,6 +1145,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == API_PATH:
             self._allow("GET, PATCH")
         elif self.path == SERVICE_STATUS_PATH:
+            self._allow("POST")
+        elif urlsplit(self.path).path in {BACKGROUND_UPLOAD_PATH, BACKGROUND_REMOVE_PATH}:
             self._allow("POST")
         else:
             self._error(HTTPStatus.NOT_FOUND, "not found")

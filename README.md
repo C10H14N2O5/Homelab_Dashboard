@@ -1,6 +1,6 @@
 # Zoraxy HomeLab Service Dashboard
 
-这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步壁纸偏好，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
+这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步和管理壁纸，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
 
 ## 项目概览
 
@@ -9,7 +9,7 @@
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余图片由部署机器本地保存 |
 | 服务入口 | 11 个 HomeLab 子域名 |
-| 状态服务 | Python 标准库实现；提供壁纸偏好与批量入口探测，生产为 Windows x64 单文件 EXE |
+| 状态服务 | Python 服务；提供壁纸偏好、图片管理与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
 | 自动启动 | 当前用户 `shell:startup` 快捷方式，登录后显示监视器 |
@@ -30,7 +30,7 @@ Zoraxy_StaticWebSite/
 │   ├── build-state-service.ps1  # 测试、PyInstaller 构建和 EXE 冒烟测试
 │   ├── uninstall-state-service.ps1 # 卸载EXE自启动注册
 │   └── verify-project.ps1       # 全仓库验证入口
-├── requirements.txt             # 仅包含构建依赖 PyInstaller
+├── requirements.txt             # 固定 PyInstaller、Pillow 和 Send2Trash 依赖
 ├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
 ├── index.txt                    # Zoraxy 原始示例，不参与运行
 ├── CHANGELOG.md
@@ -46,11 +46,11 @@ Zoraxy_StaticWebSite/
 ```text
 浏览器
 ├── GET /backgrounds/                     -> Zoraxy 静态目录列表
-├── GET/PATCH /api/background-preferences -> Zoraxy Virtual Directory
-│                                             -> 127.0.0.1:8787/api/...
+├── GET/PATCH /api/background-preferences  -> Zoraxy Virtual Directory
+├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
 └── POST /api/service-status               -> Python 状态服务
-                                               -> 127.0.0.1:443 Zoraxy
-                                               -> 11 个服务上游
+                                                -> 127.0.0.1:443 Zoraxy
+                                                -> 11 个服务上游
 ```
 
 API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录、配置和状态文件；Zoraxy 只在浏览器请求到达时反向代理。因此两个当前用户 Startup 入口可并行启动，不需要设置顺序。
@@ -97,14 +97,40 @@ Content-Type: application/json
 }
 ```
 
-本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。API 不传输图片，只同步文件名；其它设备刷新后读取共享设置，没有实时推送。
+本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好 API 不传输图片，只同步文件名；其它设备刷新后读取共享设置，没有实时推送。图片文件只在用户主动使用独立上传 API 时传输。
+
+弹窗中的“上传图片”将 JPEG、PNG、WebP 或 AVIF 原始字节发送到状态服务。单个文件最多 50 MiB、解码后最多 100MP；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`。上传成功只把图片加入列表并聚焦缩略图，不会自动切换当前横屏或竖屏背景。
+
+```http
+POST /api/background-files/upload?name=wallpaper.png
+Origin: https://home.c10h14n2o5.com
+X-Requested-With: homelab-dashboard
+Content-Type: application/octet-stream
+
+<原始图片字节>
+```
+
+“删除当前背景”始终作用于当前编辑方向中带蓝框勾选的图片，并在操作前显示二次确认。`bg.jpg` 是不可删除的永久兜底；如果被删图片同时被横屏和竖屏槽位引用，两个槽位都会回退到 `bg.jpg`。后端首先使用 Windows 回收站；若回收站不可用且文件仍存在，接口返回一个有效期 60 秒、仅限该文件且只能使用一次的确认令牌，前端只有在用户再次确认永久删除后才会携带令牌重试。
+
+```http
+POST /api/background-files/remove
+Origin: https://home.c10h14n2o5.com
+X-Requested-With: homelab-dashboard
+Content-Type: application/json
+
+{"background":"wallpaper.png"}
+```
+
+回收站失败后的永久删除请求增加 `confirmationToken` 字段。成功响应会说明删除方式并返回更新后的完整背景偏好；直接伪造永久删除参数不能绕过首次回收站尝试。
 
 ## Python 状态服务
 
-`state-service/main.py` 只使用标准库，提供：
+`state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
 
 - `GET /api/background-preferences`：读取并自愈状态；
 - `PATCH /api/background-preferences`：更新横屏或竖屏槽位；
+- `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
+- `POST /api/background-files/remove`：将图片移入回收站，必要时处理带短时令牌的永久删除；
 - `POST /api/service-status`：按输入顺序批量返回入口 HTTP 状态、耗时和稳定错误码；
 - `GET /healthz`：返回状态、服务标识、版本和 PID；
 - `POST /_control/shutdown`：仅供本机启动器使用的令牌控制端点，不得由 Zoraxy 代理。
@@ -112,8 +138,10 @@ Content-Type: application/json
 安全约束：
 
 - 强制监听 `127.0.0.1`；
-- PATCH 与状态 POST 校验精确 Origin、请求标记和 JSON Content-Type，正文上限分别为 4 KiB 和 16 KiB；
+- 所有写入 API 校验精确 Origin 和请求标记；JSON 与上传接口分别校验 Content-Type、Content-Length 和正文上限；
+- 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
 - 拒绝未知字段、路径穿越、不支持的扩展名、符号链接和不存在文件；
+- `bg.jpg` 永久禁止删除；永久删除必须使用回收站失败后签发的 60 秒单次令牌；
 - 探测只接受配置域后缀的单层 HTTPS 子域，禁止凭据、fragment、非 443 端口、IP、外部域和多层子域；
 - TCP 强制连接回环 Zoraxy，但 HTTP Host、TLS SNI 和证书 hostname 校验继续使用目标域名；不使用系统 DNS、代理或跳过 TLS 校验；
 - 最多 8 个全局并发、32 个目标和 5 次重定向；同一批次共享超时截止时间，每一跳重新执行目标校验；
@@ -196,7 +224,7 @@ D:/Zoraxy/www/html/backgrounds/
 
 ## 构建
 
-当前开发环境使用 Python 3.14。PyInstaller 是唯一的额外构建依赖，生产环境不需要它。可以使用现有 Python，也可以创建仓库本地 `.venv`：
+当前开发环境使用 Python 3.14。构建依赖固定为 PyInstaller 6.21.0、Pillow 12.3.0 和 Send2Trash 2.1.0；三者会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
 
 ```powershell
 python -m venv .venv
@@ -209,25 +237,26 @@ python -m venv .venv
 ```text
 py_compile
 -> unittest
+-> 依赖导入与 JPEG/PNG/WebP/AVIF 编解码能力预检
 -> PyInstaller --onefile --console --noupx
 -> 临时端口 EXE 冒烟测试
--> 健康检查、GET、PATCH、批量状态 API、控制关闭
+-> 健康检查、GET、PATCH、真实 PNG 上传、批量状态 API、控制关闭
 -> SHA-256
 -> dist/HomeLabWallpaperState.exe
 ```
 
-构建脚本不会自动安装依赖。PyInstaller 缺失时会给出明确安装命令。
+构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。上传冒烟测试只操作构建目录中的临时背景文件并随构建临时目录清理，不会向系统回收站写入测试文件。
 
 ## 部署和迁移
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
 2. 停止旧后端，删除现有 `HomeLabWallpaperState.json` 与 `HomeLabWallpaperState-data/`，将新版 EXE 复制到非公开的 Zoraxy 程序目录。
 3. 核对构建输出 SHA-256 后双击新版 EXE，完成严格 v2 首次引导并创建当前用户 Startup 快捷方式。
-4. 先验证 `/healthz`、壁纸 GET/PATCH 和 Homepage 同源 `/api/service-status`，再部署新版 `index.html`。
-5. 确认浏览器每次刷新只发送一次同源批量状态请求，全部卡片和壁纸同步正常。
+4. 先验证 `/healthz`、壁纸 GET/PATCH、上传/删除 API 和 Homepage 同源 `/api/service-status`，再部署新版 `index.html`；新版前端不得先于支持图片管理接口的 EXE 上线。
+5. 确认浏览器每次刷新只发送一次同源批量状态请求，全部卡片、壁纸同步、上传和回收站删除均正常。
 6. 最后删除 11 个子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。
+若回滚到旧前端，必须同时恢复旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机的 `backgrounds/`；从 Windows 回收站恢复的图片需保持原文件名，随后在网页中重新选择对应槽位。已经永久删除的图片只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -238,7 +267,7 @@ MatchingPath： /api/
 Domain：       127.0.0.1:8787/api/
 ```
 
-代理必须保留 GET/PATCH/POST、请求体、`Content-Type`、`Origin` 和 `X-Requested-With`，禁止缓存，并复用首页 Basic Auth。不要代理 `/_control/`，不要把 8787 暴露到局域网、Tailscale 或公网。
+代理仍只需保留 GET/PATCH/POST、请求体、`Content-Type`、`Content-Length`、`Origin` 和 `X-Requested-With`，禁止缓存，并复用首页 Basic Auth。不要代理 `/_control/`，不要把 8787 暴露到局域网、Tailscale 或公网。
 
 服务端探测不依赖本机 DNS，可在部署机上用等价命令诊断 Zoraxy 回环链路：
 
@@ -270,6 +299,8 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 关闭监视器后 `/healthz` 仍正常；
 - `shell:startup` 登录后显示监视器；
 - 网页可以读取和更新横竖屏背景；
+- 网页可以上传真实图片但不会自动切换，重名时自动编号；
+- 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；
 - 一个 2xx/3xx、4xx 和 5xx/网络失败入口分别显示绿、黄、红；
 - 停止状态 API 时全部卡片显示“状态未知”，而不是误报全部离线；
 - 删除旧的 CORS 响应头后 Homepage 状态正常，AstrBot 插件资源恢复；
@@ -280,5 +311,6 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 修改后先运行统一验证，不要跳过失败项。
 - 新增或删除服务卡片时只需维护卡片 HTML，并手动更新 README 中的当前数量和架构说明；页面数量文案、动画序号和前端验证会根据实际卡片自动适配。
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它背景文件不进入 Git，应独立备份。
+- 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。
