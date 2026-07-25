@@ -20,6 +20,7 @@ if ($Build -and ($SkipPython -or $SkipFrontend)) {
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $indexPath = Join-Path $projectRoot 'index.html'
 $stateServicePath = Join-Path $projectRoot 'state-service'
+$uninstallPath = Join-Path $PSScriptRoot 'uninstall-state-service.ps1'
 
 function Invoke-CheckedCommand {
     param(
@@ -60,6 +61,9 @@ foreach ($relativePath in $requiredFiles) {
 $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-service.ps1'))
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
+if ($readmeSource.Contains('index.txt')) {
+    throw 'README.md must not list the removed index.txt file.'
+}
 $maintenanceContracts = @(
     @{ Name = 'PyInstaller one-file build'; Source = $buildSource; Marker = '--onefile' },
     @{ Name = 'packaged executable health check'; Source = $buildSource; Marker = '/healthz' },
@@ -107,6 +111,16 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
 }
 if ($syntaxFailed) {
     throw 'PowerShell syntax validation failed.'
+}
+
+Write-Host 'Checking uninstall behavior when the executable is missing...'
+$missingExePath = Join-Path $projectRoot ".verify-missing-$PID.exe"
+if (Test-Path -LiteralPath $missingExePath) {
+    throw "Unable to reserve missing executable smoke-test path: $missingExePath"
+}
+$uninstallSmokeOutput = (& $uninstallPath -ExePath $missingExePath -WhatIf *>&1 | Out-String)
+if (-not $uninstallSmokeOutput.Contains('intentionally preserved')) {
+    throw 'Uninstall script did not continue after receiving a missing executable path.'
 }
 
 if ($SkipFrontend) {

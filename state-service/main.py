@@ -271,6 +271,11 @@ class AppConfig:
         return f"{host}:{self.probe_connect_port}"
 
 
+def validate_application_location(config: AppConfig) -> None:
+    if path_is_within(application_directory(), config.background_dir.parent):
+        raise ConfigurationError("application directory must be outside the public Web root")
+
+
 def load_config(path: Path) -> AppConfig:
     config_path = path.resolve()
     try:
@@ -1224,7 +1229,12 @@ def read_json_url(url: str, timeout: float = 2.0, request: Request | None = None
 
 def health(config: AppConfig, timeout: float = 1.5) -> dict[str, Any] | None:
     payload = read_json_url(f"{config.local_base_url}{HEALTH_PATH}", timeout)
-    if payload and payload.get("status") == "ok" and payload.get("service") == SERVICE_NAME:
+    if (
+        payload
+        and payload.get("status") == "ok"
+        and payload.get("service") == SERVICE_NAME
+        and payload.get("version") == SERVICE_VERSION
+    ):
         return payload
     return None
 
@@ -1249,7 +1259,7 @@ def spawn_backend(config: AppConfig) -> subprocess.Popen[Any] | None:
     if health(config):
         return None
     if port_has_http_listener(config):
-        raise RuntimeError(f"{config.listen} is occupied by another HTTP service")
+        raise RuntimeError(f"{config.listen} is occupied by another or incompatible HTTP service")
     creationflags = 0
     start_new_session = False
     if os.name == "nt":
@@ -1395,7 +1405,7 @@ def monitor(config: AppConfig) -> int:
 
 
 def prompt_value(label: str, default: str) -> str:
-    value = input(f"{label} [{default}]：").strip()
+    value = input(f"{label} [{default}]：").lstrip("\ufeff").strip()
     return value or default
 
 
@@ -1441,7 +1451,6 @@ def create_startup_shortcut(executable: Path) -> Path:
 
 
 def run_configuration_wizard(config_path: Path) -> AppConfig:
-    app_dir = config_path.resolve().parent
     print("HomeLab Wallpaper State 首次配置")
     print("=" * 60)
     print("配置、状态和日志不会放入公开的 web\\html 目录。\n")
@@ -1483,8 +1492,7 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
             }
             atomic_write_json(config_path, raw)
             config = load_config(config_path)
-            if path_is_within(app_dir, config.background_dir.parent):
-                raise ConfigurationError("EXE directory must be outside the public Web root")
+            validate_application_location(config)
             break
         except Exception as error:
             print(f"\n配置无效：{error}")
@@ -1533,6 +1541,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             config = load_config(config_path)
 
+        validate_application_location(config)
         if arguments.command == "serve":
             return serve(config)
         if arguments.command == "stop":

@@ -11,14 +11,16 @@ $taskName = 'HomeLabWallpaperState'
 $startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\HomeLabWallpaperState.lnk'
 
 if (-not [string]::IsNullOrWhiteSpace($ExePath)) {
-    $resolvedExePath = (Resolve-Path -LiteralPath $ExePath).Path
-    if (Test-Path -LiteralPath $resolvedExePath -PathType Leaf) {
+    if (Test-Path -LiteralPath $ExePath -PathType Leaf) {
+        $resolvedExePath = (Resolve-Path -LiteralPath $ExePath).Path
         if ($PSCmdlet.ShouldProcess($resolvedExePath, 'Request the user-level API backend to stop')) {
             & $resolvedExePath stop
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "The backend stop command exited with code $LASTEXITCODE."
             }
         }
+    } else {
+        Write-Warning "Executable not found; continuing with Startup and legacy task cleanup: $ExePath"
     }
 }
 

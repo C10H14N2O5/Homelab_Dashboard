@@ -32,7 +32,6 @@ Zoraxy_StaticWebSite/
 │   └── verify-project.ps1       # 全仓库验证入口
 ├── requirements.txt             # 固定 PyInstaller、Pillow 和 Send2Trash 依赖
 ├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
-├── index.txt                    # Zoraxy 原始示例，不参与运行
 ├── CHANGELOG.md
 └── README.md
 ```
@@ -200,8 +199,10 @@ HomeLabWallpaperState.exe restart
 1. 配置不存在时进入首次引导；
 2. API 未运行时隐藏启动同一 EXE 的 `serve` 模式；
 3. 等待 `/healthz` 确认身份和健康；
-4. API 已运行时不创建第二个后端；
+4. 仅在服务标识和接口版本完全匹配时复用已运行的 API，不创建第二个后端；
 5. 进入可见监视器。
+
+如果端口由其它 HTTP 服务或接口版本不兼容的旧后端占用，启动器会拒绝复用和启动第二个实例；应先停止占用进程，再重新启动当前版本。
 
 监视器每 60 秒显示 API、PID、背景槽位、探测配置、目录和最近日志。按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `R` 立即刷新。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE即可检查并恢复。
 
@@ -283,6 +284,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 ```
 
 脚本请求后端停止、删除当前用户 Startup 快捷方式，并在管理员权限下删除遗留 SYSTEM 任务。EXE、配置、状态、日志和背景默认保留。
+如果 EXE 已经被手动删除，脚本会跳过停止请求并继续清理 Startup 快捷方式和遗留计划任务。
 
 ## 验证
 

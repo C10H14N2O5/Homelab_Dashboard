@@ -20,6 +20,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$expectedServiceVersion = 3
+
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
     throw 'OutputName must be a simple Windows file name ending in .exe.'
@@ -164,13 +166,16 @@ try {
         if (-not $consoleProcess.Start()) {
             throw 'Packaged console encoding smoke test did not start.'
         }
-        $consoleProcess.StandardInput.Write($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
-        $consoleProcess.StandardInput.Close()
+        $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
+        $consoleInputStream = $consoleProcess.StandardInput.BaseStream
+        $consoleInputStream.Write($consoleInputBytes, 0, $consoleInputBytes.Length)
+        $consoleInputStream.Flush()
+        $consoleInputStream.Close()
         $consoleOutput = $consoleProcess.StandardOutput.ReadToEnd()
         $consoleError = $consoleProcess.StandardError.ReadToEnd()
         $consoleProcess.WaitForExit()
         if ($consoleProcess.ExitCode -ne 0) {
-            throw "Packaged console encoding smoke test exited with code $($consoleProcess.ExitCode): $consoleError"
+            throw "Packaged console encoding smoke test exited with code $($consoleProcess.ExitCode). Output: $consoleOutput Error: $consoleError"
         }
         foreach ($encodedText in @(
             'SG9tZUxhYiBXYWxscGFwZXIgU3RhdGUg6aaW5qyh6YWN572u',
@@ -207,7 +212,10 @@ try {
                 Start-Sleep -Milliseconds 250
             }
         } while (($null -eq $health -or $health.status -ne 'ok') -and (Get-Date) -lt $deadline)
-        if ($null -eq $health -or $health.status -ne 'ok' -or $health.service -ne 'HomeLabWallpaperState') {
+        if ($null -eq $health -or
+            $health.status -ne 'ok' -or
+            $health.service -ne 'HomeLabWallpaperState' -or
+            $health.version -ne $expectedServiceVersion) {
             throw 'Packaged executable did not become healthy during the smoke test.'
         }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import socket
@@ -80,6 +81,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(main.DEFAULT_BACKGROUND_DIRECTORY, r"D:\Zoraxy\www\html\backgrounds")
         self.assertEqual(main.MONITOR_REFRESH_SECONDS, 60.0)
 
+    def test_prompt_value_strips_redirected_utf8_bom(self) -> None:
+        with mock.patch("builtins.input", return_value="\ufeffD:\\wallpapers  "):
+            self.assertEqual(main.prompt_value("背景目录", "default"), r"D:\wallpapers")
+
     def test_wizard_preserves_existing_background_default(self) -> None:
         existing = self.project.write_config()
         prompts: list[tuple[str, str]] = []
@@ -90,11 +95,14 @@ class ConfigTests(unittest.TestCase):
 
         with mock.patch.object(main, "prompt_value", side_effect=accept_default), mock.patch.object(
             main, "prompt_yes_no", return_value=False
-        ), mock.patch.object(main.sys, "frozen", False, create=True), mock.patch("builtins.print"):
+        ), mock.patch.object(main.sys, "frozen", False, create=True), mock.patch.object(
+            main, "validate_application_location"
+        ) as validate_location, mock.patch("builtins.print"):
             configured = main.run_configuration_wizard(self.project.config_path)
 
         self.assertEqual(prompts[0], ("背景目录", r"web\html\backgrounds"))
         self.assertEqual(configured.background_dir, existing.background_dir)
+        validate_location.assert_called_once_with(configured)
 
     def test_load_config_resolves_relative_paths(self) -> None:
         config = self.project.write_config()
@@ -128,6 +136,18 @@ class ConfigTests(unittest.TestCase):
         (self.project.backgrounds / "bg.jpg").unlink()
         with self.assertRaises(main.ConfigurationError):
             self.project.write_config()
+
+    def test_application_directory_must_be_outside_public_web_root(self) -> None:
+        config = self.project.write_config()
+        with mock.patch.object(main, "application_directory", return_value=self.project.root):
+            main.validate_application_location(config)
+
+        for application_dir in (self.project.backgrounds.parent, self.project.backgrounds):
+            with self.subTest(application_dir=application_dir), mock.patch.object(
+                main, "application_directory", return_value=application_dir
+            ):
+                with self.assertRaisesRegex(main.ConfigurationError, "application directory"):
+                    main.validate_application_location(config)
 
 
 class StoreTests(unittest.TestCase):
@@ -681,6 +701,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["service"], main.SERVICE_NAME)
+        self.assertEqual(health["version"], main.SERVICE_VERSION)
         status, preferences = self.request("GET", main.API_PATH)
         self.assertEqual(status, 200)
         self.assertEqual(preferences["landscape"], "bg.jpg")
@@ -897,10 +918,54 @@ class LauncherTests(unittest.TestCase):
 
     def test_ensure_backend_reuses_healthy_service(self) -> None:
         config = mock.Mock()
-        expected = {"status": "ok", "service": main.SERVICE_NAME, "pid": 123}
+        expected = {
+            "status": "ok",
+            "service": main.SERVICE_NAME,
+            "version": main.SERVICE_VERSION,
+            "pid": 123,
+        }
         with mock.patch.object(main, "health", return_value=expected), mock.patch.object(main, "spawn_backend") as spawn:
             self.assertEqual(main.ensure_backend(config), expected)
             spawn.assert_not_called()
+
+    def test_health_requires_exact_service_version(self) -> None:
+        config = mock.Mock(local_base_url="http://127.0.0.1:8787")
+        matching = {
+            "status": "ok",
+            "service": main.SERVICE_NAME,
+            "version": main.SERVICE_VERSION,
+            "pid": 123,
+        }
+        with mock.patch.object(main, "read_json_url", return_value=matching):
+            self.assertEqual(main.health(config), matching)
+
+        for version in (None, str(main.SERVICE_VERSION), main.SERVICE_VERSION - 1, main.SERVICE_VERSION + 1):
+            incompatible = dict(matching)
+            if version is None:
+                incompatible.pop("version")
+            else:
+                incompatible["version"] = version
+            with self.subTest(version=version), mock.patch.object(
+                main, "read_json_url", return_value=incompatible
+            ):
+                self.assertIsNone(main.health(config))
+
+    def test_spawn_rejects_incompatible_listener_without_starting_process(self) -> None:
+        config = mock.Mock(
+            local_base_url="http://127.0.0.1:8787",
+            listen="127.0.0.1:8787",
+        )
+        incompatible = {
+            "status": "ok",
+            "service": main.SERVICE_NAME,
+            "version": main.SERVICE_VERSION - 1,
+        }
+        with mock.patch.object(main, "read_json_url", return_value=incompatible), mock.patch.object(
+            main, "port_has_http_listener", return_value=True
+        ), mock.patch.object(main.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(RuntimeError, "incompatible"):
+                main.spawn_backend(config)
+            popen.assert_not_called()
 
     def test_spawn_rejects_foreign_listener(self) -> None:
         config = mock.Mock()
@@ -917,6 +982,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(command[0], sys.executable)
         self.assertTrue(command[1].endswith("main.py"))
         self.assertEqual(command[-3:], ["serve", "--config", "config.json"])
+
+    def test_main_validates_application_location_before_serve(self) -> None:
+        project = TemporaryProject()
+        try:
+            config = project.write_config()
+            arguments = argparse.Namespace(command="serve", config=project.config_path)
+            with mock.patch.object(main, "parse_arguments", return_value=arguments), mock.patch.object(
+                main, "load_config", return_value=config
+            ), mock.patch.object(main, "validate_application_location") as validate_location, mock.patch.object(
+                main, "serve", return_value=0
+            ) as serve:
+                self.assertEqual(main.main([]), 0)
+            validate_location.assert_called_once_with(config)
+            serve.assert_called_once_with(config)
+        finally:
+            project.close()
 
     def test_monitor_refresh_and_quit_keys_remain_immediate(self) -> None:
         keyboard = mock.Mock()
