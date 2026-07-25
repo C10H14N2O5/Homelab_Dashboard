@@ -190,6 +190,13 @@ const requiredMarkers = [
     'reconcileSharedBackgroundPreference',
     'validateBackgroundUploadFile',
     'backgroundModesUsingFile',
+    'isBestdoriBackgroundName',
+    "const backgroundLibrarySources = ['ordinary', 'bestdori']",
+    'section.dataset.backgroundSection = source',
+    'option.dataset.backgroundSource = source',
+    "className = 'background-section-empty'",
+    'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true)',
+    'const inventorySummary =',
     "'Content-Type': 'application/octet-stream'",
     "errorCode === 'trash_unavailable'",
     'result.payload && result.payload.preferences',
@@ -261,16 +268,17 @@ if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.current
     throw new Error('Image timeout did not clean up handlers and cancel the source.');
 }
 
-const backgroundManagerHelperStart = runtimeScript.indexOf('function validateBackgroundUploadFile(');
+const backgroundManagerHelperStart = runtimeScript.indexOf('function normalizeBackgroundName(');
 const backgroundManagerHelperEnd = runtimeScript.indexOf('function backgroundUrlFromName(', backgroundManagerHelperStart);
 if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
     throw new Error('Unable to extract background file manager helpers for behavior checks.');
 }
 vm.runInContext(
     runtimeScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
-        + '\nglobalThis.__backgroundManagerHelpers = { validateBackgroundUploadFile, backgroundModesUsingFile };',
+        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
     context
 );
+context.backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
 
 const validUpload = { name: 'wallpaper.avif', size: 50 * 1024 * 1024 };
 if (context.__backgroundManagerHelpers.validateBackgroundUploadFile(validUpload) !== '') {
@@ -294,6 +302,49 @@ const affectedModes = context.__backgroundManagerHelpers.backgroundModesUsingFil
 });
 if (JSON.stringify(Array.from(affectedModes)) !== JSON.stringify(['landscape', 'portrait'])) {
     throw new Error('Background deletion impact modes were not derived from both preferences.');
+}
+
+const bestdoriBackgroundNames = [
+    '\u6237\u5c71\u9999\u6f84_\u4e09\u661f_\u6d4b\u8bd5\u5361\u9762_101_after_training.png',
+    '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d77\u8fb9\u5047\u65e5_987_normal.png',
+    '\u89d2\u8272 ID 40_\u56db\u661f_\u6807\u9898_345_normal (2).png',
+    '\u89d2\u8272_\u56db\u661f_\u6807\u9898_345_after_training (10).png'
+];
+bestdoriBackgroundNames.forEach((fileName) => {
+    if (!context.__backgroundManagerHelpers.isBestdoriBackgroundName(fileName)
+        || context.__backgroundManagerHelpers.backgroundSourceForName(fileName) !== 'bestdori') {
+        throw new Error(`Bestdori-generated background name was not classified correctly: ${fileName}`);
+    }
+});
+
+const ordinaryBackgroundNames = [
+    'bg.jpg',
+    'vacation.png',
+    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_normal.jpg',
+    '\u89d2\u8272_\u516d\u661f_\u6807\u9898_123_normal.png',
+    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_normal.png',
+    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_unknown.png',
+    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_normal (1).png'
+];
+ordinaryBackgroundNames.forEach((fileName) => {
+    if (context.__backgroundManagerHelpers.isBestdoriBackgroundName(fileName)
+        || context.__backgroundManagerHelpers.backgroundSourceForName(fileName) !== 'ordinary') {
+        throw new Error(`Ordinary background name was misclassified as Bestdori: ${fileName}`);
+    }
+});
+
+const renderFunctionStart = runtimeScript.indexOf('function renderBackgroundOptions(');
+const renderFunctionEnd = runtimeScript.indexOf('function focusBackgroundOption(', renderFunctionStart);
+if (renderFunctionStart < 0 || renderFunctionEnd < 0) {
+    throw new Error('Unable to extract the grouped background renderer.');
+}
+const groupedRendererSource = runtimeScript.slice(renderFunctionStart, renderFunctionEnd);
+if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
+    || !groupedRendererSource.includes('backgroundLibraryExpanded[source]')
+    || !groupedRendererSource.includes('groupedUrls.ordinary.length')
+    || !groupedRendererSource.includes('groupedUrls.bestdori.length')
+    || !groupedRendererSource.includes('setBackgroundSectionExpanded(source')) {
+    throw new Error('Grouped background renderer is missing section order, counts, collapse state, or toggle behavior.');
 }
 
 const bestdoriHelperStart = runtimeScript.indexOf('function backgroundManagerIsBusy(');
@@ -410,7 +461,7 @@ let observedDrawCall = null;
 context.requestBestdoriJson = async (endpoint, body, timeout) => {
     observedDrawCall = { endpoint, body, timeout };
     return {
-        background: { background: '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123.png' },
+        background: { background: '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123_after_training.png' },
         card: { id: 123, characterName: '\u7c73\u6b47\u5c14', rarity: 5, title: '\u6d4b\u8bd5' }
     };
 };
@@ -440,7 +491,7 @@ if (!await context.__drawBestdoriCard()
     || JSON.stringify(observedDrawCall.body) !== JSON.stringify({ mode: 'character', rarities: [3, 5], characterId: 4 })
     || !scanSuccessMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
     || !closedAfterDraw
-    || focusedAfterDraw !== '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123.png'
+    || focusedAfterDraw !== '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123_after_training.png'
     || patchCallCount !== 0) {
     throw new Error('Successful Bestdori draw did not refresh/focus without applying the background.');
 }

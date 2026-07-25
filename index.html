@@ -464,6 +464,7 @@
         .dialog-close:focus-visible,
         .background-mode-button:focus-visible,
         .background-action-button:focus-visible,
+        .background-library-toggle:focus-visible,
         .background-delete-dialog button:focus-visible,
         .card-draw-dialog input:focus-visible,
         .card-draw-dialog select:focus-visible,
@@ -709,10 +710,85 @@
             min-height: 9rem;
             padding: 0.85rem 1.15rem 1.15rem;
             overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .background-library-section {
+            min-width: 0;
+            padding: 0.72rem;
+            background: rgba(8, 20, 36, 0.48);
+            border: 1px solid rgba(226, 232, 240, 0.1);
+            border-radius: 0.95rem;
+        }
+
+        .background-library-toggle {
+            width: 100%;
+            min-height: 2.35rem;
+            padding: 0.12rem 0.18rem 0.72rem;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: var(--text);
+            text-align: left;
+            background: transparent;
+            border: 0;
+            cursor: pointer;
+        }
+
+        .background-library-toggle[aria-expanded="false"] {
+            padding-bottom: 0.12rem;
+        }
+
+        .background-library-title {
+            min-width: 0;
+            flex: 1;
+            font-size: 0.86rem;
+            font-weight: 720;
+        }
+
+        .background-library-count {
+            padding: 0.18rem 0.5rem;
+            color: var(--muted);
+            font-size: 0.68rem;
+            font-variant-numeric: tabular-nums;
+            background: rgba(30, 58, 92, 0.5);
+            border-radius: 999px;
+        }
+
+        .background-library-chevron {
+            color: var(--muted);
+            font-size: 0.72rem;
+            transition: transform 180ms ease;
+        }
+
+        .background-library-toggle[aria-expanded="false"] .background-library-chevron {
+            transform: rotate(-90deg);
+        }
+
+        .background-section-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
             align-content: start;
             gap: 0.75rem;
+        }
+
+        .background-section-grid[hidden] {
+            display: none;
+        }
+
+        .background-section-empty {
+            grid-column: 1 / -1;
+            min-height: 4.5rem;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            color: var(--muted);
+            font-size: 0.72rem;
+            text-align: center;
+            border: 1px dashed rgba(148, 163, 184, 0.2);
+            border-radius: 0.75rem;
         }
 
         .background-option {
@@ -763,6 +839,25 @@
             font-weight: 620;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .background-option-source {
+            position: absolute;
+            top: 0.48rem;
+            left: 0.48rem;
+            max-width: calc(100% - 3rem);
+            padding: 0.18rem 0.42rem;
+            overflow: hidden;
+            color: #e0f2fe;
+            font-size: 0.58rem;
+            font-weight: 720;
+            line-height: 1.2;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            background: rgba(3, 22, 41, 0.82);
+            border: 1px solid rgba(125, 211, 252, 0.32);
+            border-radius: 999px;
+            backdrop-filter: blur(6px);
         }
 
         .background-option-check {
@@ -1249,8 +1344,11 @@
             }
 
             .background-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
                 padding-inline: 0.85rem;
+            }
+
+            .background-section-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
             .background-mode-switcher {
@@ -1647,6 +1745,15 @@
                 landscape: '横屏',
                 portrait: '竖屏'
             };
+            const backgroundLibrarySources = ['ordinary', 'bestdori'];
+            const backgroundLibraryLabels = {
+                ordinary: '普通壁纸',
+                bestdori: 'Bestdori 抽卡'
+            };
+            const backgroundLibraryExpanded = {
+                ordinary: true,
+                bestdori: true
+            };
             const orientationQuery = window.matchMedia('(orientation: portrait)');
             const backgroundLayer = document.querySelector('.background-layer');
             const backgroundPickerButton = document.getElementById('background-picker-button');
@@ -1758,6 +1865,18 @@
             function backgroundModesUsingFile(fileName, preferences) {
                 if (typeof fileName !== 'string' || !preferences || typeof preferences !== 'object') return [];
                 return ['landscape', 'portrait'].filter((mode) => preferences[mode] === fileName);
+            }
+
+            function isBestdoriBackgroundName(value) {
+                const fileName = normalizeBackgroundName(value);
+                return Boolean(
+                    fileName
+                    && /^.+_(?:三星|四星|五星)_.+_[1-9]\d*_(?:after_training|normal)(?: \((?:[2-9]|[1-9]\d+)\))?\.png$/u.test(fileName)
+                );
+            }
+
+            function backgroundSourceForName(value) {
+                return isBestdoriBackgroundName(value) ? 'bestdori' : 'ordinary';
             }
 
             function backgroundUrlFromName(value) {
@@ -2253,42 +2372,127 @@
 
             function renderBackgroundOptions(urls) {
                 const fragment = document.createDocumentFragment();
+                const groupedUrls = {
+                    ordinary: [],
+                    bestdori: []
+                };
 
                 urls.forEach((url) => {
-                    const option = document.createElement('button');
-                    option.type = 'button';
-                    option.className = 'background-option';
-                    option.dataset.url = url.href;
-                    option.setAttribute('aria-pressed', 'false');
+                    groupedUrls[backgroundSourceForName(backgroundFileName(url))].push(url);
+                });
 
-                    const thumbnail = document.createElement('img');
-                    thumbnail.src = url.href;
-                    thumbnail.alt = '';
-                    thumbnail.loading = 'lazy';
-                    thumbnail.decoding = 'async';
+                backgroundLibrarySources.forEach((source) => {
+                    const section = document.createElement('section');
+                    section.className = 'background-library-section';
+                    section.dataset.backgroundSection = source;
 
-                    const label = document.createElement('span');
-                    label.className = 'background-option-label';
-                    label.textContent = backgroundFileName(url);
+                    const sectionGridId = `background-section-${source}`;
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'background-library-toggle';
+                    toggle.setAttribute('aria-controls', sectionGridId);
+                    toggle.setAttribute('aria-expanded', String(backgroundLibraryExpanded[source]));
 
-                    const check = document.createElement('span');
-                    check.className = 'background-option-check';
-                    check.setAttribute('aria-hidden', 'true');
-                    check.textContent = '✓';
+                    const title = document.createElement('span');
+                    title.className = 'background-library-title';
+                    title.textContent = backgroundLibraryLabels[source];
 
-                    option.append(thumbnail, label, check);
-                    option.addEventListener('click', () => saveSharedBackgroundPreference(editingBackgroundMode, url));
-                    fragment.append(option);
+                    const count = document.createElement('span');
+                    count.className = 'background-library-count';
+                    count.textContent = `${groupedUrls[source].length} 张`;
+
+                    const chevron = document.createElement('span');
+                    chevron.className = 'background-library-chevron';
+                    chevron.setAttribute('aria-hidden', 'true');
+                    chevron.textContent = '▼';
+                    toggle.append(title, count, chevron);
+
+                    const sectionGrid = document.createElement('div');
+                    sectionGrid.id = sectionGridId;
+                    sectionGrid.className = 'background-section-grid';
+                    sectionGrid.hidden = !backgroundLibraryExpanded[source];
+
+                    groupedUrls[source].forEach((url) => {
+                        const option = document.createElement('button');
+                        option.type = 'button';
+                        option.className = 'background-option';
+                        option.dataset.url = url.href;
+                        option.dataset.backgroundSource = source;
+                        option.setAttribute('aria-pressed', 'false');
+
+                        const thumbnail = document.createElement('img');
+                        thumbnail.src = url.href;
+                        thumbnail.alt = '';
+                        thumbnail.loading = 'lazy';
+                        thumbnail.decoding = 'async';
+
+                        const label = document.createElement('span');
+                        label.className = 'background-option-label';
+                        label.textContent = backgroundFileName(url);
+
+                        const check = document.createElement('span');
+                        check.className = 'background-option-check';
+                        check.setAttribute('aria-hidden', 'true');
+                        check.textContent = '✓';
+
+                        option.append(thumbnail, label);
+                        if (source === 'bestdori') {
+                            const sourceBadge = document.createElement('span');
+                            sourceBadge.className = 'background-option-source';
+                            sourceBadge.textContent = 'Bestdori';
+                            option.append(sourceBadge);
+                        }
+                        option.append(check);
+                        option.addEventListener('click', () => saveSharedBackgroundPreference(editingBackgroundMode, url));
+                        sectionGrid.append(option);
+                    });
+
+                    if (groupedUrls[source].length === 0) {
+                        const empty = document.createElement('p');
+                        empty.className = 'background-section-empty';
+                        empty.textContent = source === 'bestdori'
+                            ? '还没有通过 Bestdori 抽取卡面。'
+                            : '还没有普通壁纸。';
+                        sectionGrid.append(empty);
+                    }
+
+                    toggle.addEventListener('click', () => {
+                        setBackgroundSectionExpanded(source, !backgroundLibraryExpanded[source]);
+                    });
+                    section.append(toggle, sectionGrid);
+                    fragment.append(section);
                 });
 
                 backgroundGrid.replaceChildren(fragment);
                 updateBackgroundSelection();
                 syncBackgroundControlsBusy();
+                return {
+                    total: urls.length,
+                    ordinary: groupedUrls.ordinary.length,
+                    bestdori: groupedUrls.bestdori.length
+                };
+            }
+
+            function setBackgroundSectionExpanded(source, expanded) {
+                if (!backgroundLibrarySources.includes(source)) return false;
+                backgroundLibraryExpanded[source] = Boolean(expanded);
+
+                const section = Array.from(backgroundGrid.querySelectorAll('[data-background-section]'))
+                    .find((item) => item.dataset.backgroundSection === source);
+                if (!section) return false;
+
+                const toggle = section.querySelector('.background-library-toggle');
+                const sectionGrid = section.querySelector('.background-section-grid');
+                if (!toggle || !sectionGrid) return false;
+                toggle.setAttribute('aria-expanded', String(backgroundLibraryExpanded[source]));
+                sectionGrid.hidden = !backgroundLibraryExpanded[source];
+                return true;
             }
 
             function focusBackgroundOption(fileName) {
                 const candidate = backgroundUrlFromName(fileName);
                 if (!candidate) return false;
+                setBackgroundSectionExpanded(backgroundSourceForName(fileName), true);
                 const option = Array.from(backgroundGrid.querySelectorAll('.background-option'))
                     .find((item) => item.dataset.url === candidate.href && !item.disabled);
                 if (!option) return false;
@@ -2908,13 +3112,14 @@
                         return backgroundFileName(left).localeCompare(backgroundFileName(right), 'zh-CN', { numeric: true });
                     });
 
-                    renderBackgroundOptions(urls);
+                    const counts = renderBackgroundOptions(urls);
+                    const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
                     if (options.successMessage) {
-                        setBackgroundStatus(options.successMessage, 'success');
+                        setBackgroundStatus(`${options.successMessage} ${inventorySummary}。`, 'success');
                     } else if (backgroundPreferencesConnection === 'offline') {
-                        setBackgroundStatus(`发现 ${urls.length} 张背景图片，但跨设备同步服务暂不可用。`, 'error');
+                        setBackgroundStatus(`${inventorySummary}，但跨设备同步服务暂不可用。`, 'error');
                     } else {
-                        setBackgroundStatus(`发现 ${urls.length} 张背景图片，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
+                        setBackgroundStatus(`${inventorySummary}，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
                     }
                 } catch (error) {
                     if (scanId !== backgroundScanSequence) return;
@@ -2925,8 +3130,11 @@
                         const configuredUrl = backgroundUrlForMode(mode);
                         fallbackUrls.set(configuredUrl.href, configuredUrl);
                     });
-                    renderBackgroundOptions(Array.from(fallbackUrls.values()));
-                    setBackgroundStatus('无法读取目录列表，已保留可用背景。请确认 Zoraxy 已开启 directory listing。', 'error');
+                    const counts = renderBackgroundOptions(Array.from(fallbackUrls.values()));
+                    setBackgroundStatus(
+                        `无法读取目录列表，已保留 ${counts.total} 张可用背景（普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张）。请确认 Zoraxy 已开启 directory listing。`,
+                        'error'
+                    );
                 } finally {
                     if (scanId === backgroundScanSequence) {
                         backgroundScanController = null;
