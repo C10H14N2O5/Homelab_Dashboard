@@ -465,6 +465,9 @@
         .background-mode-button:focus-visible,
         .background-action-button:focus-visible,
         .background-delete-dialog button:focus-visible,
+        .card-draw-dialog input:focus-visible,
+        .card-draw-dialog select:focus-visible,
+        .card-draw-dialog button:focus-visible,
         .background-option:focus-visible {
             outline: 3px solid rgba(125, 211, 252, 0.9);
             outline-offset: 3px;
@@ -640,6 +643,10 @@
             gap: 0.55rem;
         }
 
+        .background-draw-launch {
+            margin-left: auto;
+        }
+
         .background-action-button {
             min-height: 2.35rem;
             padding: 0.48rem 0.82rem;
@@ -800,6 +807,168 @@
             background: rgba(2, 8, 23, 0.72);
             -webkit-backdrop-filter: blur(5px);
             backdrop-filter: blur(5px);
+        }
+
+        .card-draw-dialog {
+            width: min(34rem, calc(100vw - 2rem));
+            max-width: none;
+            max-height: min(82vh, 44rem);
+            max-height: min(82svh, 44rem);
+            margin: auto;
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.98);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1.1rem;
+            box-shadow: 0 32px 90px rgba(2, 8, 23, 0.72);
+            opacity: 0;
+            transform: translateY(10px) scale(0.98);
+            transition: opacity 160ms ease, transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .card-draw-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .card-draw-dialog::backdrop {
+            background: rgba(2, 8, 23, 0.72);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+        }
+
+        .card-draw-shell {
+            max-height: min(82vh, 44rem);
+            max-height: min(82svh, 44rem);
+            overflow-y: auto;
+        }
+
+        .card-draw-form {
+            padding: 1rem 1.15rem 1.15rem;
+        }
+
+        .card-draw-fieldset {
+            margin: 0;
+            padding: 0;
+            border: 0;
+        }
+
+        .card-draw-fieldset + .card-draw-fieldset {
+            margin-top: 1rem;
+        }
+
+        .card-draw-fieldset legend,
+        .card-draw-label {
+            margin-bottom: 0.5rem;
+            display: block;
+            color: var(--muted);
+            font-size: 0.76rem;
+            font-weight: 700;
+        }
+
+        .card-draw-choices {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+        }
+
+        .card-draw-choice,
+        .card-rarity-choice {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.65rem 0.72rem;
+            color: var(--muted);
+            font-size: 0.75rem;
+            line-height: 1.35;
+            background: rgba(15, 31, 51, 0.72);
+            border: 1px solid rgba(226, 232, 240, 0.13);
+            border-radius: 0.72rem;
+            cursor: pointer;
+        }
+
+        .card-draw-choice:has(input:checked),
+        .card-rarity-choice:has(input:checked) {
+            color: var(--text);
+            border-color: rgba(125, 211, 252, 0.48);
+            background: rgba(24, 53, 82, 0.9);
+        }
+
+        .card-draw-choice input,
+        .card-rarity-choice input {
+            margin: 0;
+            accent-color: var(--accent);
+        }
+
+        .card-rarity-choices {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+
+        .card-rarity-choice {
+            justify-content: center;
+        }
+
+        .card-character-select {
+            width: 100%;
+            min-height: 2.55rem;
+            padding: 0.5rem 0.65rem;
+            color: var(--text);
+            background: rgba(15, 31, 51, 0.9);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 0.72rem;
+        }
+
+        .card-character-select:disabled {
+            color: var(--subtle);
+            cursor: not-allowed;
+            opacity: 0.58;
+        }
+
+        .card-draw-status {
+            min-height: 1.35rem;
+            margin: 0.9rem 0 0;
+            color: var(--muted);
+            font-size: 0.73rem;
+            line-height: 1.55;
+        }
+
+        .card-draw-status[data-kind="error"] {
+            color: #fda4af;
+        }
+
+        .card-draw-status[data-kind="success"] {
+            color: #86efac;
+        }
+
+        .card-draw-actions,
+        .card-history-actions {
+            margin-top: 0.9rem;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.55rem;
+        }
+
+        .card-draw-submit {
+            margin-left: auto;
+            color: #cffafe;
+            border-color: rgba(56, 189, 248, 0.42);
+        }
+
+        .card-history-actions {
+            padding-top: 0.9rem;
+            border-top: 1px solid rgba(226, 232, 240, 0.1);
+        }
+
+        .card-history-hint {
+            flex: 1 1 100%;
+            margin: 0;
+            color: var(--subtle);
+            font-size: 0.68rem;
+            line-height: 1.5;
         }
 
         .background-delete-shell {
@@ -1096,6 +1265,20 @@
                 flex: 1 1 9rem;
             }
 
+            .background-draw-launch,
+            .card-draw-submit {
+                margin-left: 0;
+            }
+
+            .card-draw-dialog {
+                width: calc(100vw - 1rem);
+                max-height: 88svh;
+            }
+
+            .card-draw-choices {
+                grid-template-columns: 1fr;
+            }
+
             .background-mode-button {
                 flex-direction: column;
                 gap: 0.08rem;
@@ -1122,6 +1305,10 @@
             }
 
             .background-delete-dialog {
+                transform: none;
+            }
+
+            .card-draw-dialog {
                 transform: none;
             }
 
@@ -1321,6 +1508,9 @@
                 <button class="background-action-button" id="background-delete-button" type="button" data-kind="danger" disabled>
                     删除当前背景
                 </button>
+                <button class="background-action-button background-draw-launch" id="background-draw-button" type="button" aria-haspopup="dialog" aria-controls="card-draw-dialog" disabled>
+                    我的回合，抽卡！
+                </button>
             </div>
             <p class="background-picker-status" id="background-picker-status" role="status" aria-live="polite">准备扫描背景目录…</p>
             <div class="background-grid" id="background-grid" aria-busy="false"></div>
@@ -1335,6 +1525,83 @@
             <div class="background-delete-actions">
                 <button class="background-action-button" id="background-delete-cancel" type="button">取消</button>
                 <button class="background-action-button" id="background-delete-confirm" type="button" data-kind="danger">移入回收站</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="card-draw-dialog" id="card-draw-dialog" aria-labelledby="card-draw-title" aria-describedby="card-draw-description">
+        <div class="card-draw-shell">
+            <header class="dialog-header">
+                <div>
+                    <h2 id="card-draw-title">我的回合，抽卡！</h2>
+                    <p id="card-draw-description">从 Bestdori 随机抽取未重复的卡面，下载到 backgrounds 目录。</p>
+                </div>
+                <button class="dialog-close" id="card-draw-close" type="button" aria-label="关闭抽卡设置">✕</button>
+            </header>
+            <form class="card-draw-form" id="card-draw-form">
+                <fieldset class="card-draw-fieldset">
+                    <legend>抽取模式</legend>
+                    <div class="card-draw-choices">
+                        <label class="card-draw-choice">
+                            <input type="radio" name="card-draw-mode" value="character" checked>
+                            <span>指定角色</span>
+                        </label>
+                        <label class="card-draw-choice">
+                            <input type="radio" name="card-draw-mode" value="random">
+                            <span>全随机</span>
+                        </label>
+                    </div>
+                </fieldset>
+                <fieldset class="card-draw-fieldset">
+                    <legend>星级范围（可多选）</legend>
+                    <div class="card-rarity-choices">
+                        <label class="card-rarity-choice">
+                            <input type="checkbox" name="card-draw-rarity" value="3" checked>
+                            <span>3 ★</span>
+                        </label>
+                        <label class="card-rarity-choice">
+                            <input type="checkbox" name="card-draw-rarity" value="4" checked>
+                            <span>4 ★</span>
+                        </label>
+                        <label class="card-rarity-choice">
+                            <input type="checkbox" name="card-draw-rarity" value="5" checked>
+                            <span>5 ★</span>
+                        </label>
+                    </div>
+                </fieldset>
+                <div class="card-draw-fieldset">
+                    <label class="card-draw-label" for="card-character-select">角色</label>
+                    <select class="card-character-select" id="card-character-select" name="characterId" disabled>
+                        <option value="">正在读取角色列表…</option>
+                    </select>
+                </div>
+                <p class="card-draw-status" id="card-draw-status" role="status" aria-live="polite">请选择抽取条件。</p>
+                <div class="card-draw-actions">
+                    <button class="background-action-button card-draw-submit" id="card-draw-submit" type="submit">
+                        开始抽卡
+                    </button>
+                </div>
+                <div class="card-history-actions" aria-label="维护抽卡记录">
+                    <p class="card-history-hint">记录维护只更新防重复数据库，不会删除 backgrounds 中的图片。</p>
+                    <button class="background-action-button" id="card-history-reconcile" type="button">
+                        清理失效记录
+                    </button>
+                    <button class="background-action-button" id="card-history-reset" type="button" data-kind="danger" aria-haspopup="dialog" aria-controls="card-history-reset-dialog">
+                        清空全部记录
+                    </button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <dialog class="background-delete-dialog" id="card-history-reset-dialog" aria-labelledby="card-history-reset-title" aria-describedby="card-history-reset-description">
+        <div class="background-delete-shell">
+            <h2 id="card-history-reset-title">清空全部抽卡记录？</h2>
+            <p id="card-history-reset-description">这会清空防重复数据库，以后可能再次抽到现有卡面。已下载的背景图片不会被删除。</p>
+            <p class="background-delete-status" id="card-history-reset-status" role="status" aria-live="polite"></p>
+            <div class="background-delete-actions">
+                <button class="background-action-button" id="card-history-reset-cancel" type="button">取消</button>
+                <button class="background-action-button" id="card-history-reset-confirm" type="button" data-kind="danger">确认清空记录</button>
             </div>
         </div>
     </dialog>
@@ -1367,6 +1634,10 @@
             const backgroundPreferencesEndpoint = new URL('/api/background-preferences', document.baseURI);
             const backgroundUploadEndpoint = new URL('/api/background-files/upload', document.baseURI);
             const backgroundRemoveEndpoint = new URL('/api/background-files/remove', document.baseURI);
+            const bestdoriCharactersEndpoint = new URL('/api/bestdori/characters', document.baseURI);
+            const bestdoriDrawEndpoint = new URL('/api/background-files/draw', document.baseURI);
+            const bestdoriReconcileEndpoint = new URL('/api/bestdori/history/reconcile', document.baseURI);
+            const bestdoriResetEndpoint = new URL('/api/bestdori/history/reset', document.baseURI);
             const serviceStatusEndpoint = new URL('/api/service-status', document.baseURI);
             const backgroundPreferencesCacheKey = 'homelab-background-state-cache-v1';
             const legacyBackgroundStorageKey = 'homelab-background';
@@ -1393,6 +1664,21 @@
             const backgroundDeleteStatus = document.getElementById('background-delete-status');
             const backgroundDeleteCancel = document.getElementById('background-delete-cancel');
             const backgroundDeleteConfirm = document.getElementById('background-delete-confirm');
+            const backgroundDrawButton = document.getElementById('background-draw-button');
+            const cardDrawDialog = document.getElementById('card-draw-dialog');
+            const cardDrawClose = document.getElementById('card-draw-close');
+            const cardDrawForm = document.getElementById('card-draw-form');
+            const cardDrawModeInputs = Array.from(cardDrawForm.querySelectorAll('input[name="card-draw-mode"]'));
+            const cardDrawRarityInputs = Array.from(cardDrawForm.querySelectorAll('input[name="card-draw-rarity"]'));
+            const cardCharacterSelect = document.getElementById('card-character-select');
+            const cardDrawStatus = document.getElementById('card-draw-status');
+            const cardDrawSubmit = document.getElementById('card-draw-submit');
+            const cardHistoryReconcile = document.getElementById('card-history-reconcile');
+            const cardHistoryReset = document.getElementById('card-history-reset');
+            const cardHistoryResetDialog = document.getElementById('card-history-reset-dialog');
+            const cardHistoryResetStatus = document.getElementById('card-history-reset-status');
+            const cardHistoryResetCancel = document.getElementById('card-history-reset-cancel');
+            const cardHistoryResetConfirm = document.getElementById('card-history-reset-confirm');
             let backgroundScanSequence = 0;
             let backgroundScanController = null;
             let backgroundScanPending = false;
@@ -1404,6 +1690,8 @@
             let backgroundWritePending = false;
             let backgroundUploadPending = false;
             let backgroundDeletePending = false;
+            let backgroundDrawPending = false;
+            let cardDrawCharactersLoaded = false;
             let backgroundDeleteRequest = null;
             let backgroundDeleteReturnFocus = null;
             let backgroundPreferencesConnection = 'loading';
@@ -1614,11 +1902,91 @@
                 });
             }
 
-            function syncBackgroundControlsBusy() {
-                const isBusy = backgroundScanPending
+            function backgroundManagerIsBusy() {
+                return backgroundScanPending
                     || backgroundWritePending
                     || backgroundUploadPending
-                    || backgroundDeletePending;
+                    || backgroundDeletePending
+                    || backgroundDrawPending;
+            }
+
+            function bestdoriErrorMessage(payload, status, fallbackLabel) {
+                const error = payload && payload.error;
+                const errorCode = typeof error === 'string'
+                    ? error
+                    : error && typeof error.code === 'string' ? error.code : '';
+                const knownMessages = {
+                    bestdori_operation_in_progress: '另一个抽卡或记录维护操作正在进行，请稍后再试。',
+                    bestdori_card_pool_exhausted: '当前筛选条件下没有尚未抽取的卡面，请更换角色或星级，或确认后清空抽卡记录。',
+                    bestdori_history_unavailable: '抽卡记录不可用或已损坏，请检查服务日志并恢复 BestdoriCardDraws.json。',
+                    bestdori_unavailable: '暂时无法连接 Bestdori，请稍后再试。',
+                    bestdori_invalid_image: 'Bestdori 返回的卡面图片无效或不受支持。'
+                };
+                if (Object.prototype.hasOwnProperty.call(knownMessages, errorCode)) {
+                    return knownMessages[errorCode];
+                }
+                const detail = payload && (
+                    payload.message
+                    || (typeof error === 'string' ? error : error && (error.message || error.code))
+                    || payload.code
+                );
+                return typeof detail === 'string' && detail
+                    ? detail
+                    : `${fallbackLabel}接口返回 ${status}`;
+            }
+
+            function buildBestdoriDrawRequest(mode, rarities, characterId = null) {
+                const normalizedRarities = Array.from(new Set(
+                    Array.isArray(rarities)
+                        ? rarities.map(Number).filter((rarity) => [3, 4, 5].includes(rarity))
+                        : []
+                )).sort((left, right) => left - right);
+                if (normalizedRarities.length === 0) throw new Error('请至少选择一个星级。');
+                if (mode !== 'character' && mode !== 'random') throw new Error('请选择有效的抽取模式。');
+
+                const request = { mode, rarities: normalizedRarities };
+                if (mode === 'character') {
+                    const normalizedCharacterId = Number(characterId);
+                    if (!Number.isInteger(normalizedCharacterId) || normalizedCharacterId < 1 || normalizedCharacterId > 40) {
+                        throw new Error('请选择一个有效角色。');
+                    }
+                    request.characterId = normalizedCharacterId;
+                }
+                return request;
+            }
+
+            async function requestBestdoriJson(endpoint, body = null, timeoutMs = 10000) {
+                const headers = {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'homelab-dashboard'
+                };
+                if (body !== null) headers['Content-Type'] = 'application/json';
+
+                return fetchWithTimeout(endpoint.href, {
+                    method: body === null ? 'GET' : 'POST',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers,
+                    body: body === null ? null : JSON.stringify(body)
+                }, timeoutMs, null, async (response) => {
+                    let payload = null;
+                    try {
+                        payload = await response.json();
+                    } catch (error) {
+                        // Keep the HTTP status useful if an intermediary returned non-JSON.
+                    }
+                    if (!response.ok) {
+                        throw new Error(bestdoriErrorMessage(payload, response.status, 'Bestdori'));
+                    }
+                    if (!payload || typeof payload !== 'object') {
+                        throw new Error('Bestdori 接口返回了无效数据');
+                    }
+                    return payload;
+                });
+            }
+
+            function syncBackgroundControlsBusy() {
+                const isBusy = backgroundManagerIsBusy();
                 const managerOnline = backgroundPreferencesConnection === 'online';
                 const selectedName = normalizeBackgroundName(backgroundPreferences[editingBackgroundMode]);
                 const canDelete = managerOnline
@@ -1636,6 +2004,7 @@
                 backgroundUploadButton.disabled = isBusy || !managerOnline;
                 backgroundUploadInput.disabled = isBusy || !managerOnline;
                 backgroundDeleteButton.disabled = !canDelete;
+                backgroundDrawButton.disabled = isBusy || !managerOnline;
                 backgroundDeleteButton.setAttribute(
                     'aria-label',
                     canDelete ? `删除当前${backgroundModeLabels[editingBackgroundMode]}背景 ${selectedName}` : '删除当前背景'
@@ -1808,7 +2177,7 @@
             }
 
             async function saveSharedBackgroundPreference(mode, url) {
-                if (backgroundWritePending || !backgroundModes.includes(mode)) return false;
+                if (backgroundManagerIsBusy() || !backgroundModes.includes(mode)) return false;
                 const candidate = normalizeBackgroundUrl(url);
                 if (!candidate) {
                     setBackgroundStatus('该图片地址无效，未修改共享设置。', 'error');
@@ -1939,10 +2308,7 @@
                 }
                 if (
                     backgroundPreferencesConnection !== 'online'
-                    || backgroundScanPending
-                    || backgroundWritePending
-                    || backgroundUploadPending
-                    || backgroundDeletePending
+                    || backgroundManagerIsBusy()
                 ) {
                     setBackgroundStatus('背景管理服务正忙或暂不可用，请稍后再试。', 'error');
                     return false;
@@ -2001,6 +2367,295 @@
                 }
             }
 
+            function cardDrawDialogIsOpen() {
+                return cardDrawDialog.open || cardDrawDialog.hasAttribute('open');
+            }
+
+            function selectedCardDrawMode() {
+                return cardDrawModeInputs.find((input) => input.checked)?.value || '';
+            }
+
+            function selectedCardDrawRarities() {
+                return cardDrawRarityInputs
+                    .filter((input) => input.checked)
+                    .map((input) => Number(input.value));
+            }
+
+            function setCardDrawStatus(message, kind = '') {
+                cardDrawStatus.textContent = message;
+                if (kind) {
+                    cardDrawStatus.dataset.kind = kind;
+                } else {
+                    delete cardDrawStatus.dataset.kind;
+                }
+            }
+
+            function syncCardDrawControls() {
+                const mode = selectedCardDrawMode();
+                const hasRarity = selectedCardDrawRarities().length > 0;
+                const hasCharacter = Number.isInteger(Number(cardCharacterSelect.value))
+                    && Number(cardCharacterSelect.value) >= 1
+                    && Number(cardCharacterSelect.value) <= 40;
+                const inputs = [...cardDrawModeInputs, ...cardDrawRarityInputs];
+
+                inputs.forEach((input) => {
+                    input.disabled = backgroundDrawPending;
+                });
+                cardCharacterSelect.disabled = backgroundDrawPending
+                    || mode !== 'character'
+                    || !cardDrawCharactersLoaded;
+                cardDrawClose.disabled = backgroundDrawPending;
+                cardDrawForm.setAttribute('aria-busy', String(backgroundDrawPending));
+                cardDrawSubmit.disabled = backgroundDrawPending
+                    || !hasRarity
+                    || (mode === 'character' && !hasCharacter);
+                cardDrawSubmit.setAttribute('aria-busy', String(backgroundDrawPending));
+                cardHistoryReconcile.disabled = backgroundDrawPending;
+                cardHistoryReset.disabled = backgroundDrawPending;
+            }
+
+            async function loadBestdoriCharacters() {
+                if (cardDrawCharactersLoaded || backgroundDrawPending) return cardDrawCharactersLoaded;
+
+                backgroundDrawPending = true;
+                syncBackgroundControlsBusy();
+                syncCardDrawControls();
+                setCardDrawStatus('正在读取角色列表…');
+
+                try {
+                    const payload = await requestBestdoriJson(bestdoriCharactersEndpoint, null, 15000);
+                    const characters = Array.isArray(payload.characters)
+                        ? payload.characters.filter((character) => (
+                            character
+                            && Number.isInteger(Number(character.id))
+                            && Number(character.id) >= 1
+                            && Number(character.id) <= 40
+                            && typeof character.name === 'string'
+                            && character.name
+                        ))
+                        : [];
+                    if (characters.length === 0) throw new Error('角色接口没有返回可用角色');
+
+                    const fragment = document.createDocumentFragment();
+                    characters
+                        .sort((left, right) => Number(left.id) - Number(right.id))
+                        .forEach((character) => {
+                            const option = document.createElement('option');
+                            option.value = String(Number(character.id));
+                            option.textContent = character.name;
+                            fragment.append(option);
+                        });
+                    cardCharacterSelect.replaceChildren(fragment);
+                    cardDrawCharactersLoaded = true;
+                    setCardDrawStatus(`已读取 ${characters.length} 个角色，请选择抽取条件。`, 'success');
+                    return true;
+                } catch (error) {
+                    console.warn('Bestdori 角色列表读取失败。', error);
+                    cardCharacterSelect.replaceChildren();
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = '角色列表暂不可用';
+                    cardCharacterSelect.append(option);
+                    setCardDrawStatus(`角色列表读取失败：${error.message || '未知错误'}；仍可使用全随机模式。`, 'error');
+                    return false;
+                } finally {
+                    backgroundDrawPending = false;
+                    syncBackgroundControlsBusy();
+                    syncCardDrawControls();
+                }
+            }
+
+            function closeCardDrawDialog(returnValue = '', restoreFocus = true) {
+                if (!cardDrawDialogIsOpen() || backgroundDrawPending) return false;
+                cardDrawDialog.classList.remove('is-visible');
+                if (typeof cardDrawDialog.close === 'function' && cardDrawDialog.open) {
+                    cardDrawDialog.close(returnValue);
+                } else {
+                    cardDrawDialog.removeAttribute('open');
+                }
+                if (restoreFocus) focusWithoutScroll(backgroundDrawButton);
+                return true;
+            }
+
+            async function openCardDrawDialog() {
+                if (backgroundManagerIsBusy() || backgroundPreferencesConnection !== 'online') {
+                    setBackgroundStatus('背景管理服务正忙或暂不可用，请稍后再试。', 'error');
+                    return false;
+                }
+
+                if (typeof cardDrawDialog.showModal === 'function') {
+                    if (!cardDrawDialog.open) cardDrawDialog.showModal();
+                } else {
+                    cardDrawDialog.setAttribute('open', '');
+                }
+                const reveal = () => {
+                    if (cardDrawDialogIsOpen()) cardDrawDialog.classList.add('is-visible');
+                };
+                if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    reveal();
+                } else {
+                    window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
+                }
+
+                syncCardDrawControls();
+                if (!cardDrawCharactersLoaded) await loadBestdoriCharacters();
+                if (cardDrawDialogIsOpen()) {
+                    const focusTarget = selectedCardDrawMode() === 'character' && !cardCharacterSelect.disabled
+                        ? cardCharacterSelect
+                        : cardDrawModeInputs[0];
+                    focusWithoutScroll(focusTarget);
+                }
+                return true;
+            }
+
+            async function drawBestdoriCard() {
+                if (backgroundManagerIsBusy() || backgroundPreferencesConnection !== 'online') {
+                    setCardDrawStatus('背景管理服务正忙或暂不可用，请稍后再试。', 'error');
+                    return false;
+                }
+
+                let request;
+                try {
+                    request = buildBestdoriDrawRequest(
+                        selectedCardDrawMode(),
+                        selectedCardDrawRarities(),
+                        cardCharacterSelect.value
+                    );
+                } catch (error) {
+                    setCardDrawStatus(error.message, 'error');
+                    syncCardDrawControls();
+                    return false;
+                }
+
+                let drawnName = '';
+                let succeeded = false;
+                backgroundDrawPending = true;
+                syncBackgroundControlsBusy();
+                syncCardDrawControls();
+                setCardDrawStatus('正在从 Bestdori 抽取并下载卡面，请稍候…');
+
+                try {
+                    const payload = await requestBestdoriJson(bestdoriDrawEndpoint, request, 90000);
+                    drawnName = normalizeBackgroundName(
+                        payload.background && payload.background.background
+                    ) || '';
+                    if (!drawnName) throw new Error('抽卡接口返回了无效背景文件名');
+
+                    const card = payload.card && typeof payload.card === 'object' ? payload.card : {};
+                    const characterName = typeof card.characterName === 'string' ? card.characterName : '未知角色';
+                    const rarity = [3, 4, 5].includes(Number(card.rarity)) ? `${Number(card.rarity)} 星` : '未知星级';
+                    await scanBackgroundDirectory({
+                        successMessage: `已抽到 ${characterName} · ${rarity}，下载为 ${drawnName}；当前背景未更改。`
+                    });
+                    succeeded = true;
+                    return true;
+                } catch (error) {
+                    console.warn('Bestdori 抽卡失败。', error);
+                    const message = `抽卡失败：${error.message || '未知错误'}`;
+                    setCardDrawStatus(message, 'error');
+                    setBackgroundStatus(message, 'error');
+                    return false;
+                } finally {
+                    backgroundDrawPending = false;
+                    syncBackgroundControlsBusy();
+                    syncCardDrawControls();
+                    if (succeeded) {
+                        closeCardDrawDialog('drawn', false);
+                        focusBackgroundOption(drawnName);
+                    }
+                }
+            }
+
+            async function reconcileBestdoriHistory() {
+                if (backgroundManagerIsBusy()) return false;
+
+                backgroundDrawPending = true;
+                syncBackgroundControlsBusy();
+                syncCardDrawControls();
+                setCardDrawStatus('正在核对抽卡记录与本地图片…');
+                try {
+                    const payload = await requestBestdoriJson(bestdoriReconcileEndpoint, {}, 30000);
+                    const removed = Number.isInteger(Number(payload.removed)) ? Number(payload.removed) : 0;
+                    const remaining = Number.isInteger(Number(payload.remaining)) ? Number(payload.remaining) : 0;
+                    setCardDrawStatus(`已清理 ${removed} 条失效记录，当前保留 ${remaining} 条。图片未被删除。`, 'success');
+                    return true;
+                } catch (error) {
+                    console.warn('Bestdori 抽卡记录清理失败。', error);
+                    setCardDrawStatus(`清理失效记录失败：${error.message || '未知错误'}`, 'error');
+                    return false;
+                } finally {
+                    backgroundDrawPending = false;
+                    syncBackgroundControlsBusy();
+                    syncCardDrawControls();
+                    focusWithoutScroll(cardHistoryReconcile);
+                }
+            }
+
+            function cardHistoryResetDialogIsOpen() {
+                return cardHistoryResetDialog.open || cardHistoryResetDialog.hasAttribute('open');
+            }
+
+            function syncCardHistoryResetControls() {
+                cardHistoryResetCancel.disabled = backgroundDrawPending;
+                cardHistoryResetConfirm.disabled = backgroundDrawPending;
+                cardHistoryResetConfirm.setAttribute('aria-busy', String(backgroundDrawPending));
+            }
+
+            function openCardHistoryResetDialog() {
+                if (backgroundManagerIsBusy()) return false;
+                cardHistoryResetStatus.textContent = '';
+                if (typeof cardHistoryResetDialog.showModal === 'function') {
+                    if (!cardHistoryResetDialog.open) cardHistoryResetDialog.showModal();
+                } else {
+                    cardHistoryResetDialog.setAttribute('open', '');
+                }
+                cardHistoryResetDialog.classList.add('is-visible');
+                syncCardHistoryResetControls();
+                focusWithoutScroll(cardHistoryResetConfirm);
+                return true;
+            }
+
+            function closeCardHistoryResetDialog(returnValue = '', restoreFocus = true) {
+                if (!cardHistoryResetDialogIsOpen() || backgroundDrawPending) return false;
+                cardHistoryResetDialog.classList.remove('is-visible');
+                if (typeof cardHistoryResetDialog.close === 'function' && cardHistoryResetDialog.open) {
+                    cardHistoryResetDialog.close(returnValue);
+                } else {
+                    cardHistoryResetDialog.removeAttribute('open');
+                }
+                cardHistoryResetStatus.textContent = '';
+                if (restoreFocus) focusWithoutScroll(cardHistoryReset);
+                return true;
+            }
+
+            async function resetBestdoriHistory() {
+                if (!cardHistoryResetDialogIsOpen() || backgroundManagerIsBusy()) return false;
+
+                let succeeded = false;
+                backgroundDrawPending = true;
+                syncBackgroundControlsBusy();
+                syncCardDrawControls();
+                syncCardHistoryResetControls();
+                cardHistoryResetStatus.textContent = '正在清空防重复记录…';
+                try {
+                    const payload = await requestBestdoriJson(bestdoriResetEndpoint, {}, 30000);
+                    const removed = Number.isInteger(Number(payload.removed)) ? Number(payload.removed) : 0;
+                    setCardDrawStatus(`已清空 ${removed} 条抽卡记录。已下载图片未被删除。`, 'success');
+                    succeeded = true;
+                    return true;
+                } catch (error) {
+                    console.warn('Bestdori 抽卡记录重置失败。', error);
+                    cardHistoryResetStatus.textContent = `清空失败：${error.message || '未知错误'}`;
+                    return false;
+                } finally {
+                    backgroundDrawPending = false;
+                    syncBackgroundControlsBusy();
+                    syncCardDrawControls();
+                    syncCardHistoryResetControls();
+                    if (succeeded) closeCardHistoryResetDialog('reset');
+                }
+            }
+
             function backgroundDeleteDialogIsOpen() {
                 return backgroundDeleteDialog.open || backgroundDeleteDialog.hasAttribute('open');
             }
@@ -2051,10 +2706,7 @@
 
             function openBackgroundDeleteDialog() {
                 const fileName = normalizeBackgroundName(backgroundPreferences[editingBackgroundMode]);
-                const isBusy = backgroundScanPending
-                    || backgroundWritePending
-                    || backgroundUploadPending
-                    || backgroundDeletePending;
+                const isBusy = backgroundManagerIsBusy();
                 if (
                     !fileName
                     || fileName.toLowerCase() === defaultBackgroundName
@@ -2287,10 +2939,7 @@
             function setEditingBackgroundMode(mode, announce = true) {
                 if (
                     !backgroundModes.includes(mode)
-                    || backgroundScanPending
-                    || backgroundWritePending
-                    || backgroundUploadPending
-                    || backgroundDeletePending
+                    || backgroundManagerIsBusy()
                 ) return false;
                 editingBackgroundMode = mode;
                 updateBackgroundModeControls();
@@ -2315,6 +2964,63 @@
                 const file = backgroundUploadInput.files && backgroundUploadInput.files[0];
                 backgroundUploadInput.value = '';
                 if (file) uploadBackgroundFile(file);
+            });
+
+            backgroundDrawButton.addEventListener('click', openCardDrawDialog);
+            cardDrawClose.addEventListener('click', () => closeCardDrawDialog('close'));
+            cardDrawForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                drawBestdoriCard();
+            });
+            cardDrawModeInputs.forEach((input) => {
+                input.addEventListener('change', () => {
+                    syncCardDrawControls();
+                    if (selectedCardDrawMode() === 'random') {
+                        setCardDrawStatus('全随机模式会在所选星级范围内抽取未重复卡面。');
+                    } else {
+                        setCardDrawStatus('请选择角色与至少一个星级。');
+                    }
+                });
+            });
+            cardDrawRarityInputs.forEach((input) => {
+                input.addEventListener('change', () => {
+                    syncCardDrawControls();
+                    if (selectedCardDrawRarities().length === 0) {
+                        setCardDrawStatus('请至少选择一个星级。', 'error');
+                    }
+                });
+            });
+            cardCharacterSelect.addEventListener('change', syncCardDrawControls);
+            cardHistoryReconcile.addEventListener('click', reconcileBestdoriHistory);
+            cardHistoryReset.addEventListener('click', openCardHistoryResetDialog);
+
+            cardDrawDialog.addEventListener('cancel', (event) => {
+                event.preventDefault();
+                if (!backgroundDrawPending) closeCardDrawDialog('cancel');
+            });
+            cardDrawDialog.addEventListener('click', (event) => {
+                if (event.target === cardDrawDialog && !backgroundDrawPending) {
+                    closeCardDrawDialog('backdrop');
+                }
+            });
+            cardDrawDialog.addEventListener('close', () => {
+                cardDrawDialog.classList.remove('is-visible');
+            });
+
+            cardHistoryResetCancel.addEventListener('click', () => closeCardHistoryResetDialog('cancel'));
+            cardHistoryResetConfirm.addEventListener('click', resetBestdoriHistory);
+            cardHistoryResetDialog.addEventListener('cancel', (event) => {
+                event.preventDefault();
+                if (!backgroundDrawPending) closeCardHistoryResetDialog('cancel');
+            });
+            cardHistoryResetDialog.addEventListener('click', (event) => {
+                if (event.target === cardHistoryResetDialog && !backgroundDrawPending) {
+                    closeCardHistoryResetDialog('backdrop');
+                }
+            });
+            cardHistoryResetDialog.addEventListener('close', () => {
+                cardHistoryResetDialog.classList.remove('is-visible');
+                cardHistoryResetStatus.textContent = '';
             });
 
             backgroundDeleteButton.addEventListener('click', openBackgroundDeleteDialog);
@@ -2430,9 +3136,7 @@
                 if (
                     backgroundDialogIsOpen()
                     && !editingBackgroundModeTouched
-                    && !backgroundWritePending
-                    && !backgroundUploadPending
-                    && !backgroundDeletePending
+                    && !backgroundManagerIsBusy()
                 ) {
                     setEditingBackgroundMode(activeBackgroundMode, false);
                 }

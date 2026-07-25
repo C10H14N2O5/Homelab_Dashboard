@@ -9,11 +9,11 @@
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余图片由部署机器本地保存 |
 | 服务入口 | 11 个 HomeLab 子域名 |
-| 状态服务 | Python 服务；提供壁纸偏好、图片管理与批量入口探测，生产为 Windows x64 单文件 EXE |
+| 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
 | 自动启动 | 当前用户 `shell:startup` 快捷方式，登录后显示监视器 |
-| 配置与状态 | 严格 v2 JSON 配置；状态位于 `HomeLabWallpaperState-data/state.json` |
+| 配置与状态 | 严格 v2 JSON 配置；背景状态和独立抽卡去重记录位于 `HomeLabWallpaperState-data/` |
 | 前端依赖 | 无 CDN、无框架、内联 SVG |
 
 ## 文件结构
@@ -47,6 +47,8 @@ Zoraxy_StaticWebSite/
 ├── GET /backgrounds/                     -> Zoraxy 静态目录列表
 ├── GET/PATCH /api/background-preferences  -> Zoraxy Virtual Directory
 ├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
+├── GET/POST /api/bestdori/...              -> Python 状态服务
+│                                               -> Bestdori 固定 HTTPS API/资源
 └── POST /api/service-status               -> Python 状态服务
                                                 -> 127.0.0.1:443 Zoraxy
                                                 -> 11 个服务上游
@@ -122,6 +124,34 @@ Content-Type: application/json
 
 回收站失败后的永久删除请求增加 `confirmationToken` 字段。成功响应会说明删除方式并返回更新后的完整背景偏好；直接伪造永久删除参数不能绕过首次回收站尝试。
 
+#### Bestdori 卡面抽取
+
+“我的回合，抽卡！”会打开独立参数弹窗，提供两种模式：
+
+- 角色模式：从固定角色 ID 1–40 中选择一个角色，再从勾选的 3、4、5 星范围内随机抽取；
+- 全随机模式：不指定角色，只在勾选的 3、4、5 星范围内随机抽取。
+
+至少要选择一个星级。服务端先过滤尚未记录的卡面，再随机选择；优先下载训练后卡面，资源不存在时回退到普通卡面。抽取结果经过与上传相同的图片大小、像素、格式和原子发布校验后写入 `backgrounds/`，文件名保留角色、星级、标题和卡面 ID。成功后页面只刷新列表并聚焦新卡面，不自动改变横屏或竖屏当前背景；符合条件但没有未抽取卡面时会明确提示去重池已耗尽。
+
+如果只有角色名称目录暂时不可用，角色模式会因无法选择角色而停用，但全随机模式仍可继续抽取，并在文件名与记录中使用“角色 ID”作为名称兜底；卡片目录或图片资源不可用时则会明确报错且不写入文件或去重记录。
+
+```http
+POST /api/background-files/draw
+Origin: https://home.c10h14n2o5.com
+X-Requested-With: homelab-dashboard
+Content-Type: application/json
+
+{"mode":"character","rarities":[3,4,5],"characterId":4}
+```
+
+全随机请求省略 `characterId`：
+
+```json
+{"mode":"random","rarities":[4,5]}
+```
+
+永久去重记录独立保存在非公开状态目录的 `HomeLabWallpaperState-data/BestdoriCardDraws.json`，记录卡面 ID、实际文件名、SHA-256、抽取时间和卡面元数据，不与浏览器缓存或其它抽卡工具共享。“清理失效记录”只删除背景文件已缺失或 SHA-256 不匹配的记录；“清空全部记录”需要二次确认。两项操作都只维护 JSON 记录，不会删除任何背景图片。记录文件损坏时，抽卡与历史维护 API 会安全失败，壁纸偏好、上传、删除、入口探测和健康检查仍可继续使用。
+
 ## Python 状态服务
 
 `state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
@@ -130,6 +160,10 @@ Content-Type: application/json
 - `PATCH /api/background-preferences`：更新横屏或竖屏槽位；
 - `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
 - `POST /api/background-files/remove`：将图片移入回收站，必要时处理带短时令牌的永久删除；
+- `GET /api/bestdori/characters`：读取固定角色 ID 1–40 的显示名称；
+- `POST /api/background-files/draw`：按角色/星级或全随机参数抽取、验证并保存一张未记录卡面；
+- `POST /api/bestdori/history/reconcile`：移除文件缺失或哈希不匹配的失效去重记录，不删除图片；
+- `POST /api/bestdori/history/reset`：在前端二次确认后清空全部去重记录，不删除图片；
 - `POST /api/service-status`：按输入顺序批量返回入口 HTTP 状态、耗时和稳定错误码；
 - `GET /healthz`：返回状态、服务标识、版本和 PID；
 - `POST /_control/shutdown`：仅供本机启动器使用的令牌控制端点，不得由 Zoraxy 代理。
@@ -139,6 +173,8 @@ Content-Type: application/json
 - 强制监听 `127.0.0.1`；
 - 所有写入 API 校验精确 Origin 和请求标记；JSON 与上传接口分别校验 Content-Type、Content-Length 和正文上限；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
+- Bestdori 目录和图片下载只访问代码中固定的 HTTPS API 与资源地址，不接受客户端提供远程 URL；下载图片沿用上传的大小、像素、格式和原子发布约束；
+- 抽卡使用独立的非阻塞互斥锁；永久去重记录只在卡面验证并发布成功后原子写入，符合条件的未记录池耗尽时不会回退到重复卡面；
 - 拒绝未知字段、路径穿越、不支持的扩展名、符号链接和不存在文件；
 - `bg.jpg` 永久禁止删除；永久删除必须使用回收站失败后签发的 60 秒单次令牌；
 - 探测只接受配置域后缀的单层 HTTPS 子域，禁止凭据、fragment、非 443 端口、IP、外部域和多层子域；
@@ -215,6 +251,7 @@ HomeLabWallpaperState.exe restart
 ├── HomeLabWallpaperState.exe
 ├── HomeLabWallpaperState.json
 ├── HomeLabWallpaperState-data/
+│   ├── BestdoriCardDraws.json
 │   ├── state.json
 │   └── service.log
 
@@ -225,7 +262,7 @@ D:/Zoraxy/www/html/backgrounds/
 
 ## 构建
 
-当前开发环境使用 Python 3.14。构建依赖固定为 PyInstaller 6.21.0、Pillow 12.3.0 和 Send2Trash 2.1.0；三者会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
+当前开发环境使用 Python 3.14。构建依赖固定为 PyInstaller 6.21.0、Pillow 12.3.0 和 Send2Trash 2.1.0；Bestdori HTTPS 请求使用 Python 标准库，不新增第三方依赖。三项固定依赖会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
 
 ```powershell
 python -m venv .venv
@@ -241,23 +278,23 @@ py_compile
 -> 依赖导入与 JPEG/PNG/WebP/AVIF 编解码能力预检
 -> PyInstaller --onefile --console --noupx
 -> 临时端口 EXE 冒烟测试
--> 健康检查、GET、PATCH、真实 PNG 上传、批量状态 API、控制关闭
+-> 健康检查、GET、PATCH、真实 PNG 上传、离线抽卡历史维护、批量状态 API、控制关闭
 -> SHA-256
 -> dist/HomeLabWallpaperState.exe
 ```
 
-构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。上传冒烟测试只操作构建目录中的临时背景文件并随构建临时目录清理，不会向系统回收站写入测试文件。
+构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。上传和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理，不会请求 Bestdori 公网，也不会向系统回收站写入测试文件。
 
 ## 部署和迁移
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
-2. 停止旧后端，删除现有 `HomeLabWallpaperState.json` 与 `HomeLabWallpaperState-data/`，将新版 EXE 复制到非公开的 Zoraxy 程序目录。
-3. 核对构建输出 SHA-256 后双击新版 EXE，完成严格 v2 首次引导并创建当前用户 Startup 快捷方式。
-4. 先验证 `/healthz`、壁纸 GET/PATCH、上传/删除 API 和 Homepage 同源 `/api/service-status`，再部署新版 `index.html`；新版前端不得先于支持图片管理接口的 EXE 上线。
-5. 确认浏览器每次刷新只发送一次同源批量状态请求，全部卡片、壁纸同步、上传和回收站删除均正常。
+2. 停止旧后端，将新版 EXE 复制到非公开的 Zoraxy 程序目录。本次配置版本和背景状态版本不变，不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
+3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `4`；接口版本不匹配时启动器会拒绝复用旧进程。
+4. 先验证壁纸 GET/PATCH、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署包含抽卡入口的新版 `index.html`；新版前端不得先于接口版本 4 的 EXE 上线。
+5. 确认浏览器每次刷新只发送一次同源批量状态请求，全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式均正常。
 6. 最后删除 11 个子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机的 `backgrounds/`；从 Windows 回收站恢复的图片需保持原文件名，随后在网页中重新选择对应槽位。已经永久删除的图片只能从独立备份恢复。
+若回滚到旧前端，必须同时恢复兼容的旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机的 `backgrounds/` 和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；旧版 EXE 不会使用去重记录，但不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名，随后在网页中重新选择对应槽位。已经永久删除的图片只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -303,6 +340,9 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 网页可以读取和更新横竖屏背景；
 - 网页可以上传真实图片但不会自动切换，重名时自动编号；
 - 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；
+- 角色模式和全随机模式只接受 3–5 星，抽卡成功会新增并聚焦图片但不会自动切换背景；
+- 重复卡面不会再次抽取；清理失效记录和清空全部记录不删除背景图片，清空前会二次确认；
+- Bestdori 不可访问或去重记录损坏时，已有背景、上传/删除、入口探测和 `/healthz` 仍正常；
 - 一个 2xx/3xx、4xx 和 5xx/网络失败入口分别显示绿、黄、红；
 - 停止状态 API 时全部卡片显示“状态未知”，而不是误报全部离线；
 - 删除旧的 CORS 响应头后 Homepage 状态正常，AstrBot 插件资源恢复；
@@ -313,6 +353,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 修改后先运行统一验证，不要跳过失败项。
 - 新增或删除服务卡片时只需维护卡片 HTML，并手动更新 README 中的当前数量和架构说明；页面数量文案、动画序号和前端验证会根据实际卡片自动适配。
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它背景文件不进入 Git，应独立备份。
+- `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。

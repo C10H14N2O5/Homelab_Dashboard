@@ -39,6 +39,47 @@ def image_bytes(image_format: str = "PNG") -> bytes:
     return output.getvalue()
 
 
+class FakeBestdoriClient:
+    def __init__(self) -> None:
+        self.characters = [
+            {"id": 1, "name": "户山香澄"},
+            {"id": 2, "name": "花园多惠"},
+        ]
+        self.cards = [
+            {
+                "id": 101,
+                "characterId": 1,
+                "rarity": 3,
+                "resourceSetName": "card101",
+                "title": "星之鼓动",
+                "server": "cn",
+            },
+            {
+                "id": 102,
+                "characterId": 2,
+                "rarity": 5,
+                "resourceSetName": "card102",
+                "title": "闪耀舞台",
+                "server": "jp",
+            },
+        ]
+        self.download_started: threading.Event | None = None
+        self.download_continue: threading.Event | None = None
+
+    def get_characters(self) -> list[dict[str, object]]:
+        return [dict(character) for character in self.characters]
+
+    def get_cards(self) -> list[dict[str, object]]:
+        return [dict(card) for card in self.cards]
+
+    def download_card(self, card: dict[str, object]) -> tuple[bytes, str]:
+        if self.download_started is not None:
+            self.download_started.set()
+        if self.download_continue is not None:
+            self.download_continue.wait(timeout=2)
+        return image_bytes(), "after_training"
+
+
 class TemporaryProject:
     def __init__(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -342,6 +383,232 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(self.store._removal_tokens), main.MAX_REMOVAL_TOKENS)
 
 
+class BestdoriClientTests(unittest.TestCase):
+    def test_catalog_filters_supported_characters_rarities_and_release_server(self) -> None:
+        client = main.BestdoriClient(opener=mock.Mock())
+        characters = {
+            str(character_id): {"characterName": [f"JP {character_id}", "", "", f"中文 {character_id}"]}
+            for character_id in range(1, 41)
+        }
+        cards = {
+            "101": {
+                "characterId": 1,
+                "rarity": 3,
+                "resourceSetName": "card101",
+                "prefix": ["日文", "", "", "中文标题"],
+                "releasedAt": [None, None, None, 123, None],
+            },
+            "102": {
+                "characterId": 41,
+                "rarity": 5,
+                "resourceSetName": "new-band",
+                "prefix": ["unsupported"],
+                "releasedAt": [123],
+            },
+            "103": {
+                "characterId": 1,
+                "rarity": 2,
+                "resourceSetName": "low-rarity",
+                "prefix": ["unsupported"],
+                "releasedAt": [123],
+            },
+            "104": {
+                "characterId": 1,
+                "rarity": 5,
+                "resourceSetName": "../unsafe",
+                "prefix": ["unsafe"],
+                "releasedAt": [123],
+            },
+            "105": {
+                "characterId": 2,
+                "rarity": 4,
+                "resourceSetName": "unreleased",
+                "prefix": ["unreleased"],
+                "releasedAt": [None, None, None, None, None],
+            },
+        }
+        with mock.patch.object(client, "_read_json", side_effect=[characters, cards]):
+            parsed_characters = client.get_characters()
+            parsed_cards = client.get_cards()
+        self.assertEqual(len(parsed_characters), 40)
+        self.assertEqual(parsed_characters[0], {"id": 1, "name": "中文 1"})
+        self.assertEqual(
+            parsed_cards,
+            [{
+                "id": 101,
+                "characterId": 1,
+                "rarity": 3,
+                "resourceSetName": "card101",
+                "title": "中文标题",
+                "server": "cn",
+            }],
+        )
+
+    def test_card_download_falls_back_from_after_training_404_to_normal(self) -> None:
+        client = main.BestdoriClient(opener=mock.Mock())
+        card = {"server": "jp", "resourceSetName": "card101"}
+        payload = image_bytes()
+        with mock.patch.object(
+            client,
+            "_read",
+            side_effect=[main.BestdoriAssetMissing("missing"), payload],
+        ) as read:
+            downloaded, art = client.download_card(card)
+        self.assertEqual(downloaded, payload)
+        self.assertEqual(art, "normal")
+        self.assertIn("card_after_training.png", read.call_args_list[0].args[0])
+        self.assertIn("card_normal.png", read.call_args_list[1].args[0])
+
+    def test_fixed_https_origin_and_response_size_are_enforced(self) -> None:
+        client = main.BestdoriClient(opener=mock.Mock())
+        for url in (
+            "http://bestdori.com/api/cards/all.5.json",
+            "https://evil.example/api/cards/all.5.json",
+            "https://bestdori.com.evil.example/api/cards/all.5.json",
+            "https://bestdori.com:444/api/cards/all.5.json",
+        ):
+            with self.subTest(url=url), self.assertRaises(main.BestdoriUnavailable):
+                client._validate_url(url)
+
+        response = mock.MagicMock()
+        response.geturl.return_value = main.BESTDORI_CHARACTERS_URL
+        response.headers.get_content_type.return_value = "application/json"
+        response.headers.get.return_value = str(main.MAX_BESTDORI_CATALOG_BODY + 1)
+        response.__enter__.return_value = response
+        client.opener.open.return_value = response
+        with self.assertRaisesRegex(main.BestdoriUnavailable, "too large"):
+            client._read_json(main.BESTDORI_CHARACTERS_URL)
+        self.assertTrue(any(isinstance(handler, main._RejectBestdoriRedirects) for handler in main.BestdoriClient().opener.handlers))
+
+
+class BestdoriDrawTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.project = TemporaryProject()
+        self.config = self.project.write_config()
+        self.store = main.StateStore(self.config.background_dir, self.config.state_file, lambda: FIXED_TIME)
+        self.client = FakeBestdoriClient()
+        self.history_path = self.config.state_dir / "BestdoriCardDraws.json"
+        self.history = main.BestdoriHistoryStore(self.history_path, lambda: FIXED_TIME)
+        self.manager = main.BestdoriDrawManager(
+            self.store,
+            self.history_path,
+            client=self.client,
+            history=self.history,
+            choice=lambda values: values[0],
+        )
+
+    def tearDown(self) -> None:
+        self.project.close()
+
+    def test_character_draw_publishes_records_and_permanently_deduplicates(self) -> None:
+        result = self.manager.draw("character", {3, 5}, 1)
+        self.assertEqual(result["card"]["id"], 101)
+        self.assertEqual(result["card"]["characterName"], "户山香澄")
+        self.assertEqual(result["card"]["art"], "after_training")
+        filename = result["background"]["background"]
+        self.assertIn("户山香澄_三星_星之鼓动_101_after_training.png", filename)
+        self.assertTrue((self.project.backgrounds / filename).is_file())
+        history = json.loads(self.history_path.read_text(encoding="utf-8"))
+        self.assertEqual(history["version"], 1)
+        self.assertEqual(history["records"]["101"]["filename"], filename)
+        self.assertEqual(
+            history["records"]["101"]["sha256"],
+            main.hashlib.sha256((self.project.backgrounds / filename).read_bytes()).hexdigest(),
+        )
+        with self.assertRaises(main.BestdoriPoolExhausted):
+            self.manager.draw("character", {3}, 1)
+
+        second = self.manager.draw("random", {5})
+        self.assertEqual(second["card"]["id"], 102)
+        with self.assertRaises(main.BestdoriPoolExhausted):
+            self.manager.draw("random", {3, 5})
+
+    def test_random_draw_survives_character_name_catalog_failure(self) -> None:
+        with mock.patch.object(
+            self.client,
+            "get_characters",
+            side_effect=main.BestdoriUnavailable("character catalog unavailable"),
+        ):
+            result = self.manager.draw("random", {3})
+
+        self.assertEqual(result["card"]["characterName"], "角色 1")
+        filename = result["background"]["background"]
+        self.assertIn("角色 1_三星_星之鼓动_101_after_training.png", filename)
+        history = json.loads(self.history_path.read_text(encoding="utf-8"))
+        self.assertEqual(history["records"]["101"]["card"]["characterName"], "角色 1")
+
+    def test_reconcile_removes_missing_and_hash_mismatched_records_without_deleting_images(self) -> None:
+        first = self.manager.draw("character", {3}, 1)
+        second = self.manager.draw("character", {5}, 2)
+        first_path = self.project.backgrounds / first["background"]["background"]
+        second_path = self.project.backgrounds / second["background"]["background"]
+        first_path.write_bytes(b"changed")
+        second_path.unlink()
+
+        result = self.manager.reconcile()
+        self.assertEqual(result, {"removed": 2, "remaining": 0})
+        self.assertEqual(first_path.read_bytes(), b"changed")
+        self.assertFalse(second_path.exists())
+
+    def test_reset_clears_records_but_keeps_downloaded_background(self) -> None:
+        drawn = self.manager.draw("random", {3})
+        path = self.project.backgrounds / drawn["background"]["background"]
+        self.assertEqual(self.manager.reset(), {"removed": 1, "remaining": 0})
+        self.assertTrue(path.is_file())
+        self.assertEqual(json.loads(self.history_path.read_text(encoding="utf-8"))["records"], {})
+
+    def test_corrupt_history_fails_closed_without_affecting_preferences(self) -> None:
+        self.history_path.parent.mkdir(parents=True, exist_ok=True)
+        self.history_path.write_text("{broken", encoding="utf-8")
+        with self.assertRaises(main.BestdoriHistoryError):
+            self.manager.draw("random", {3, 5})
+        with self.assertRaises(main.BestdoriHistoryError):
+            self.manager.reconcile()
+        with self.assertRaises(main.BestdoriHistoryError):
+            self.manager.reset()
+        self.assertEqual(self.store.get()["landscape"], "bg.jpg")
+
+    def test_operation_lock_rejects_concurrent_draw_and_maintenance(self) -> None:
+        self.client.download_started = threading.Event()
+        self.client.download_continue = threading.Event()
+        errors: list[Exception] = []
+
+        def draw() -> None:
+            try:
+                self.manager.draw("random", {3})
+            except Exception as error:
+                errors.append(error)
+
+        thread = threading.Thread(target=draw)
+        thread.start()
+        self.assertTrue(self.client.download_started.wait(timeout=1))
+        with self.assertRaises(main.BestdoriDrawBusy):
+            self.manager.draw("random", {5})
+        with self.assertRaises(main.BestdoriDrawBusy):
+            self.manager.reconcile()
+        with self.assertRaises(main.BestdoriDrawBusy):
+            self.manager.reset()
+        self.client.download_continue.set()
+        thread.join(timeout=2)
+        self.assertEqual(errors, [])
+
+    def test_history_write_failure_rolls_back_published_image(self) -> None:
+        failing_history = mock.Mock()
+        failing_history.used_card_ids.return_value = set()
+        failing_history.record.side_effect = main.BestdoriHistoryError("disk full")
+        manager = main.BestdoriDrawManager(
+            self.store,
+            self.history_path,
+            client=self.client,
+            history=failing_history,
+            choice=lambda values: values[0],
+        )
+        before = {path.name for path in self.project.backgrounds.iterdir()}
+        with self.assertRaises(main.BestdoriHistoryError):
+            manager.draw("random", {3})
+        self.assertEqual({path.name for path in self.project.backgrounds.iterdir()}, before)
+
+
 class FakeResponse:
     def __init__(self, status: int, location: str | None = None) -> None:
         self.status = status
@@ -608,6 +875,42 @@ class FakeProbeClient:
                 for index, target in enumerate(targets)]
 
 
+class FakeBestdoriManager:
+    def __init__(self) -> None:
+        self.draw_request: tuple[str, set[int], int | None] | None = None
+        self.history_action: str | None = None
+
+    def characters(self) -> list[dict[str, object]]:
+        return [{"id": 1, "name": "户山香澄"}, {"id": 40, "name": "奥泽美咲"}]
+
+    def draw(self, mode: str, rarities: set[int], character_id: int | None) -> dict[str, object]:
+        self.draw_request = (mode, set(rarities), character_id)
+        return {
+            "background": {
+                "background": "户山香澄_五星_测试卡面_101_after_training.png",
+                "size": 100,
+                "width": 1000,
+                "height": 1334,
+            },
+            "card": {
+                "id": 101,
+                "characterId": 1,
+                "characterName": "户山香澄",
+                "rarity": 5,
+                "title": "测试卡面",
+                "art": "after_training",
+            },
+        }
+
+    def reconcile(self) -> dict[str, int]:
+        self.history_action = "reconcile"
+        return {"removed": 1, "remaining": 2}
+
+    def reset(self) -> dict[str, int]:
+        self.history_action = "reset"
+        return {"removed": 3, "remaining": 0}
+
+
 class APITests(unittest.TestCase):
     def setUp(self) -> None:
         self.project = TemporaryProject()
@@ -621,6 +924,7 @@ class APITests(unittest.TestCase):
         self.server.store = self.store
         self.server.logger = logger
         self.server.probe_client = FakeProbeClient()
+        self.server.bestdori_manager = FakeBestdoriManager()
         main.ThreadingHTTPServer.__init__(self.server, ("127.0.0.1", 0), main.StateRequestHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -695,6 +999,21 @@ class APITests(unittest.TestCase):
         if headers:
             request_headers.update(headers)
         return self.request("POST", main.BACKGROUND_REMOVE_PATH, json.dumps(value).encode(), request_headers)
+
+    def bestdori_post(
+        self,
+        path: str,
+        value: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request("POST", path, json.dumps(value).encode(), request_headers)
 
     def test_health_and_get_contract(self) -> None:
         status, health = self.request("GET", main.HEALTH_PATH)
@@ -832,6 +1151,95 @@ class APITests(unittest.TestCase):
 
         status, _ = self.request("GET", main.BACKGROUND_REMOVE_PATH)
         self.assertEqual(status, 405)
+
+    def test_bestdori_characters_draw_and_history_contracts(self) -> None:
+        status, characters = self.request("GET", main.BESTDORI_CHARACTERS_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(characters["characters"][0], {"id": 1, "name": "户山香澄"})
+
+        status, drawn = self.bestdori_post(
+            main.BESTDORI_DRAW_PATH,
+            {"mode": "character", "rarities": [3, 5], "characterId": 1},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(drawn["background"]["background"], "户山香澄_五星_测试卡面_101_after_training.png")
+        self.assertEqual(drawn["card"]["id"], 101)
+        self.assertEqual(self.server.bestdori_manager.draw_request, ("character", {3, 5}, 1))
+
+        status, reconciled = self.bestdori_post(main.BESTDORI_RECONCILE_PATH, {})
+        self.assertEqual(status, 200)
+        self.assertEqual(reconciled, {"removed": 1, "remaining": 2})
+        status, reset = self.bestdori_post(main.BESTDORI_RESET_PATH, {})
+        self.assertEqual(status, 200)
+        self.assertEqual(reset, {"removed": 3, "remaining": 0})
+
+    def test_bestdori_request_validation_and_security(self) -> None:
+        valid_random = {"mode": "random", "rarities": [4, 5]}
+        cases = (
+            (valid_random, {"Origin": "https://evil.test"}, 403),
+            (valid_random, {"X-Requested-With": "wrong"}, 403),
+            (valid_random, {"Content-Type": "text/plain"}, 415),
+            ({"mode": "random", "rarities": []}, None, 400),
+            ({"mode": "random", "rarities": [3, 3]}, None, 400),
+            ({"mode": "random", "rarities": [2]}, None, 400),
+            ({"mode": "random", "rarities": [True]}, None, 400),
+            ({"mode": "random", "rarities": [3], "characterId": 1}, None, 400),
+            ({"mode": "character", "rarities": [3]}, None, 400),
+            ({"mode": "character", "rarities": [3], "characterId": 41}, None, 400),
+            ({"mode": "character", "rarities": [3], "characterId": True}, None, 400),
+        )
+        for value, headers, expected in cases:
+            with self.subTest(value=value, headers=headers):
+                status, _ = self.bestdori_post(main.BESTDORI_DRAW_PATH, value, headers)
+                self.assertEqual(status, expected)
+
+        for path in (main.BESTDORI_RECONCILE_PATH, main.BESTDORI_RESET_PATH):
+            with self.subTest(path=path):
+                status, _ = self.bestdori_post(path, {"unexpected": True})
+                self.assertEqual(status, 400)
+                status, _ = self.request("GET", path)
+                self.assertEqual(status, 405)
+        status, _ = self.request("POST", main.BESTDORI_DRAW_PATH, b"{}", {})
+        self.assertEqual(status, 403)
+        status, _ = self.request("POST", main.BESTDORI_CHARACTERS_PATH)
+        self.assertEqual(status, 405)
+
+    def test_all_dashboard_json_endpoints_reject_null_without_hanging(self) -> None:
+        dashboard_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        endpoints = (
+            ("PATCH", main.API_PATH),
+            ("POST", main.BACKGROUND_REMOVE_PATH),
+            ("POST", main.SERVICE_STATUS_PATH),
+            ("POST", main.BESTDORI_DRAW_PATH),
+            ("POST", main.BESTDORI_RECONCILE_PATH),
+            ("POST", main.BESTDORI_RESET_PATH),
+        )
+        for method, path in endpoints:
+            with self.subTest(method=method, path=path):
+                status, payload = self.request(method, path, b"null", dashboard_headers)
+                self.assertEqual(status, 400)
+                self.assertIn("null", payload["error"])
+
+    def test_bestdori_failures_map_to_stable_http_errors(self) -> None:
+        for error, expected_status, expected_message in (
+            (main.BestdoriDrawBusy("busy"), 409, "bestdori_operation_in_progress"),
+            (main.BestdoriPoolExhausted("empty"), 409, "bestdori_card_pool_exhausted"),
+            (main.BestdoriHistoryError("broken"), 503, "bestdori_history_unavailable"),
+            (main.BestdoriUnavailable("offline"), 502, "bestdori_unavailable"),
+            (main.InvalidImage("bad"), 502, "bestdori_invalid_image"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                with mock.patch.object(self.server.bestdori_manager, "draw", side_effect=error):
+                    status, payload = self.bestdori_post(
+                        main.BESTDORI_DRAW_PATH,
+                        {"mode": "random", "rarities": [3]},
+                    )
+                self.assertEqual(status, expected_status)
+                self.assertEqual(payload["error"], expected_message)
 
     def test_service_status_contract_and_partial_failure(self) -> None:
         targets = ["https://one.home.example.test/", "https://two.home.example.test/"]

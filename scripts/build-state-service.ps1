@@ -20,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$expectedServiceVersion = 3
+$expectedServiceVersion = 4
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -266,6 +266,21 @@ try {
             if ($uploadedSmokeBytes[$byteIndex] -ne $smokePngBytes[$byteIndex]) {
                 throw 'Packaged executable changed the uploaded PNG bytes.'
             }
+        }
+
+        $bestdoriReconcile = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/api/bestdori/history/reconcile" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body '{}' `
+            -TimeoutSec 2
+        if (($bestdoriReconcile.removed -isnot [int] -and $bestdoriReconcile.removed -isnot [long]) -or
+            ($bestdoriReconcile.remaining -isnot [int] -and $bestdoriReconcile.remaining -isnot [long]) -or
+            $bestdoriReconcile.removed -lt 0 -or
+            $bestdoriReconcile.remaining -lt 0) {
+            throw 'Packaged executable failed the offline Bestdori history reconciliation smoke test.'
         }
 
         $serviceStatusBody = @{ targets = @('https://outside.example.test/') } | ConvertTo-Json -Compress

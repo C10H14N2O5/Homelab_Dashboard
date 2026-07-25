@@ -6,6 +6,32 @@
 
 - 暂无
 
+## [1.1.0] - 2026-07-26
+
+### Added
+
+- 在“切换背景”弹窗中增加“我的回合，抽卡！”入口；可按固定角色与星级组合抽取卡面，也可在指定星级范围内全随机抽取。角色范围固定为 Bestdori 角色 ID 1–40，星级范围固定为 3–5 星。
+- 增加 Bestdori 卡面代理与历史维护 API：`GET /api/bestdori/characters`、`POST /api/background-files/draw`、`POST /api/bestdori/history/reconcile` 和 `POST /api/bestdori/history/reset`。
+- 增加独立的永久去重记录 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；抽取成功后记录卡面 ID、实际背景文件名、SHA-256、抽取时间和卡面元数据。
+
+### Changed
+
+- 抽取的卡面通过 Bestdori 固定 HTTPS API 获取，优先下载训练后卡面、缺失时回退到普通卡面；服务端验证图片并原子发布到 `backgrounds/`，文件名包含角色、星级、标题和卡面 ID。
+- 抽卡成功后只刷新背景列表并聚焦新卡面，不自动改变横屏或竖屏当前背景。去重池耗尽时明确报错，不会静默重复抽取。
+- 去重记录的“清理失效记录”和“清空全部记录”都不会删除背景图片；清理只移除文件缺失或 SHA-256 不匹配的记录，清空需要独立二次确认。
+- 状态服务接口版本由 3 升级到 4；配置版本和背景偏好状态版本保持不变。生产部署必须先升级并确认新版 EXE，再上线依赖抽卡 API 的 `index.html`。
+- 构建与运行不新增第三方依赖；Bestdori 请求使用 Python 标准库 HTTPS 实现，现有 PyInstaller、Pillow 和 Send2Trash 固定依赖保持不变。
+
+### Fixed
+
+- 修复合法 JSON `null` 请求在现有及新增写入 API 中可能不返回响应的问题；现在统一立即返回 HTTP 400。
+- 角色名称目录单独不可用时，全随机抽卡改用“角色 ID”作为名称兜底，不再被角色显示名称请求阻断；稳定后端错误码也会转换为可读中文提示。
+
+### Security
+
+- Bestdori 请求只访问代码中固定的 HTTPS API 与资源地址；下载内容继续受 50 MiB、100MP、真实图片格式、扩展名、符号链接和原子发布约束保护。
+- 抽卡使用独立的非阻塞互斥锁避免并发重复抽取；去重数据库损坏时仅拒绝抽卡及历史维护请求，不影响壁纸偏好、上传、删除、服务探测和健康检查。
+
 ## [1.0.2] - 2026-07-25
 
 ### Fixed

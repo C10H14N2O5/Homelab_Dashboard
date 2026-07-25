@@ -135,7 +135,7 @@ const fs = require('fs');
 const vm = require('vm');
 
 (async () => {
-const html = fs.readFileSync(process.argv[2], 'utf8');
+const html = fs.readFileSync(process.argv[2] || process.argv[1], 'utf8');
 const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
 if (scripts.length !== 2) throw new Error(`Expected 2 inline scripts, found ${scripts.length}.`);
 scripts.forEach((source, index) => new vm.Script(source, { filename: `inline-script-${index + 1}.js` }));
@@ -162,6 +162,10 @@ const requiredMarkers = [
     '/api/background-preferences',
     '/api/background-files/upload',
     '/api/background-files/remove',
+    '/api/bestdori/characters',
+    '/api/background-files/draw',
+    '/api/bestdori/history/reconcile',
+    '/api/bestdori/history/reset',
     '/api/service-status',
     'homelab-background-state-cache-v1',
     'data-background-mode="landscape"',
@@ -169,6 +173,9 @@ const requiredMarkers = [
     'id="background-upload-button"',
     'id="background-delete-button"',
     'id="background-delete-dialog"',
+    'id="background-draw-button"',
+    'id="card-draw-dialog"',
+    'id="card-history-reset-dialog"',
     'fetchWithTimeout',
     'classifyServiceStatus',
     'data-state="warning"',
@@ -177,6 +184,9 @@ const requiredMarkers = [
     "'Content-Type': 'application/json'",
     'data-state="unknown"',
     'backgroundScanPending',
+    'backgroundDrawPending',
+    'buildBestdoriDrawRequest',
+    'payload.background && payload.background.background',
     'reconcileSharedBackgroundPreference',
     'validateBackgroundUploadFile',
     'backgroundModesUsingFile',
@@ -284,6 +294,227 @@ const affectedModes = context.__backgroundManagerHelpers.backgroundModesUsingFil
 });
 if (JSON.stringify(Array.from(affectedModes)) !== JSON.stringify(['landscape', 'portrait'])) {
     throw new Error('Background deletion impact modes were not derived from both preferences.');
+}
+
+const bestdoriHelperStart = runtimeScript.indexOf('function backgroundManagerIsBusy(');
+const bestdoriHelperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', bestdoriHelperStart);
+if (bestdoriHelperStart < 0 || bestdoriHelperEnd < 0) {
+    throw new Error('Unable to extract Bestdori request helpers for behavior checks.');
+}
+vm.runInContext(
+    runtimeScript.slice(bestdoriHelperStart, bestdoriHelperEnd)
+        + '\nglobalThis.__bestdoriHelpers = { backgroundManagerIsBusy, bestdoriErrorMessage, buildBestdoriDrawRequest, requestBestdoriJson };',
+    context
+);
+
+context.backgroundScanPending = false;
+context.backgroundWritePending = false;
+context.backgroundUploadPending = false;
+context.backgroundDeletePending = false;
+context.backgroundDrawPending = false;
+if (context.__bestdoriHelpers.backgroundManagerIsBusy()) {
+    throw new Error('Idle background manager was reported as busy.');
+}
+context.backgroundDrawPending = true;
+if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
+    throw new Error('Bestdori work was not included in the shared background-manager busy state.');
+}
+context.backgroundDrawPending = false;
+
+const bestdoriErrorCases = [
+    ['bestdori_operation_in_progress', '\u6b63\u5728\u8fdb\u884c'],
+    ['bestdori_card_pool_exhausted', '\u6ca1\u6709\u5c1a\u672a\u62bd\u53d6\u7684\u5361\u9762'],
+    ['bestdori_history_unavailable', '\u62bd\u5361\u8bb0\u5f55\u4e0d\u53ef\u7528'],
+    ['bestdori_unavailable', '\u65e0\u6cd5\u8fde\u63a5 Bestdori'],
+    ['bestdori_invalid_image', '\u56fe\u7247\u65e0\u6548']
+];
+for (const [errorCode, expectedText] of bestdoriErrorCases) {
+    const message = context.__bestdoriHelpers.bestdoriErrorMessage({ error: errorCode }, 409, 'Bestdori');
+    if (!message.includes(expectedText) || message.includes(errorCode)) {
+        throw new Error(`Bestdori error code ${errorCode} was not mapped to a user-facing message.`);
+    }
+}
+
+const characterDrawRequest = context.__bestdoriHelpers.buildBestdoriDrawRequest('character', [5, 3, 5], '4');
+if (JSON.stringify(characterDrawRequest) !== JSON.stringify({ mode: 'character', rarities: [3, 5], characterId: 4 })) {
+    throw new Error('Character draw payload normalization mismatch.');
+}
+const randomDrawRequest = context.__bestdoriHelpers.buildBestdoriDrawRequest('random', [4, 5], '4');
+if (JSON.stringify(randomDrawRequest) !== JSON.stringify({ mode: 'random', rarities: [4, 5] })) {
+    throw new Error('Random draw payload must not include a character id.');
+}
+await expectRejection(
+    Promise.resolve().then(() => context.__bestdoriHelpers.buildBestdoriDrawRequest('random', [], null)),
+    'Empty Bestdori rarity selection'
+);
+
+let observedBestdoriRequest = null;
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
+    observedBestdoriRequest = { resource, options, timeout, controller };
+    return transform({
+        ok: true,
+        status: 201,
+        json: async () => ({ background: { background: 'drawn.png' }, card: { id: 123 } })
+    });
+};
+context.testBestdoriEndpoint = { href: 'https://home.example.test/api/background-files/draw' };
+const bestdoriPayload = await context.__bestdoriHelpers.requestBestdoriJson(
+    context.testBestdoriEndpoint,
+    characterDrawRequest,
+    90000
+);
+if (bestdoriPayload.background.background !== 'drawn.png'
+    || observedBestdoriRequest.resource !== context.testBestdoriEndpoint.href
+    || observedBestdoriRequest.options.method !== 'POST'
+    || observedBestdoriRequest.options.credentials !== 'same-origin'
+    || observedBestdoriRequest.options.headers['X-Requested-With'] !== 'homelab-dashboard'
+    || observedBestdoriRequest.timeout !== 90000
+    || observedBestdoriRequest.controller !== null
+    || JSON.stringify(JSON.parse(observedBestdoriRequest.options.body)) !== JSON.stringify(characterDrawRequest)) {
+    throw new Error('Bestdori JSON POST request contract mismatch.');
+}
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => transform({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: { code: 'pool_exhausted', message: '\u6ca1\u6709\u672a\u91cd\u590d\u5361\u9762' } })
+});
+await expectRejection(
+    context.__bestdoriHelpers.requestBestdoriJson(context.testBestdoriEndpoint, randomDrawRequest),
+    'Bestdori API error'
+);
+
+const drawFunctionStart = runtimeScript.indexOf('async function drawBestdoriCard(');
+const drawFunctionEnd = runtimeScript.indexOf('async function reconcileBestdoriHistory(', drawFunctionStart);
+if (drawFunctionStart < 0 || drawFunctionEnd < 0) {
+    throw new Error('Unable to extract the Bestdori draw workflow.');
+}
+const drawFunctionSource = runtimeScript.slice(drawFunctionStart, drawFunctionEnd);
+if (drawFunctionSource.includes("requestBackgroundPreferences('PATCH'")) {
+    throw new Error('A successful card draw must not automatically apply the downloaded background.');
+}
+vm.runInContext(
+    drawFunctionSource + '\nglobalThis.__drawBestdoriCard = drawBestdoriCard;',
+    context
+);
+context.bestdoriDrawEndpoint = { href: 'https://home.example.test/api/background-files/draw' };
+context.backgroundPreferencesConnection = 'online';
+context.backgroundDrawPending = false;
+context.cardCharacterSelect = { value: '4' };
+context.selectedCardDrawMode = () => 'character';
+context.selectedCardDrawRarities = () => [3, 5];
+context.buildBestdoriDrawRequest = context.__bestdoriHelpers.buildBestdoriDrawRequest;
+context.syncBackgroundControlsBusy = () => {};
+context.syncCardDrawControls = () => {};
+context.normalizeBackgroundName = (value) => typeof value === 'string' && value.endsWith('.png') ? value : null;
+let observedDrawCall = null;
+context.requestBestdoriJson = async (endpoint, body, timeout) => {
+    observedDrawCall = { endpoint, body, timeout };
+    return {
+        background: { background: '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123.png' },
+        card: { id: 123, characterName: '\u7c73\u6b47\u5c14', rarity: 5, title: '\u6d4b\u8bd5' }
+    };
+};
+let scanSuccessMessage = '';
+context.scanBackgroundDirectory = async (options) => {
+    scanSuccessMessage = options.successMessage;
+};
+let closedAfterDraw = false;
+let focusedAfterDraw = '';
+let patchCallCount = 0;
+context.closeCardDrawDialog = (returnValue, restoreFocus) => {
+    closedAfterDraw = returnValue === 'drawn' && restoreFocus === false;
+};
+context.focusBackgroundOption = (name) => {
+    focusedAfterDraw = name;
+    return true;
+};
+context.requestBackgroundPreferences = async () => {
+    patchCallCount += 1;
+    throw new Error('PATCH must not be called by draw workflow.');
+};
+context.setCardDrawStatus = () => {};
+context.setBackgroundStatus = () => {};
+if (!await context.__drawBestdoriCard()
+    || observedDrawCall.endpoint !== context.bestdoriDrawEndpoint
+    || observedDrawCall.timeout !== 90000
+    || JSON.stringify(observedDrawCall.body) !== JSON.stringify({ mode: 'character', rarities: [3, 5], characterId: 4 })
+    || !scanSuccessMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
+    || !closedAfterDraw
+    || focusedAfterDraw !== '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123.png'
+    || patchCallCount !== 0) {
+    throw new Error('Successful Bestdori draw did not refresh/focus without applying the background.');
+}
+
+let drawErrorStatus = '';
+context.backgroundDrawPending = false;
+context.requestBestdoriJson = async () => { throw new Error('simulated draw failure'); };
+context.setCardDrawStatus = (message, kind) => {
+    if (kind === 'error') drawErrorStatus = message;
+};
+context.setBackgroundStatus = () => {};
+if (await context.__drawBestdoriCard() || !drawErrorStatus.includes('simulated draw failure')) {
+    throw new Error('Bestdori draw failure was not reported without claiming success.');
+}
+
+const resetOpenStart = runtimeScript.indexOf('function openCardHistoryResetDialog(');
+const resetOpenEnd = runtimeScript.indexOf('function closeCardHistoryResetDialog(', resetOpenStart);
+if (resetOpenStart < 0 || resetOpenEnd < 0) {
+    throw new Error('Unable to extract Bestdori reset confirmation opener.');
+}
+vm.runInContext(
+    runtimeScript.slice(resetOpenStart, resetOpenEnd)
+        + '\nglobalThis.__openCardHistoryResetDialog = openCardHistoryResetDialog;',
+    context
+);
+context.cardHistoryResetDialog = {
+    open: false,
+    classList: { add() {} },
+    showModal() { this.open = true; },
+    setAttribute() { this.open = true; }
+};
+context.cardHistoryResetStatus = { textContent: '' };
+context.cardHistoryResetConfirm = { focus() {} };
+context.syncCardHistoryResetControls = () => {};
+context.focusWithoutScroll = () => {};
+let resetRequestCount = 0;
+context.requestBestdoriJson = async () => {
+    resetRequestCount += 1;
+    return { removed: 1, remaining: 0 };
+};
+if (!context.__openCardHistoryResetDialog() || !context.cardHistoryResetDialog.open || resetRequestCount !== 0) {
+    throw new Error('Opening reset confirmation sent a reset request before the second confirmation.');
+}
+
+const resetFunctionStart = runtimeScript.indexOf('async function resetBestdoriHistory(');
+const resetFunctionEnd = runtimeScript.indexOf('function backgroundDeleteDialogIsOpen(', resetFunctionStart);
+if (resetFunctionStart < 0 || resetFunctionEnd < 0) {
+    throw new Error('Unable to extract Bestdori history reset workflow.');
+}
+vm.runInContext(
+    runtimeScript.slice(resetFunctionStart, resetFunctionEnd)
+        + '\nglobalThis.__resetBestdoriHistory = resetBestdoriHistory;',
+    context
+);
+context.cardHistoryResetDialogIsOpen = () => true;
+context.bestdoriResetEndpoint = { href: 'https://home.example.test/api/bestdori/history/reset' };
+context.backgroundDrawPending = false;
+context.syncCardHistoryResetControls = () => {};
+let resetClosed = false;
+context.closeCardHistoryResetDialog = (returnValue) => {
+    resetClosed = returnValue === 'reset';
+};
+context.setCardDrawStatus = () => {};
+context.requestBestdoriJson = async (endpoint, body, timeout) => {
+    resetRequestCount += 1;
+    if (endpoint !== context.bestdoriResetEndpoint
+        || JSON.stringify(body) !== '{}'
+        || timeout !== 30000) {
+        throw new Error('History reset request contract mismatch.');
+    }
+    return { removed: 7, remaining: 0 };
+};
+if (!await context.__resetBestdoriHistory() || resetRequestCount !== 1 || !resetClosed) {
+    throw new Error('Confirmed Bestdori history reset did not complete exactly once.');
 }
 
 const uploadFunctionStart = runtimeScript.indexOf('async function uploadBackgroundFile(');
@@ -457,10 +688,16 @@ console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} 
     process.exitCode = 1;
 });
 '@
-    $encodedValidation = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($frontendValidation))
-    $nodeBootstrap = "eval(Buffer.from(process.argv[1], 'base64').toString('utf8'))"
-    Invoke-CheckedCommand -Name 'frontend HTML and JavaScript' -Command {
-        & $node.Source -e $nodeBootstrap $encodedValidation $indexPath
+    $frontendValidationPath = Join-Path ([IO.Path]::GetTempPath()) "homelab-frontend-validation-$PID-$([guid]::NewGuid().ToString('N')).js"
+    try {
+        [IO.File]::WriteAllText($frontendValidationPath, $frontendValidation, [Text.UTF8Encoding]::new($false))
+        Invoke-CheckedCommand -Name 'frontend HTML and JavaScript' -Command {
+            & $node.Source $frontendValidationPath $indexPath
+        }
+    } finally {
+        if (Test-Path -LiteralPath $frontendValidationPath -PathType Leaf) {
+            Remove-Item -LiteralPath $frontendValidationPath -Force
+        }
     }
 }
 
