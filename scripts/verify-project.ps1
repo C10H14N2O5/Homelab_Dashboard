@@ -194,8 +194,15 @@ const requiredMarkers = [
     "const backgroundLibrarySources = ['ordinary', 'bestdori']",
     'section.dataset.backgroundSection = source',
     'option.dataset.backgroundSource = source',
+    "className = 'background-section-collapse'",
+    "className = 'background-section-clip'",
+    'grid-template-rows: 0fr',
+    'transform: translateY(-4px)',
+    "sectionContent.toggleAttribute('inert'",
+    'runAfterBackgroundSectionTransition',
+    'afterTransition: focusOption',
     "className = 'background-section-empty'",
-    'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true)',
+    'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {',
     'const inventorySummary =',
     "'Content-Type': 'application/octet-stream'",
     "errorCode === 'trash_unavailable'",
@@ -343,8 +350,155 @@ if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
     || !groupedRendererSource.includes('backgroundLibraryExpanded[source]')
     || !groupedRendererSource.includes('groupedUrls.ordinary.length')
     || !groupedRendererSource.includes('groupedUrls.bestdori.length')
-    || !groupedRendererSource.includes('setBackgroundSectionExpanded(source')) {
+    || !groupedRendererSource.includes('setBackgroundSectionExpanded(source')
+    || !groupedRendererSource.includes("sectionContent.setAttribute('aria-hidden'")
+    || !groupedRendererSource.includes("sectionContent.toggleAttribute('inert'")
+    || groupedRendererSource.includes('sectionGrid.hidden')) {
     throw new Error('Grouped background renderer is missing section order, counts, collapse state, or toggle behavior.');
+}
+
+const transitionHelperStart = runtimeScript.indexOf('function cancelBackgroundSectionTransition(');
+const transitionHelperEnd = runtimeScript.indexOf('function focusBackgroundOption(', transitionHelperStart);
+if (transitionHelperStart < 0 || transitionHelperEnd < 0) {
+    throw new Error('Unable to extract background section transition helpers.');
+}
+
+const transitionListeners = new Map();
+const transitionTimers = new Map();
+let transitionTimerId = 0;
+let reduceBackgroundMotion = false;
+const transitionContentAttributes = new Map();
+const transitionContent = {
+    dataset: { expanded: 'true' },
+    offsetHeight: 100,
+    setAttribute(name, value) {
+        transitionContentAttributes.set(name, String(value));
+    },
+    toggleAttribute(name, force) {
+        if (force) transitionContentAttributes.set(name, '');
+        else transitionContentAttributes.delete(name);
+    },
+    addEventListener(type, listener) {
+        transitionListeners.set(type, listener);
+    },
+    removeEventListener(type, listener) {
+        if (transitionListeners.get(type) === listener) transitionListeners.delete(type);
+    }
+};
+const transitionToggleAttributes = new Map();
+const transitionToggle = {
+    setAttribute(name, value) {
+        transitionToggleAttributes.set(name, String(value));
+    }
+};
+const transitionSection = {
+    dataset: { backgroundSection: 'ordinary' },
+    querySelector(selector) {
+        if (selector === '.background-library-toggle') return transitionToggle;
+        if (selector === '.background-section-collapse') return transitionContent;
+        return null;
+    }
+};
+const transitionContext = vm.createContext({
+    backgroundLibrarySources: ['ordinary', 'bestdori'],
+    backgroundLibraryExpanded: { ordinary: true, bestdori: true },
+    backgroundSectionTransitionCleanups: new Map(),
+    backgroundGrid: {
+        querySelectorAll() {
+            return [transitionSection];
+        }
+    },
+    window: {
+        matchMedia() {
+            return { matches: reduceBackgroundMotion };
+        },
+        setTimeout(callback) {
+            const timerId = ++transitionTimerId;
+            transitionTimers.set(timerId, callback);
+            return timerId;
+        },
+        clearTimeout(timerId) {
+            transitionTimers.delete(timerId);
+        }
+    }
+});
+vm.runInContext(
+    runtimeScript.slice(transitionHelperStart, transitionHelperEnd)
+        + '\nglobalThis.__backgroundTransitionHelpers = { setBackgroundSectionExpanded };',
+    transitionContext
+);
+
+if (!transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', false)
+    || transitionToggleAttributes.get('aria-expanded') !== 'false'
+    || transitionContent.dataset.expanded !== 'false'
+    || transitionContentAttributes.get('aria-hidden') !== 'true'
+    || !transitionContentAttributes.has('inert')) {
+    throw new Error('Collapsing a background section did not synchronize visual and accessibility state.');
+}
+
+let completedBackgroundFocus = 0;
+if (!transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', true, {
+    afterTransition() {
+        completedBackgroundFocus += 1;
+    }
+}) || completedBackgroundFocus !== 0 || !transitionListeners.has('transitionend')) {
+    throw new Error('Animated background expansion did not defer its completion callback.');
+}
+transitionListeners.get('transitionend')({
+    target: transitionContent,
+    propertyName: 'grid-template-rows'
+});
+if (completedBackgroundFocus !== 1
+    || transitionTimers.size !== 0
+    || transitionContentAttributes.has('inert')
+    || transitionContentAttributes.get('aria-hidden') !== 'false') {
+    throw new Error('Background expansion did not complete once or restore accessible content.');
+}
+
+let immediateBackgroundFocus = 0;
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', true, {
+    afterTransition() {
+        immediateBackgroundFocus += 1;
+    }
+});
+if (immediateBackgroundFocus !== 1 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+    throw new Error('An already expanded background section did not complete focus immediately.');
+}
+
+let fallbackBackgroundFocus = 0;
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', false);
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', true, {
+    afterTransition() {
+        fallbackBackgroundFocus += 1;
+    }
+});
+const fallbackTransitionTimer = Array.from(transitionTimers.values())[0];
+fallbackTransitionTimer();
+if (fallbackBackgroundFocus !== 1 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+    throw new Error('Background transition timeout fallback did not complete and clean up.');
+}
+
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', false);
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', true, {
+    afterTransition() {
+        completedBackgroundFocus += 10;
+    }
+});
+const staleTransitionListener = transitionListeners.get('transitionend');
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', false);
+staleTransitionListener({ target: transitionContent, propertyName: 'grid-template-rows' });
+if (completedBackgroundFocus !== 1 || transitionTimers.size !== 0) {
+    throw new Error('Reversing a background transition did not cancel its stale completion callback.');
+}
+
+reduceBackgroundMotion = true;
+transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', true, {
+    afterTransition() {
+        completedBackgroundFocus += 1;
+    }
+});
+if (completedBackgroundFocus !== 2 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+    throw new Error('Reduced-motion background expansion did not complete immediately.');
 }
 
 const bestdoriHelperStart = runtimeScript.indexOf('function backgroundManagerIsBusy(');

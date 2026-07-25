@@ -735,6 +735,7 @@
             background: transparent;
             border: 0;
             cursor: pointer;
+            transition: padding-bottom 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
         .background-library-toggle[aria-expanded="false"] {
@@ -760,22 +761,42 @@
         .background-library-chevron {
             color: var(--muted);
             font-size: 0.72rem;
-            transition: transform 180ms ease;
+            transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
         .background-library-toggle[aria-expanded="false"] .background-library-chevron {
             transform: rotate(-90deg);
         }
 
+        .background-section-collapse {
+            min-width: 0;
+            display: grid;
+            grid-template-rows: 1fr;
+            opacity: 1;
+            transform: translateY(0);
+            transition:
+                grid-template-rows 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+                opacity 160ms ease,
+                transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .background-section-collapse[data-expanded="false"] {
+            grid-template-rows: 0fr;
+            opacity: 0;
+            transform: translateY(-4px);
+        }
+
+        .background-section-clip {
+            min-height: 0;
+            overflow: hidden;
+        }
+
         .background-section-grid {
+            padding: 3px;
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
             align-content: start;
             gap: 0.75rem;
-        }
-
-        .background-section-grid[hidden] {
-            display: none;
         }
 
         .background-section-empty {
@@ -1754,6 +1775,7 @@
                 ordinary: true,
                 bestdori: true
             };
+            const backgroundSectionTransitionCleanups = new Map();
             const orientationQuery = window.matchMedia('(orientation: portrait)');
             const backgroundLayer = document.querySelector('.background-layer');
             const backgroundPickerButton = document.getElementById('background-picker-button');
@@ -2377,6 +2399,7 @@
                     bestdori: []
                 };
 
+                backgroundLibrarySources.forEach(cancelBackgroundSectionTransition);
                 urls.forEach((url) => {
                     groupedUrls[backgroundSourceForName(backgroundFileName(url))].push(url);
                 });
@@ -2386,11 +2409,11 @@
                     section.className = 'background-library-section';
                     section.dataset.backgroundSection = source;
 
-                    const sectionGridId = `background-section-${source}`;
+                    const sectionContentId = `background-section-${source}`;
                     const toggle = document.createElement('button');
                     toggle.type = 'button';
                     toggle.className = 'background-library-toggle';
-                    toggle.setAttribute('aria-controls', sectionGridId);
+                    toggle.setAttribute('aria-controls', sectionContentId);
                     toggle.setAttribute('aria-expanded', String(backgroundLibraryExpanded[source]));
 
                     const title = document.createElement('span');
@@ -2407,10 +2430,18 @@
                     chevron.textContent = '▼';
                     toggle.append(title, count, chevron);
 
+                    const sectionContent = document.createElement('div');
+                    sectionContent.id = sectionContentId;
+                    sectionContent.className = 'background-section-collapse';
+                    sectionContent.dataset.expanded = String(backgroundLibraryExpanded[source]);
+                    sectionContent.setAttribute('aria-hidden', String(!backgroundLibraryExpanded[source]));
+                    sectionContent.toggleAttribute('inert', !backgroundLibraryExpanded[source]);
+
+                    const sectionClip = document.createElement('div');
+                    sectionClip.className = 'background-section-clip';
+
                     const sectionGrid = document.createElement('div');
-                    sectionGrid.id = sectionGridId;
                     sectionGrid.className = 'background-section-grid';
-                    sectionGrid.hidden = !backgroundLibraryExpanded[source];
 
                     groupedUrls[source].forEach((url) => {
                         const option = document.createElement('button');
@@ -2456,10 +2487,12 @@
                         sectionGrid.append(empty);
                     }
 
+                    sectionClip.append(sectionGrid);
+                    sectionContent.append(sectionClip);
                     toggle.addEventListener('click', () => {
                         setBackgroundSectionExpanded(source, !backgroundLibraryExpanded[source]);
                     });
-                    section.append(toggle, sectionGrid);
+                    section.append(toggle, sectionContent);
                     fragment.append(section);
                 });
 
@@ -2473,35 +2506,92 @@
                 };
             }
 
-            function setBackgroundSectionExpanded(source, expanded) {
-                if (!backgroundLibrarySources.includes(source)) return false;
-                backgroundLibraryExpanded[source] = Boolean(expanded);
+            function cancelBackgroundSectionTransition(source) {
+                const cleanup = backgroundSectionTransitionCleanups.get(source);
+                if (cleanup) cleanup();
+            }
 
+            function runAfterBackgroundSectionTransition(source, sectionContent, callback) {
+                if (typeof callback !== 'function') return;
+                if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    callback();
+                    return;
+                }
+
+                let active = true;
+                let timeoutId = 0;
+                const onTransitionEnd = (event) => {
+                    if (event.target === sectionContent && event.propertyName === 'grid-template-rows') {
+                        finish();
+                    }
+                };
+                const cleanup = () => {
+                    if (!active) return;
+                    active = false;
+                    sectionContent.removeEventListener('transitionend', onTransitionEnd);
+                    if (timeoutId) window.clearTimeout(timeoutId);
+                    if (backgroundSectionTransitionCleanups.get(source) === cleanup) {
+                        backgroundSectionTransitionCleanups.delete(source);
+                    }
+                };
+                const finish = () => {
+                    if (!active) return;
+                    cleanup();
+                    callback();
+                };
+
+                sectionContent.addEventListener('transitionend', onTransitionEnd);
+                timeoutId = window.setTimeout(finish, 300);
+                backgroundSectionTransitionCleanups.set(source, cleanup);
+            }
+
+            function setBackgroundSectionExpanded(source, expanded, options = {}) {
+                if (!backgroundLibrarySources.includes(source)) return false;
                 const section = Array.from(backgroundGrid.querySelectorAll('[data-background-section]'))
                     .find((item) => item.dataset.backgroundSection === source);
                 if (!section) return false;
 
                 const toggle = section.querySelector('.background-library-toggle');
-                const sectionGrid = section.querySelector('.background-section-grid');
-                if (!toggle || !sectionGrid) return false;
-                toggle.setAttribute('aria-expanded', String(backgroundLibraryExpanded[source]));
-                sectionGrid.hidden = !backgroundLibraryExpanded[source];
+                const sectionContent = section.querySelector('.background-section-collapse');
+                if (!toggle || !sectionContent) return false;
+
+                const nextExpanded = Boolean(expanded);
+                const changed = backgroundLibraryExpanded[source] !== nextExpanded;
+                cancelBackgroundSectionTransition(source);
+                if (changed) void sectionContent.offsetHeight;
+                backgroundLibraryExpanded[source] = nextExpanded;
+                toggle.setAttribute('aria-expanded', String(nextExpanded));
+                sectionContent.dataset.expanded = String(nextExpanded);
+                sectionContent.setAttribute('aria-hidden', String(!nextExpanded));
+                sectionContent.toggleAttribute('inert', !nextExpanded);
+
+                if (typeof options.afterTransition === 'function') {
+                    if (changed) {
+                        runAfterBackgroundSectionTransition(source, sectionContent, options.afterTransition);
+                    } else {
+                        options.afterTransition();
+                    }
+                }
                 return true;
             }
 
             function focusBackgroundOption(fileName) {
                 const candidate = backgroundUrlFromName(fileName);
                 if (!candidate) return false;
-                setBackgroundSectionExpanded(backgroundSourceForName(fileName), true);
                 const option = Array.from(backgroundGrid.querySelectorAll('.background-option'))
                     .find((item) => item.dataset.url === candidate.href && !item.disabled);
                 if (!option) return false;
 
-                if (typeof option.scrollIntoView === 'function') {
-                    option.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                }
-                focusWithoutScroll(option);
-                return true;
+                const focusOption = () => {
+                    if (!option.isConnected || option.closest('[inert]')) return;
+                    if (typeof option.scrollIntoView === 'function') {
+                        option.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                    }
+                    focusWithoutScroll(option);
+                };
+                return setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {
+                    afterTransition: focusOption
+                });
             }
 
             async function uploadBackgroundFile(file) {
