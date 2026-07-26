@@ -2248,10 +2248,23 @@ def clear_console() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def confirm_monitor_shutdown() -> bool:
+    clear_console()
+    print("停止 API 并关闭 Monitor")
+    print("=" * 60)
+    print("此操作将停止 HomeLab Wallpaper State API，并关闭当前 Monitor。")
+    print("请输入大写 Y 并按 Enter 确认；输入其它任何内容将取消操作。")
+    try:
+        return input("\n确认大退：") == "Y"
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
 def monitor(config: AppConfig) -> int:
     failure_count = 0
     recovery_attempted = False
-    recovery_message = ""
+    runtime_message = ""
     force_refresh = True
     try:
         import msvcrt
@@ -2271,11 +2284,11 @@ def monitor(config: AppConfig) -> int:
                 recovery_attempted = True
                 try:
                     ensure_backend(config)
-                    recovery_message = f"{time.strftime('%H:%M:%S')} 后端已自动恢复"
+                    runtime_message = f"{time.strftime('%H:%M:%S')} 后端已自动恢复"
                     status = health(config)
                     preferences = read_preferences(config) if status else None
                 except Exception as error:
-                    recovery_message = f"{time.strftime('%H:%M:%S')} 自动恢复失败：{error}"
+                    runtime_message = f"{time.strftime('%H:%M:%S')} 自动恢复失败：{error}"
 
         clear_console()
         print("HomeLab Wallpaper State Monitor")
@@ -2295,8 +2308,8 @@ def monitor(config: AppConfig) -> int:
             print("横屏背景      ：-")
             print("竖屏背景      ：-")
             print("最后更新时间  ：-")
-        if recovery_message:
-            print(f"恢复信息      ：{recovery_message}")
+        if runtime_message:
+            print(f"运行信息      ：{runtime_message}")
         print("\n最近日志：")
         logs = tail_lines(config.log_file)
         if logs:
@@ -2304,7 +2317,7 @@ def monitor(config: AppConfig) -> int:
                 print(line.rstrip())
         else:
             print("（暂无日志）")
-        print("\n按 R 立即刷新；按 Q 关闭监视器（API 将继续运行）。")
+        print("\n按 R 立即刷新；按 Q 关闭监视器（API 将继续运行）；按 X 停止 API 并关闭监视器。")
 
         waited = 0.0
         force_refresh = False
@@ -2316,6 +2329,19 @@ def monitor(config: AppConfig) -> int:
                 if key == "r":
                     force_refresh = True
                     break
+                if key == "x":
+                    if not confirm_monitor_shutdown():
+                        runtime_message = f"{time.strftime('%H:%M:%S')} 已取消大退，API 继续运行"
+                        force_refresh = True
+                        break
+                    try:
+                        stopped = request_stop(config)
+                    except Exception as error:
+                        runtime_message = f"{time.strftime('%H:%M:%S')} 大退失败：{error}"
+                        force_refresh = True
+                        break
+                    print("\nAPI 已停止，Monitor 已关闭。" if stopped else "\nAPI 当前未运行，Monitor 已关闭。")
+                    return 0
             time.sleep(0.1)
             waited += 0.1
 

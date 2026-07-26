@@ -1694,6 +1694,132 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(keyboard.getwch.call_count, 2)
         sleep.assert_not_called()
 
+    def test_monitor_shutdown_confirmation_requires_exact_uppercase_y(self) -> None:
+        for value, expected in (
+            ("Y", True),
+            ("y", False),
+            ("Y ", False),
+            ("yes", False),
+            ("", False),
+        ):
+            with self.subTest(value=value), mock.patch("builtins.input", return_value=value), mock.patch.object(
+                main, "clear_console"
+            ), mock.patch("builtins.print"):
+                self.assertIs(main.confirm_monitor_shutdown(), expected)
+
+        for error in (EOFError(), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__), mock.patch(
+                "builtins.input", side_effect=error
+            ), mock.patch.object(main, "clear_console"), mock.patch("builtins.print"):
+                self.assertFalse(main.confirm_monitor_shutdown())
+
+    def test_monitor_big_exit_stops_api_or_exits_when_already_stopped(self) -> None:
+        for stopped in (True, False):
+            keyboard = mock.Mock()
+            keyboard.kbhit.return_value = True
+            keyboard.getwch.return_value = "x"
+            config = mock.Mock(
+                listen="127.0.0.1:8787",
+                background_dir=Path("backgrounds"),
+                state_dir=Path("state"),
+                log_file=Path("service.log"),
+                probe_connect_address="127.0.0.1:443",
+                probe_domain_suffix="home.example.test",
+            )
+            status = {"status": "ok", "pid": 123}
+
+            with self.subTest(stopped=stopped), mock.patch.dict(
+                sys.modules, {"msvcrt": keyboard}
+            ), mock.patch.object(main, "health", return_value=status), mock.patch.object(
+                main, "read_preferences", return_value=None
+            ), mock.patch.object(main, "clear_console"), mock.patch.object(
+                main, "tail_lines", return_value=[]
+            ), mock.patch.object(main, "confirm_monitor_shutdown", return_value=True), mock.patch.object(
+                main, "request_stop", return_value=stopped
+            ) as request_stop, mock.patch.object(
+                main.time, "sleep"
+            ) as sleep, mock.patch(
+                "builtins.print"
+            ) as output:
+                self.assertEqual(main.monitor(config), 0)
+
+            request_stop.assert_called_once_with(config)
+            sleep.assert_not_called()
+            message = "API 已停止，Monitor 已关闭。" if stopped else "API 当前未运行，Monitor 已关闭。"
+            self.assertTrue(any(message in str(call) for call in output.call_args_list))
+
+    def test_monitor_big_exit_cancel_returns_to_monitor_and_can_retry(self) -> None:
+        keyboard = mock.Mock()
+        keyboard.kbhit.return_value = True
+        keyboard.getwch.side_effect = ["x", "x"]
+        config = mock.Mock(
+            listen="127.0.0.1:8787",
+            background_dir=Path("backgrounds"),
+            state_dir=Path("state"),
+            log_file=Path("service.log"),
+            probe_connect_address="127.0.0.1:443",
+            probe_domain_suffix="home.example.test",
+        )
+        status = {"status": "ok", "pid": 123}
+
+        with mock.patch.dict(sys.modules, {"msvcrt": keyboard}), mock.patch.object(
+            main, "health", return_value=status
+        ) as health, mock.patch.object(main, "read_preferences", return_value=None), mock.patch.object(
+            main, "clear_console"
+        ), mock.patch.object(main, "tail_lines", return_value=[]), mock.patch.object(
+            main, "confirm_monitor_shutdown", side_effect=[False, True]
+        ), mock.patch.object(main, "request_stop") as request_stop, mock.patch.object(
+            main.time, "sleep"
+        ) as sleep, mock.patch(
+            "builtins.print"
+        ) as output:
+            self.assertEqual(main.monitor(config), 0)
+
+        request_stop.assert_called_once_with(config)
+        self.assertEqual(health.call_count, 2)
+        sleep.assert_not_called()
+        self.assertTrue(any("已取消大退，API 继续运行" in str(call) for call in output.call_args_list))
+
+    def test_monitor_big_exit_failure_returns_to_monitor_and_can_retry(self) -> None:
+        keyboard = mock.Mock()
+        keyboard.kbhit.return_value = True
+        keyboard.getwch.side_effect = ["X", "x"]
+        config = mock.Mock(
+            listen="127.0.0.1:8787",
+            background_dir=Path("backgrounds"),
+            state_dir=Path("state"),
+            log_file=Path("service.log"),
+            probe_connect_address="127.0.0.1:443",
+            probe_domain_suffix="home.example.test",
+        )
+        status = {"status": "ok", "pid": 123}
+
+        with mock.patch.dict(sys.modules, {"msvcrt": keyboard}), mock.patch.object(
+            main, "health", return_value=status
+        ), mock.patch.object(main, "read_preferences", return_value=None), mock.patch.object(
+            main, "clear_console"
+        ), mock.patch.object(main, "tail_lines", return_value=[]), mock.patch.object(
+            main, "confirm_monitor_shutdown", return_value=True
+        ), mock.patch.object(
+            main,
+            "request_stop",
+            side_effect=[RuntimeError("backend did not stop within the timeout"), True],
+        ) as request_stop, mock.patch.object(
+            main.time, "sleep"
+        ) as sleep, mock.patch(
+            "builtins.print"
+        ) as output:
+            self.assertEqual(main.monitor(config), 0)
+
+        self.assertEqual(request_stop.call_args_list, [mock.call(config), mock.call(config)])
+        sleep.assert_not_called()
+        self.assertTrue(
+            any(
+                "大退失败：backend did not stop within the timeout" in str(call)
+                for call in output.call_args_list
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
