@@ -31,9 +31,13 @@ Zoraxy_StaticWebSite/
 │   ├── build-state-service.ps1  # 测试、PyInstaller 构建和 EXE 冒烟测试
 │   ├── uninstall-state-service.ps1 # 卸载EXE自启动注册
 │   └── verify-project.ps1       # 全仓库验证入口
+├── audits/
+│   ├── README.md                # 审计报告管理规则、编号和模板
+│   └── 2026-07-23-business-implementation-audit.md # 已关闭的历史审计
 ├── requirements.txt             # 固定 PyInstaller、Pillow 和 Send2Trash 依赖
 ├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
 ├── CHANGELOG.md
+├── TODO.md
 └── README.md
 ```
 
