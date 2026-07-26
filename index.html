@@ -644,8 +644,9 @@
             gap: 0.55rem;
         }
 
-        .background-draw-launch {
+        .background-original-link {
             margin-left: auto;
+            text-decoration: none;
         }
 
         .background-action-button {
@@ -685,6 +686,13 @@
         }
 
         .background-action-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.48;
+            transform: none;
+        }
+
+        .background-original-link[aria-disabled="true"] {
+            pointer-events: none;
             cursor: not-allowed;
             opacity: 0.48;
             transform: none;
@@ -1384,6 +1392,7 @@
                 flex: 1 1 9rem;
             }
 
+            .background-original-link,
             .background-draw-launch,
             .card-draw-submit {
                 margin-left: 0;
@@ -1627,6 +1636,9 @@
                 <button class="background-action-button" id="background-delete-button" type="button" data-kind="danger" disabled>
                     删除当前背景
                 </button>
+                <a class="background-action-button background-original-link" id="background-original-link" target="_blank" rel="noopener noreferrer" aria-disabled="true">
+                    查看原图
+                </a>
                 <button class="background-action-button background-draw-launch" id="background-draw-button" type="button" aria-haspopup="dialog" aria-controls="card-draw-dialog" disabled>
                     我的回合，抽卡！
                 </button>
@@ -1789,6 +1801,7 @@
             const backgroundUploadButton = document.getElementById('background-upload-button');
             const backgroundUploadInput = document.getElementById('background-upload-input');
             const backgroundDeleteButton = document.getElementById('background-delete-button');
+            const backgroundOriginalLink = document.getElementById('background-original-link');
             const backgroundDeleteDialog = document.getElementById('background-delete-dialog');
             const backgroundDeleteTitle = document.getElementById('background-delete-title');
             const backgroundDeleteDescription = document.getElementById('background-delete-description');
@@ -2210,6 +2223,24 @@
                 });
             }
 
+            function syncBackgroundOriginalLink() {
+                const selectedName = normalizeBackgroundName(backgroundPreferences[editingBackgroundMode]);
+                const selectedUrl = selectedName ? backgroundUrlFromName(selectedName) : null;
+                if (!selectedUrl) {
+                    backgroundOriginalLink.removeAttribute('href');
+                    backgroundOriginalLink.setAttribute('aria-disabled', 'true');
+                    backgroundOriginalLink.setAttribute('aria-label', '查看当前背景原图');
+                    return;
+                }
+
+                backgroundOriginalLink.setAttribute('href', selectedUrl.href);
+                backgroundOriginalLink.setAttribute('aria-disabled', 'false');
+                backgroundOriginalLink.setAttribute(
+                    'aria-label',
+                    `在新标签页查看当前${backgroundModeLabels[editingBackgroundMode]}背景原图 ${selectedName}`
+                );
+            }
+
             function syncBackgroundControlsBusy() {
                 const isBusy = backgroundManagerIsBusy();
                 const managerOnline = backgroundPreferencesConnection === 'online';
@@ -2230,6 +2261,7 @@
                 backgroundUploadInput.disabled = isBusy || !managerOnline;
                 backgroundDeleteButton.disabled = !canDelete;
                 backgroundDrawButton.disabled = isBusy || !managerOnline;
+                syncBackgroundOriginalLink();
                 backgroundDeleteButton.setAttribute(
                     'aria-label',
                     canDelete ? `删除当前${backgroundModeLabels[editingBackgroundMode]}背景 ${selectedName}` : '删除当前背景'

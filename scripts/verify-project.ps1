@@ -159,6 +159,24 @@ cards.forEach((tag, index) => {
     }
 });
 
+const originalLinkMatch = html.match(/<a\b[^>]*\bid="background-original-link"[^>]*>/);
+if (!originalLinkMatch) throw new Error('Missing the original-background link.');
+const originalLinkTag = originalLinkMatch[0];
+if (!/\btarget="_blank"/.test(originalLinkTag)) {
+    throw new Error('The original-background link does not open in a new tab.');
+}
+const originalLinkRel = originalLinkTag.match(/\brel="([^"]+)"/);
+const originalLinkRelTokens = originalLinkRel ? originalLinkRel[1].split(/\s+/) : [];
+if (!originalLinkRelTokens.includes('noopener') || !originalLinkRelTokens.includes('noreferrer')) {
+    throw new Error('The original-background link is missing safe rel tokens.');
+}
+if (/\bdownload(?:\s|=|>)/.test(originalLinkTag) || /\bhref=/.test(originalLinkTag)) {
+    throw new Error('The original-background link must render in-browser and receive its validated href from JavaScript.');
+}
+if (html.indexOf('id="background-original-link"') > html.indexOf('id="background-draw-button"')) {
+    throw new Error('The original-background link must remain to the left of the Bestdori draw button.');
+}
+
 const requiredMarkers = [
     '/api/background-preferences',
     'const backgroundInventoryEndpoint',
@@ -174,6 +192,7 @@ const requiredMarkers = [
     'data-background-mode="portrait"',
     'id="background-upload-button"',
     'id="background-delete-button"',
+    'id="background-original-link"',
     'id="background-delete-dialog"',
     'id="background-draw-button"',
     'id="card-draw-dialog"',
@@ -222,6 +241,9 @@ requiredMarkers.forEach((marker) => {
 });
 
 const runtimeScript = scripts[1];
+if (runtimeScript.includes('window.open(')) {
+    throw new Error('Original-background navigation must use the native safe link instead of window.open().');
+}
 const helperStart = runtimeScript.indexOf('function fetchWithTimeout(');
 const helperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', helperStart);
 if (helperStart < 0 || helperEnd < 0) throw new Error('Unable to extract timeout helpers for behavior checks.');
@@ -676,6 +698,68 @@ if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
     throw new Error('Bestdori work was not included in the shared background-manager busy state.');
 }
 context.backgroundDrawPending = false;
+
+const originalLinkHelperStart = runtimeScript.indexOf('function syncBackgroundOriginalLink(');
+const originalLinkHelperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', originalLinkHelperStart);
+if (originalLinkHelperStart < 0 || originalLinkHelperEnd < 0) {
+    throw new Error('Unable to extract the original-background link helper.');
+}
+const originalLinkHelperSource = runtimeScript.slice(originalLinkHelperStart, originalLinkHelperEnd);
+if (originalLinkHelperSource.includes('backgroundPreferencesConnection')
+    || originalLinkHelperSource.includes('backgroundManagerIsBusy')
+    || originalLinkHelperSource.includes('thumbnailUrl')) {
+    throw new Error('The original-background link was coupled to API availability, busy state, or thumbnails.');
+}
+const originalLinkAttributes = new Map();
+const originalLinkContext = vm.createContext({
+    URL,
+    backgroundPreferences: {
+        landscape: 'wallpaper.jpg',
+        portrait: 'phone.png'
+    },
+    editingBackgroundMode: 'landscape',
+    backgroundModeLabels: {
+        landscape: '\u6a2a\u5c4f',
+        portrait: '\u7ad6\u5c4f'
+    },
+    normalizeBackgroundName(value) {
+        return typeof value === 'string' && !value.includes('/') ? value : null;
+    },
+    backgroundUrlFromName(value) {
+        return new URL(encodeURIComponent(value), 'https://home.example.test/backgrounds/');
+    },
+    backgroundOriginalLink: {
+        setAttribute(name, value) {
+            originalLinkAttributes.set(name, String(value));
+        },
+        removeAttribute(name) {
+            originalLinkAttributes.delete(name);
+        }
+    }
+});
+vm.runInContext(
+    originalLinkHelperSource
+        + '\nglobalThis.__syncBackgroundOriginalLink = syncBackgroundOriginalLink;',
+    originalLinkContext
+);
+originalLinkContext.__syncBackgroundOriginalLink();
+if (originalLinkAttributes.get('href') !== 'https://home.example.test/backgrounds/wallpaper.jpg'
+    || originalLinkAttributes.get('aria-disabled') !== 'false'
+    || !originalLinkAttributes.get('aria-label').includes('\u6a2a\u5c4f')
+    || !originalLinkAttributes.get('aria-label').includes('wallpaper.jpg')) {
+    throw new Error('The original-background link did not target the saved landscape original.');
+}
+originalLinkContext.editingBackgroundMode = 'portrait';
+originalLinkContext.__syncBackgroundOriginalLink();
+if (originalLinkAttributes.get('href') !== 'https://home.example.test/backgrounds/phone.png'
+    || !originalLinkAttributes.get('aria-label').includes('\u7ad6\u5c4f')) {
+    throw new Error('Switching background mode did not update the original-background link.');
+}
+originalLinkContext.backgroundPreferences.portrait = '../unsafe.png';
+originalLinkContext.__syncBackgroundOriginalLink();
+if (originalLinkAttributes.has('href') || originalLinkAttributes.get('aria-disabled') !== 'true') {
+    throw new Error('An invalid original-background name did not disable the link.');
+}
 
 const bestdoriErrorCases = [
     ['bestdori_operation_in_progress', '\u6b63\u5728\u8fdb\u884c'],
