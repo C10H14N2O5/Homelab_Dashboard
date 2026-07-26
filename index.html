@@ -1748,9 +1748,11 @@
 
             const pageBase = new URL('.', document.baseURI);
             const backgroundDirectory = new URL('backgrounds/', pageBase);
+            const backgroundThumbnailDirectory = new URL('thumbnails/', backgroundDirectory);
             const defaultBackground = new URL('bg.jpg', backgroundDirectory);
             const defaultBackgroundName = 'bg.jpg';
             const backgroundPreferencesEndpoint = new URL('/api/background-preferences', document.baseURI);
+            const backgroundInventoryEndpoint = new URL('/api/background-files', document.baseURI);
             const backgroundUploadEndpoint = new URL('/api/background-files/upload', document.baseURI);
             const backgroundRemoveEndpoint = new URL('/api/background-files/remove', document.baseURI);
             const bestdoriCharactersEndpoint = new URL('/api/bestdori/characters', document.baseURI);
@@ -1863,6 +1865,88 @@
                 ) return null;
 
                 return value;
+            }
+
+            function normalizeBackgroundThumbnailUrl(value) {
+                if (typeof value !== 'string' || value.length === 0 || value.length > 1024) return null;
+
+                try {
+                    const url = new URL(value, backgroundDirectory);
+                    if (
+                        url.origin !== location.origin
+                        || url.username
+                        || url.password
+                        || url.hash
+                        || !url.pathname.startsWith(backgroundThumbnailDirectory.pathname)
+                    ) return null;
+
+                    const relativePath = decodeURIComponent(
+                        url.pathname.slice(backgroundThumbnailDirectory.pathname.length)
+                    );
+                    if (
+                        !relativePath
+                        || relativePath.includes('/')
+                        || relativePath.includes('\\')
+                        || !/^[a-z0-9][a-z0-9._-]*\.webp$/i.test(relativePath)
+                    ) return null;
+
+                    const versionValues = url.searchParams.getAll('v');
+                    const queryKeys = Array.from(url.searchParams.keys());
+                    if (
+                        queryKeys.length !== 1
+                        || queryKeys[0] !== 'v'
+                        || versionValues.length !== 1
+                        || !/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(versionValues[0])
+                    ) return null;
+
+                    return url;
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            function normalizeBackgroundInventory(value) {
+                if (
+                    !value
+                    || typeof value !== 'object'
+                    || value.version !== 1
+                    || !Array.isArray(value.backgrounds)
+                    || value.backgrounds.length === 0
+                    || !value.thumbnails
+                    || typeof value.thumbnails !== 'object'
+                ) return null;
+
+                const thumbnailStats = {};
+                for (const key of ['generated', 'reused', 'failed']) {
+                    const count = value.thumbnails[key];
+                    if (!Number.isSafeInteger(count) || count < 0) return null;
+                    thumbnailStats[key] = count;
+                }
+
+                const seenNames = new Set();
+                const backgrounds = [];
+                for (const item of value.backgrounds) {
+                    if (!item || typeof item !== 'object') return null;
+                    const name = normalizeBackgroundName(item.name);
+                    if (!name || seenNames.has(name)) return null;
+
+                    const url = backgroundUrlFromName(name);
+                    if (!url) return null;
+
+                    let thumbnailUrl = null;
+                    if (item.thumbnail !== null) {
+                        thumbnailUrl = normalizeBackgroundThumbnailUrl(item.thumbnail);
+                        if (!thumbnailUrl) return null;
+                    }
+
+                    seenNames.add(name);
+                    backgrounds.push({ url, thumbnailUrl });
+                }
+
+                return {
+                    backgrounds,
+                    thumbnails: thumbnailStats
+                };
             }
 
             function validateBackgroundUploadFile(file) {
@@ -2392,16 +2476,18 @@
                 }
             }
 
-            function renderBackgroundOptions(urls) {
+            function renderBackgroundOptions(backgrounds) {
                 const fragment = document.createDocumentFragment();
-                const groupedUrls = {
+                const groupedBackgrounds = {
                     ordinary: [],
                     bestdori: []
                 };
 
                 backgroundLibrarySources.forEach(cancelBackgroundSectionTransition);
-                urls.forEach((url) => {
-                    groupedUrls[backgroundSourceForName(backgroundFileName(url))].push(url);
+                backgrounds.forEach((background) => {
+                    groupedBackgrounds[
+                        backgroundSourceForName(backgroundFileName(background.url))
+                    ].push(background);
                 });
 
                 backgroundLibrarySources.forEach((source) => {
@@ -2422,7 +2508,7 @@
 
                     const count = document.createElement('span');
                     count.className = 'background-library-count';
-                    count.textContent = `${groupedUrls[source].length} 张`;
+                    count.textContent = `${groupedBackgrounds[source].length} 张`;
 
                     const chevron = document.createElement('span');
                     chevron.className = 'background-library-chevron';
@@ -2443,7 +2529,7 @@
                     const sectionGrid = document.createElement('div');
                     sectionGrid.className = 'background-section-grid';
 
-                    groupedUrls[source].forEach((url) => {
+                    groupedBackgrounds[source].forEach(({ url, thumbnailUrl }) => {
                         const option = document.createElement('button');
                         option.type = 'button';
                         option.className = 'background-option';
@@ -2452,10 +2538,16 @@
                         option.setAttribute('aria-pressed', 'false');
 
                         const thumbnail = document.createElement('img');
-                        thumbnail.src = url.href;
+                        const thumbnailSource = thumbnailUrl || url;
+                        thumbnail.src = thumbnailSource.href;
                         thumbnail.alt = '';
                         thumbnail.loading = 'lazy';
                         thumbnail.decoding = 'async';
+                        if (thumbnailSource.href !== url.href) {
+                            thumbnail.addEventListener('error', () => {
+                                thumbnail.src = url.href;
+                            }, { once: true });
+                        }
 
                         const label = document.createElement('span');
                         label.className = 'background-option-label';
@@ -2478,7 +2570,7 @@
                         sectionGrid.append(option);
                     });
 
-                    if (groupedUrls[source].length === 0) {
+                    if (groupedBackgrounds[source].length === 0) {
                         const empty = document.createElement('p');
                         empty.className = 'background-section-empty';
                         empty.textContent = source === 'bestdori'
@@ -2500,9 +2592,9 @@
                 updateBackgroundSelection();
                 syncBackgroundControlsBusy();
                 return {
-                    total: urls.length,
-                    ordinary: groupedUrls.ordinary.length,
-                    bestdori: groupedUrls.bestdori.length
+                    total: backgrounds.length,
+                    ordinary: groupedBackgrounds.ordinary.length,
+                    bestdori: groupedBackgrounds.bestdori.length
                 };
             }
 
@@ -3155,76 +3247,174 @@
                 }
             }
 
+            function mergeAndSortBackgrounds(backgrounds) {
+                const merged = new Map();
+                backgrounds.forEach((background) => {
+                    merged.set(background.url.href, background);
+                });
+                backgroundModes.forEach((mode) => {
+                    const configuredUrl = backgroundUrlForMode(mode);
+                    if (!merged.has(configuredUrl.href)) {
+                        merged.set(configuredUrl.href, {
+                            url: configuredUrl,
+                            thumbnailUrl: null
+                        });
+                    }
+                });
+
+                return Array.from(merged.values()).sort((left, right) => {
+                    if (left.url.href === defaultBackground.href) return -1;
+                    if (right.url.href === defaultBackground.href) return 1;
+                    return backgroundFileName(left.url).localeCompare(
+                        backgroundFileName(right.url),
+                        'zh-CN',
+                        { numeric: true }
+                    );
+                });
+            }
+
+            async function requestBackgroundInventory(controller) {
+                return fetchWithTimeout(backgroundInventoryEndpoint.href, {
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json'
+                    }
+                }, 120000, controller, async (response) => {
+                    if (!response.ok) throw new Error(`背景清单接口返回 ${response.status}`);
+                    let payload;
+                    try {
+                        payload = await response.json();
+                    } catch (error) {
+                        throw new Error('背景清单接口返回了非 JSON 响应');
+                    }
+                    const inventory = normalizeBackgroundInventory(payload);
+                    if (!inventory) throw new Error('背景清单接口返回了无效数据');
+                    return inventory;
+                });
+            }
+
+            async function requestLegacyBackgroundListing(controller) {
+                const result = await fetchWithTimeout(backgroundDirectory.href, {
+                    cache: 'no-store',
+                    credentials: 'same-origin'
+                }, 5000, controller, async (response) => {
+                    if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
+                    return {
+                        response,
+                        listingText: await response.text()
+                    };
+                });
+
+                const listing = new DOMParser().parseFromString(result.listingText, 'text/html');
+                const discovered = new Map();
+                listing.querySelectorAll('a[href]').forEach((anchor) => {
+                    try {
+                        const url = normalizeBackgroundUrl(
+                            new URL(anchor.getAttribute('href'), result.response.url)
+                        );
+                        if (url) {
+                            discovered.set(url.href, {
+                                url,
+                                thumbnailUrl: null
+                            });
+                        }
+                    } catch (error) {
+                        // Ignore malformed links in the server-generated directory listing.
+                    }
+                });
+
+                if (discovered.size === 0) throw new Error('目录列表中没有支持的图片链接');
+                return Array.from(discovered.values());
+            }
+
+            function renderKnownBackgroundFallback() {
+                const fallbackUrls = new Map([[defaultBackground.href, defaultBackground]]);
+                if (currentBackground.href !== defaultBackground.href) {
+                    fallbackUrls.set(currentBackground.href, currentBackground);
+                }
+                backgroundModes.forEach((mode) => {
+                    const configuredUrl = backgroundUrlForMode(mode);
+                    fallbackUrls.set(configuredUrl.href, configuredUrl);
+                });
+                return renderBackgroundOptions(
+                    Array.from(fallbackUrls.values()).map((url) => ({
+                        url,
+                        thumbnailUrl: null
+                    }))
+                );
+            }
+
             async function scanBackgroundDirectory(options = {}) {
                 if (backgroundScanController) backgroundScanController.abort();
                 const scanId = ++backgroundScanSequence;
-                const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                let controller = typeof AbortController === 'function' ? new AbortController() : null;
                 backgroundScanController = controller;
                 backgroundScanPending = true;
                 syncBackgroundControlsBusy();
-                setBackgroundStatus('正在扫描 backgrounds 目录…');
+                setBackgroundStatus('正在核对背景清单与缩略图…');
 
                 try {
-                    const result = await fetchWithTimeout(backgroundDirectory.href, {
-                        cache: 'no-store',
-                        credentials: 'same-origin'
-                    }, 5000, controller, async (response) => {
-                        if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
-                        return {
-                            response,
-                            listingText: await response.text()
-                        };
-                    });
+                    let inventory;
+                    try {
+                        inventory = await requestBackgroundInventory(controller);
+                    } catch (inventoryError) {
+                        if (scanId !== backgroundScanSequence) return;
+                        console.warn('背景清单接口不可用，正在使用原图目录列表降级。', inventoryError);
 
-                    const listing = new DOMParser().parseFromString(result.listingText, 'text/html');
-                    const discovered = new Map();
-
-                    listing.querySelectorAll('a[href]').forEach((anchor) => {
+                        controller = typeof AbortController === 'function' ? new AbortController() : null;
+                        backgroundScanController = controller;
                         try {
-                            const url = normalizeBackgroundUrl(new URL(anchor.getAttribute('href'), result.response.url));
-                            if (url) discovered.set(url.href, url);
-                        } catch (error) {
-                            // Ignore malformed links in the server-generated directory listing.
+                            const legacyBackgrounds = await requestLegacyBackgroundListing(controller);
+                            if (scanId !== backgroundScanSequence) return;
+                            const backgrounds = mergeAndSortBackgrounds(legacyBackgrounds);
+                            const counts = renderBackgroundOptions(backgrounds);
+                            const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
+                            const prefix = options.successMessage ? `${options.successMessage} ` : '';
+                            setBackgroundStatus(
+                                `${prefix}已进入原图加载降级模式；${inventorySummary}。`,
+                                'error'
+                            );
+                            return;
+                        } catch (listingError) {
+                            if (scanId !== backgroundScanSequence) return;
+                            console.warn('原图目录列表降级也失败。', listingError);
+                            const counts = renderKnownBackgroundFallback();
+                            setBackgroundStatus(
+                                `已进入原图加载降级模式，但无法读取目录列表；仅保留 ${counts.total} 张已知背景（普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张）。请确认 Zoraxy 已开启 directory listing。`,
+                                'error'
+                            );
+                            return;
                         }
-                    });
-
-                    if (scanId !== backgroundScanSequence) return;
-                    if (discovered.size === 0) throw new Error('目录列表中没有支持的图片链接');
-
-                    backgroundModes.forEach((mode) => {
-                        const configuredUrl = backgroundUrlForMode(mode);
-                        discovered.set(configuredUrl.href, configuredUrl);
-                    });
-
-                    const urls = Array.from(discovered.values()).sort((left, right) => {
-                        if (left.href === defaultBackground.href) return -1;
-                        if (right.href === defaultBackground.href) return 1;
-                        return backgroundFileName(left).localeCompare(backgroundFileName(right), 'zh-CN', { numeric: true });
-                    });
-
-                    const counts = renderBackgroundOptions(urls);
-                    const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
-                    if (options.successMessage) {
-                        setBackgroundStatus(`${options.successMessage} ${inventorySummary}。`, 'success');
-                    } else if (backgroundPreferencesConnection === 'offline') {
-                        setBackgroundStatus(`${inventorySummary}，但跨设备同步服务暂不可用。`, 'error');
-                    } else {
-                        setBackgroundStatus(`${inventorySummary}，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`, 'success');
                     }
-                } catch (error) {
+
                     if (scanId !== backgroundScanSequence) return;
-                    console.warn('背景目录扫描失败。', error);
-                    const fallbackUrls = new Map([[defaultBackground.href, defaultBackground]]);
-                    if (currentBackground.href !== defaultBackground.href) fallbackUrls.set(currentBackground.href, currentBackground);
-                    backgroundModes.forEach((mode) => {
-                        const configuredUrl = backgroundUrlForMode(mode);
-                        fallbackUrls.set(configuredUrl.href, configuredUrl);
-                    });
-                    const counts = renderBackgroundOptions(Array.from(fallbackUrls.values()));
-                    setBackgroundStatus(
-                        `无法读取目录列表，已保留 ${counts.total} 张可用背景（普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张）。请确认 Zoraxy 已开启 directory listing。`,
-                        'error'
-                    );
+                    const backgrounds = mergeAndSortBackgrounds(inventory.backgrounds);
+                    const counts = renderBackgroundOptions(backgrounds);
+                    const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
+                    const originalFallbackCount = backgrounds.filter(
+                        (background) => !background.thumbnailUrl
+                    ).length;
+                    const thumbnailMessage = originalFallbackCount > 0
+                        ? `，其中 ${originalFallbackCount} 张缩略图不可用，已单张使用原图`
+                        : '';
+
+                    if (options.successMessage) {
+                        setBackgroundStatus(
+                            `${options.successMessage} ${inventorySummary}${thumbnailMessage}。`,
+                            originalFallbackCount > 0 ? 'error' : 'success'
+                        );
+                    } else if (backgroundPreferencesConnection === 'offline') {
+                        setBackgroundStatus(
+                            `${inventorySummary}${thumbnailMessage}，但跨设备同步服务暂不可用。`,
+                            'error'
+                        );
+                    } else {
+                        setBackgroundStatus(
+                            `${inventorySummary}${thumbnailMessage}，正在设置${backgroundModeLabels[editingBackgroundMode]}背景。`,
+                            originalFallbackCount > 0 ? 'error' : 'success'
+                        );
+                    }
                 } finally {
                     if (scanId === backgroundScanSequence) {
                         backgroundScanController = null;

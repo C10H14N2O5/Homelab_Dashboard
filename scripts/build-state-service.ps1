@@ -20,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$expectedServiceVersion = 4
+$expectedServiceVersion = 5
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -266,6 +266,34 @@ try {
             if ($uploadedSmokeBytes[$byteIndex] -ne $smokePngBytes[$byteIndex]) {
                 throw 'Packaged executable changed the uploaded PNG bytes.'
             }
+        }
+
+        $backgroundInventory = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/background-files" `
+            -TimeoutSec 120
+        if ($backgroundInventory.version -ne 1 -or
+            $null -eq $backgroundInventory.backgrounds -or
+            $null -eq $backgroundInventory.thumbnails) {
+            throw 'Packaged executable returned an invalid background inventory.'
+        }
+        $smokeInventoryItem = @($backgroundInventory.backgrounds) |
+            Where-Object { $_.name -eq 'smoke.png' } |
+            Select-Object -First 1
+        if ($null -eq $smokeInventoryItem -or
+            $smokeInventoryItem.thumbnail -notmatch '^thumbnails/[A-Za-z0-9._-]+\.webp\?v=[A-Za-z0-9._-]+$') {
+            throw 'Packaged executable did not publish a safe WebP thumbnail URL for smoke.png.'
+        }
+        $thumbnailRelativePath = ($smokeInventoryItem.thumbnail -split '\?', 2)[0]
+        $thumbnailSmokePath = Join-Path $smokeBackgrounds ($thumbnailRelativePath.Replace('/', '\'))
+        if (-not (Test-Path -LiteralPath $thumbnailSmokePath -PathType Leaf)) {
+            throw 'Packaged executable inventory referenced a missing smoke.png thumbnail.'
+        }
+        $thumbnailSmokeBytes = [IO.File]::ReadAllBytes($thumbnailSmokePath)
+        if ($thumbnailSmokeBytes.Length -lt 12 -or
+            [Text.Encoding]::ASCII.GetString($thumbnailSmokeBytes, 0, 4) -ne 'RIFF' -or
+            [Text.Encoding]::ASCII.GetString($thumbnailSmokeBytes, 8, 4) -ne 'WEBP') {
+            throw 'Packaged executable did not generate a valid WebP thumbnail.'
         }
 
         $bestdoriReconcile = Invoke-RestMethod `

@@ -70,6 +70,7 @@ $maintenanceContracts = @(
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },
+    @{ Name = 'packaged thumbnail inventory check'; Source = $buildSource; Marker = '$backgroundInventory' },
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
@@ -160,6 +161,7 @@ cards.forEach((tag, index) => {
 
 const requiredMarkers = [
     '/api/background-preferences',
+    'const backgroundInventoryEndpoint',
     '/api/background-files/upload',
     '/api/background-files/remove',
     '/api/bestdori/characters',
@@ -190,6 +192,10 @@ const requiredMarkers = [
     'reconcileSharedBackgroundPreference',
     'validateBackgroundUploadFile',
     'backgroundModesUsingFile',
+    'normalizeBackgroundThumbnailUrl',
+    'normalizeBackgroundInventory',
+    'requestBackgroundInventory',
+    'requestLegacyBackgroundListing',
     'isBestdoriBackgroundName',
     "const backgroundLibrarySources = ['ordinary', 'bestdori']",
     'section.dataset.backgroundSection = source',
@@ -225,6 +231,7 @@ const context = vm.createContext({
     console: { warn() {} },
     Error,
     Promise,
+    URL,
     fetch: null,
     Image: null,
     window: { setTimeout, clearTimeout }
@@ -282,10 +289,67 @@ if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
 }
 vm.runInContext(
     runtimeScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
-        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
+        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
     context
 );
 context.backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
+context.pageBase = new URL('https://home.example.test/');
+context.backgroundDirectory = new URL('backgrounds/', context.pageBase);
+context.backgroundThumbnailDirectory = new URL('thumbnails/', context.backgroundDirectory);
+context.location = { origin: context.pageBase.origin };
+context.backgroundUrlFromName = (fileName) => new URL(
+    encodeURIComponent(fileName),
+    context.backgroundDirectory
+);
+
+const safeThumbnail = context.__backgroundManagerHelpers.normalizeBackgroundThumbnailUrl(
+    'thumbnails/thumbnail-0123456789abcdef.webp?v=123-456'
+);
+if (!safeThumbnail || safeThumbnail.href !== 'https://home.example.test/backgrounds/thumbnails/thumbnail-0123456789abcdef.webp?v=123-456') {
+    throw new Error('A valid same-origin thumbnail URL was rejected.');
+}
+[
+    'https://images.example.invalid/thumbnail.webp?v=1',
+    'thumbnails/../outside.webp?v=1',
+    'thumbnails/nested/thumb.webp?v=1',
+    'thumbnails/thumb.jpg?v=1',
+    'thumbnails/thumb.webp?v=1&extra=2',
+    'thumbnails/thumb.webp'
+].forEach((candidate) => {
+    if (context.__backgroundManagerHelpers.normalizeBackgroundThumbnailUrl(candidate)) {
+        throw new Error(`Unsafe thumbnail URL was accepted: ${candidate}`);
+    }
+});
+
+const normalizedInventory = context.__backgroundManagerHelpers.normalizeBackgroundInventory({
+    version: 1,
+    backgrounds: [
+        {
+            name: 'wallpaper.jpg',
+            thumbnail: 'thumbnails/thumbnail-0123456789abcdef.webp?v=123-456'
+        },
+        { name: 'fallback.png', thumbnail: null }
+    ],
+    thumbnails: { generated: 1, reused: 1, failed: 0 }
+});
+if (!normalizedInventory
+    || normalizedInventory.backgrounds.length !== 2
+    || normalizedInventory.backgrounds[0].url.href !== 'https://home.example.test/backgrounds/wallpaper.jpg'
+    || !normalizedInventory.backgrounds[0].thumbnailUrl
+    || normalizedInventory.backgrounds[1].thumbnailUrl !== null
+    || normalizedInventory.thumbnails.generated !== 1) {
+    throw new Error('A valid background inventory was not normalized correctly.');
+}
+if (context.__backgroundManagerHelpers.normalizeBackgroundInventory({
+    version: 1,
+    backgrounds: [
+        { name: 'duplicate.jpg', thumbnail: null },
+        { name: 'duplicate.jpg', thumbnail: null }
+    ],
+    thumbnails: { generated: 0, reused: 0, failed: 0 }
+})) {
+    throw new Error('A background inventory containing duplicate original names was accepted.');
+}
 
 const validUpload = { name: 'wallpaper.avif', size: 50 * 1024 * 1024 };
 if (context.__backgroundManagerHelpers.validateBackgroundUploadFile(validUpload) !== '') {
@@ -348,13 +412,100 @@ if (renderFunctionStart < 0 || renderFunctionEnd < 0) {
 const groupedRendererSource = runtimeScript.slice(renderFunctionStart, renderFunctionEnd);
 if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
     || !groupedRendererSource.includes('backgroundLibraryExpanded[source]')
-    || !groupedRendererSource.includes('groupedUrls.ordinary.length')
-    || !groupedRendererSource.includes('groupedUrls.bestdori.length')
+    || !groupedRendererSource.includes('groupedBackgrounds.ordinary.length')
+    || !groupedRendererSource.includes('groupedBackgrounds.bestdori.length')
     || !groupedRendererSource.includes('setBackgroundSectionExpanded(source')
     || !groupedRendererSource.includes("sectionContent.setAttribute('aria-hidden'")
     || !groupedRendererSource.includes("sectionContent.toggleAttribute('inert'")
+    || !groupedRendererSource.includes('option.dataset.url = url.href')
+    || !groupedRendererSource.includes('thumbnail.src = thumbnailSource.href')
+    || !groupedRendererSource.includes("thumbnail.addEventListener('error'")
+    || !groupedRendererSource.includes('thumbnail.src = url.href')
+    || !groupedRendererSource.includes('{ once: true }')
+    || !groupedRendererSource.includes('saveSharedBackgroundPreference(editingBackgroundMode, url)')
     || groupedRendererSource.includes('sectionGrid.hidden')) {
-    throw new Error('Grouped background renderer is missing section order, counts, collapse state, or toggle behavior.');
+    throw new Error('Grouped background renderer is missing thumbnail, original-selection, count, collapse, or toggle behavior.');
+}
+
+const inventoryRequestStart = runtimeScript.indexOf('async function requestBackgroundInventory(');
+const inventoryRequestEnd = runtimeScript.indexOf('async function requestLegacyBackgroundListing(', inventoryRequestStart);
+if (inventoryRequestStart < 0 || inventoryRequestEnd < 0) {
+    throw new Error('Unable to extract the background inventory request.');
+}
+vm.runInContext(
+    runtimeScript.slice(inventoryRequestStart, inventoryRequestEnd)
+        + '\nglobalThis.__requestBackgroundInventory = requestBackgroundInventory;',
+    context
+);
+context.backgroundInventoryEndpoint = { href: 'https://home.example.test/api/background-files' };
+context.normalizeBackgroundInventory = (payload) => payload.version === 1 ? payload : null;
+let observedInventoryRequest = null;
+context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
+    observedInventoryRequest = { resource, options, timeout, controller };
+    return transform({
+        ok: true,
+        status: 200,
+        json: async () => ({
+            version: 1,
+            backgrounds: [{ name: 'wallpaper.jpg', thumbnail: null }],
+            thumbnails: { generated: 0, reused: 0, failed: 1 }
+        })
+    });
+};
+const inventoryController = { signal: 'test-controller' };
+const requestedInventory = await context.__requestBackgroundInventory(inventoryController);
+if (requestedInventory.version !== 1
+    || observedInventoryRequest.resource !== context.backgroundInventoryEndpoint.href
+    || observedInventoryRequest.options.cache !== 'no-store'
+    || observedInventoryRequest.options.credentials !== 'same-origin'
+    || observedInventoryRequest.options.headers.Accept !== 'application/json'
+    || observedInventoryRequest.timeout !== 120000
+    || observedInventoryRequest.controller !== inventoryController) {
+    throw new Error('Background inventory request contract mismatch.');
+}
+
+const scanFunctionStart = runtimeScript.indexOf('async function scanBackgroundDirectory(');
+const scanFunctionEnd = runtimeScript.indexOf('function setEditingBackgroundMode(', scanFunctionStart);
+if (scanFunctionStart < 0 || scanFunctionEnd < 0) {
+    throw new Error('Unable to extract the background scan fallback workflow.');
+}
+vm.runInContext(
+    runtimeScript.slice(scanFunctionStart, scanFunctionEnd)
+        + '\nglobalThis.__scanBackgroundDirectory = scanBackgroundDirectory;',
+    context
+);
+context.AbortController = class {
+    abort() {}
+};
+context.backgroundScanController = null;
+context.backgroundScanSequence = 0;
+context.backgroundScanPending = false;
+context.backgroundPreferencesConnection = 'online';
+context.editingBackgroundMode = 'landscape';
+context.backgroundModeLabels = { landscape: '横屏', portrait: '竖屏' };
+context.syncBackgroundControlsBusy = () => {};
+const observedBackgroundStatuses = [];
+context.setBackgroundStatus = (message, state) => {
+    observedBackgroundStatuses.push({ message, state });
+};
+context.requestBackgroundInventory = async () => {
+    throw new Error('simulated inventory outage');
+};
+let legacyListingRequestCount = 0;
+context.requestLegacyBackgroundListing = async () => {
+    legacyListingRequestCount += 1;
+    return [{ url: new URL('https://home.example.test/backgrounds/bg.jpg'), thumbnailUrl: null }];
+};
+context.mergeAndSortBackgrounds = (backgrounds) => backgrounds;
+context.renderBackgroundOptions = () => ({ total: 1, ordinary: 1, bestdori: 0 });
+context.renderKnownBackgroundFallback = () => ({ total: 1, ordinary: 1, bestdori: 0 });
+await context.__scanBackgroundDirectory();
+if (legacyListingRequestCount !== 1
+    || !observedBackgroundStatuses.some(
+        ({ message }) => message.includes('\u539f\u56fe\u52a0\u8f7d\u964d\u7ea7\u6a21\u5f0f')
+    )
+    || context.backgroundScanPending) {
+    throw new Error('Inventory failure did not enter and announce the legacy original-loading fallback.');
 }
 
 const transitionHelperStart = runtimeScript.indexOf('function cancelBackgroundSectionTransition(');

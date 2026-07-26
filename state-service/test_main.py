@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import socket
 import ssl
 import sys
@@ -200,6 +201,23 @@ class StoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.project.close()
 
+    def write_real_backgrounds(self) -> None:
+        formats = {
+            "bg.jpg": "JPEG",
+            "test.jpg": "JPEG",
+            "portrait.png": "PNG",
+            "alternate.webp": "WEBP",
+        }
+        for name, image_format in formats.items():
+            (self.project.backgrounds / name).write_bytes(image_bytes(image_format))
+
+    def thumbnail_path(self, manifest: dict[str, object], background: str) -> Path:
+        records = manifest["backgrounds"]
+        record = next(item for item in records if item["name"] == background)
+        thumbnail = record["thumbnail"]
+        self.assertIsInstance(thumbnail, str)
+        return self.project.backgrounds / thumbnail.split("?", 1)[0]
+
     def test_initial_state_and_independent_updates_persist(self) -> None:
         self.assertEqual(
             self.store.get(),
@@ -258,6 +276,7 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(any(path.name.startswith(".state.json.") for path in self.config.state_dir.iterdir()))
 
     def test_upload_validates_image_and_uses_collision_safe_names(self) -> None:
+        self.write_real_backgrounds()
         payload = image_bytes()
         first = self.store.upload_background("holiday.png", io.BytesIO(payload), len(payload))
         second = self.store.upload_background("holiday.png", io.BytesIO(payload), len(payload))
@@ -268,6 +287,221 @@ class StoreTests(unittest.TestCase):
         self.assertEqual((self.project.backgrounds / second["background"]).read_bytes(), payload)
         self.assertFalse(any(path.name.startswith(".upload-") for path in self.project.backgrounds.iterdir()))
         self.assertEqual(self.store.get()["landscape"], "bg.jpg")
+
+        manifest = self.store.list_backgrounds()
+        holiday = next(item for item in manifest["backgrounds"] if item["name"] == "holiday.png")
+        self.assertIsInstance(holiday["thumbnail"], str)
+        with main.Image.open(self.thumbnail_path(manifest, "holiday.png")) as thumbnail:
+            self.assertEqual(thumbnail.format, "WEBP")
+            self.assertEqual(thumbnail.size, (480, 270))
+
+    def test_thumbnail_manifest_generates_reuses_and_orients_supported_images(self) -> None:
+        self.write_real_backgrounds()
+        (self.project.backgrounds / "phone.avif").write_bytes(image_bytes("AVIF"))
+
+        oriented = main.Image.new("RGB", (40, 80), (180, 40, 60))
+        exif = main.Image.Exif()
+        exif[274] = 6
+        oriented.save(self.project.backgrounds / "oriented.jpg", format="JPEG", exif=exif)
+        oriented.close()
+
+        with mock.patch.object(
+            main.ImageOps,
+            "exif_transpose",
+            wraps=main.ImageOps.exif_transpose,
+        ) as transpose, mock.patch.object(
+            main.ImageOps,
+            "fit",
+            wraps=main.ImageOps.fit,
+        ) as fit, mock.patch.object(main.os, "fsync", wraps=main.os.fsync) as fsync, mock.patch.object(
+            main.os,
+            "replace",
+            wraps=main.os.replace,
+        ) as replace:
+            first = self.store.list_backgrounds()
+
+        self.assertEqual(first["version"], 1)
+        self.assertEqual(first["thumbnails"], {"generated": 6, "reused": 0, "failed": 0})
+        self.assertEqual(first["backgrounds"][0]["name"], "bg.jpg")
+        self.assertGreaterEqual(transpose.call_count, 6)
+        self.assertGreaterEqual(fit.call_count, 6)
+        for call in fit.call_args_list:
+            self.assertEqual(call.args[1], (480, 270))
+            self.assertEqual(call.kwargs["centering"], (0.5, 0.5))
+        self.assertGreaterEqual(fsync.call_count, 6)
+        for call in replace.call_args_list:
+            temporary, destination = map(Path, call.args[:2])
+            self.assertEqual(temporary.parent, destination.parent)
+            self.assertEqual(temporary.suffix, ".tmp")
+            self.assertEqual(destination.suffix, ".webp")
+        for record in first["backgrounds"]:
+            self.assertRegex(
+                record["thumbnail"],
+                r"^thumbnails/thumbnail-[0-9a-f]{64}-[0-9a-f]{64}\.webp\?v=\d+-\d+$",
+            )
+            with main.Image.open(self.thumbnail_path(first, record["name"])) as thumbnail:
+                self.assertEqual((thumbnail.format, thumbnail.size), ("WEBP", (480, 270)))
+
+        second = self.store.list_backgrounds()
+        self.assertEqual(second["thumbnails"], {"generated": 0, "reused": 6, "failed": 0})
+        self.assertEqual(second["backgrounds"], first["backgrounds"])
+
+    def test_thumbnail_manifest_invalidates_repairs_and_cleans_only_internal_orphans(self) -> None:
+        self.write_real_backgrounds()
+        first = self.store.list_backgrounds()
+        original_cache = self.thumbnail_path(first, "bg.jpg")
+
+        source = self.project.backgrounds / "bg.jpg"
+        source.write_bytes(image_bytes("JPEG") + b"\n")
+        source_stat = source.stat()
+        os.utime(
+            source,
+            ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns + 1_000_000_000),
+        )
+        changed = self.store.list_backgrounds()
+        changed_cache = self.thumbnail_path(changed, "bg.jpg")
+        self.assertNotEqual(changed_cache, original_cache)
+        self.assertFalse(original_cache.exists())
+
+        changed_cache.write_bytes(b"damaged")
+        repaired = self.store.list_backgrounds()
+        self.assertGreaterEqual(repaired["thumbnails"]["generated"], 1)
+        with main.Image.open(changed_cache) as thumbnail:
+            self.assertEqual((thumbnail.format, thumbnail.size), ("WEBP", (480, 270)))
+
+        orphan = self.store.thumbnail_dir / f"thumbnail-{'a' * 64}-{'b' * 64}.webp"
+        unrelated = self.store.thumbnail_dir / "keep-me.txt"
+        nested = self.store.thumbnail_dir / "keep-directory"
+        orphan.write_bytes(b"orphan")
+        unrelated.write_text("operator file", encoding="utf-8")
+        nested.mkdir()
+        self.store.list_backgrounds()
+        self.assertFalse(orphan.exists())
+        self.assertTrue(unrelated.is_file())
+        self.assertTrue(nested.is_dir())
+
+    def test_thumbnail_manifest_contains_single_image_failures_and_rejects_unsafe_cache_path(self) -> None:
+        self.write_real_backgrounds()
+        (self.project.backgrounds / "test.jpg").write_bytes(b"damaged")
+        with self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            partial = self.store.list_backgrounds()
+        failed = next(item for item in partial["backgrounds"] if item["name"] == "test.jpg")
+        self.assertIsNone(failed["thumbnail"])
+        self.assertEqual(partial["thumbnails"], {"generated": 3, "reused": 0, "failed": 1})
+
+        main.shutil.rmtree(self.store.thumbnail_dir)
+        outside = self.project.root / "outside-cache"
+        outside.mkdir()
+        try:
+            os.symlink(outside, self.store.thumbnail_dir, target_is_directory=True)
+        except OSError:
+            self.store.thumbnail_dir.write_text("not a directory", encoding="utf-8")
+        with self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            unsafe = self.store.list_backgrounds()
+        self.assertTrue(all(item["thumbnail"] is None for item in unsafe["backgrounds"]))
+        self.assertEqual(unsafe["thumbnails"]["failed"], 4)
+        self.assertEqual(list(outside.iterdir()), [])
+
+        if self.store.thumbnail_dir.is_symlink() or self.store.thumbnail_dir.is_file():
+            self.store.thumbnail_dir.unlink()
+        else:
+            main.shutil.rmtree(self.store.thumbnail_dir)
+        self.store.thumbnail_dir.mkdir()
+        with mock.patch.object(
+            type(self.store.thumbnail_dir),
+            "is_junction",
+            return_value=True,
+        ), self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            junction = self.store.list_backgrounds()
+        self.assertTrue(all(item["thumbnail"] is None for item in junction["backgrounds"]))
+        self.assertEqual(junction["thumbnails"]["failed"], 4)
+
+    def test_thumbnail_manifest_serializes_with_background_mutations(self) -> None:
+        self.write_real_backgrounds()
+        manifest_entered = threading.Event()
+        release_manifest = threading.Event()
+        mutation_started = threading.Event()
+        mutation_finished = threading.Event()
+        errors: list[BaseException] = []
+        original_thumbnail = self.store._thumbnail_for_background_locked
+
+        def blocking_thumbnail(background: str) -> tuple[str, str]:
+            if background == "bg.jpg":
+                manifest_entered.set()
+                if not release_manifest.wait(5):
+                    raise TimeoutError("test did not release the thumbnail manifest")
+            return original_thumbnail(background)
+
+        def list_manifest() -> None:
+            try:
+                self.store.list_backgrounds()
+            except BaseException as error:
+                errors.append(error)
+
+        def upload_during_manifest() -> None:
+            mutation_started.set()
+            try:
+                payload = image_bytes()
+                self.store.upload_background("queued.png", io.BytesIO(payload), len(payload))
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                mutation_finished.set()
+
+        with mock.patch.object(
+            self.store,
+            "_thumbnail_for_background_locked",
+            side_effect=blocking_thumbnail,
+        ):
+            manifest_thread = threading.Thread(target=list_manifest)
+            manifest_thread.start()
+            self.assertTrue(manifest_entered.wait(5))
+            mutation_thread = threading.Thread(target=upload_during_manifest)
+            mutation_thread.start()
+            self.assertTrue(mutation_started.wait(5))
+            self.assertFalse(mutation_finished.wait(0.1))
+            release_manifest.set()
+            manifest_thread.join(10)
+            mutation_thread.join(10)
+
+        self.assertFalse(manifest_thread.is_alive())
+        self.assertFalse(mutation_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue((self.project.backgrounds / "queued.png").is_file())
+
+    def test_thumbnail_failure_does_not_rollback_upload_and_removal_cleans_cache(self) -> None:
+        payload = image_bytes()
+        with mock.patch.object(
+            self.store,
+            "_thumbnail_for_background_locked",
+            side_effect=OSError("cache unavailable"),
+        ), self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            uploaded = self.store.upload_background("survives.png", io.BytesIO(payload), len(payload))
+        self.assertTrue((self.project.backgrounds / uploaded["background"]).is_file())
+
+        self.write_real_backgrounds()
+        manifest = self.store.list_backgrounds()
+        cache = self.thumbnail_path(manifest, "test.jpg")
+        with mock.patch.object(main, "send2trash", side_effect=OSError("trash unavailable")):
+            with self.assertRaises(main.TrashUnavailable) as issued:
+                self.store.remove_background("test.jpg")
+        self.assertTrue(cache.is_file())
+        self.store.remove_background("test.jpg", issued.exception.confirmation_token)
+        self.assertFalse(cache.exists())
+
+        restored = self.project.backgrounds / "test.jpg"
+        restored.write_bytes(image_bytes("JPEG"))
+        restored_manifest = self.store.list_backgrounds()
+        restored_cache = self.thumbnail_path(restored_manifest, "test.jpg")
+        self.assertTrue(restored_cache.is_file())
+
+        def simulate_trash(path: str) -> None:
+            Path(path).unlink()
+
+        with mock.patch.object(main, "send2trash", side_effect=simulate_trash):
+            disposition, _ = self.store.remove_background("test.jpg")
+        self.assertEqual(disposition, "trash")
+        self.assertFalse(restored_cache.exists())
 
     def test_upload_rejects_invalid_size_name_format_and_incomplete_body(self) -> None:
         payload = image_bytes()
@@ -603,10 +837,14 @@ class BestdoriDrawTests(unittest.TestCase):
             history=failing_history,
             choice=lambda values: values[0],
         )
-        before = {path.name for path in self.project.backgrounds.iterdir()}
+        before = {path.name for path in self.project.backgrounds.iterdir() if path.is_file()}
         with self.assertRaises(main.BestdoriHistoryError):
             manager.draw("random", {3})
-        self.assertEqual({path.name for path in self.project.backgrounds.iterdir()}, before)
+        self.assertEqual(
+            {path.name for path in self.project.backgrounds.iterdir() if path.is_file()},
+            before,
+        )
+        self.assertEqual(list(self.store.thumbnail_dir.iterdir()), [])
 
 
 class FakeResponse:
@@ -1024,6 +1262,31 @@ class APITests(unittest.TestCase):
         status, preferences = self.request("GET", main.API_PATH)
         self.assertEqual(status, 200)
         self.assertEqual(preferences["landscape"], "bg.jpg")
+
+    def test_background_manifest_contract_partial_failure_and_methods(self) -> None:
+        (self.project.backgrounds / "bg.jpg").write_bytes(image_bytes("JPEG"))
+        with self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            status, manifest = self.request("GET", main.BACKGROUND_FILES_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(set(manifest), {"version", "backgrounds", "thumbnails"})
+        self.assertEqual(manifest["version"], 1)
+        self.assertEqual(manifest["backgrounds"][0]["name"], "bg.jpg")
+        self.assertIsInstance(manifest["backgrounds"][0]["thumbnail"], str)
+        self.assertEqual(
+            manifest["thumbnails"],
+            {"generated": 1, "reused": 0, "failed": 3},
+        )
+        failed = [item for item in manifest["backgrounds"] if item["thumbnail"] is None]
+        self.assertEqual(len(failed), 3)
+
+        with self.assertLogs(main.SERVICE_NAME, level="WARNING"):
+            status, reused = self.request("GET", main.BACKGROUND_FILES_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(reused["thumbnails"], {"generated": 0, "reused": 1, "failed": 3})
+        for method in ("POST", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+            with self.subTest(method=method):
+                status, _ = self.request(method, main.BACKGROUND_FILES_PATH)
+                self.assertEqual(status, 405)
 
     def test_patch_matches_frontend_contract(self) -> None:
         status, preferences = self.patch({"mode": "landscape", "background": "test.jpg"})

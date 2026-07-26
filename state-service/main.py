@@ -33,12 +33,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener, urlopen
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from send2trash import send2trash
 
 
 API_PATH = "/api/background-preferences"
 SERVICE_STATUS_PATH = "/api/service-status"
+BACKGROUND_FILES_PATH = "/api/background-files"
 BACKGROUND_UPLOAD_PATH = "/api/background-files/upload"
 BACKGROUND_REMOVE_PATH = "/api/background-files/remove"
 BESTDORI_CHARACTERS_PATH = "/api/bestdori/characters"
@@ -60,10 +61,11 @@ MONITOR_REFRESH_SECONDS = 60.0
 LOG_MAX_BYTES = 48 * 1024
 LOG_BACKUP_COUNT = 1
 SERVICE_NAME = "HomeLabWallpaperState"
-SERVICE_VERSION = 4
+SERVICE_VERSION = 5
 CONFIG_VERSION = 2
 STATE_VERSION = 1
 BESTDORI_HISTORY_VERSION = 1
+BACKGROUND_FILES_VERSION = 1
 MAX_PATCH_BODY = 4 * 1024
 MAX_SERVICE_STATUS_BODY = 16 * 1024
 MAX_BACKGROUND_REMOVE_BODY = 4 * 1024
@@ -72,6 +74,13 @@ MAX_BACKGROUND_UPLOAD_BODY = 50 * 1024 * 1024
 MAX_BESTDORI_CATALOG_BODY = 24 * 1024 * 1024
 MAX_BACKGROUND_PIXELS = 100_000_000
 BACKGROUND_UPLOAD_CHUNK_SIZE = 1024 * 1024
+THUMBNAIL_DIRECTORY_NAME = "thumbnails"
+THUMBNAIL_WIDTH = 480
+THUMBNAIL_HEIGHT = 270
+THUMBNAIL_QUALITY = 75
+THUMBNAIL_FILE_PATTERN = re.compile(
+    r"^thumbnail-(?P<name>[0-9a-f]{64})-(?P<source>[0-9a-f]{64})\.webp$"
+)
 REMOVAL_TOKEN_TTL_SECONDS = 60
 MAX_REMOVAL_TOKENS = 32
 MAX_REJECTED_BODY_DRAIN = 64 * 1024
@@ -438,6 +447,243 @@ class StateStore:
         self._removal_tokens: dict[str, tuple[str, float]] = {}
         self.state = self._load_or_initialize()
 
+    @property
+    def thumbnail_dir(self) -> Path:
+        return self.background_dir / THUMBNAIL_DIRECTORY_NAME
+
+    @staticmethod
+    def _thumbnail_name_hash(background: str) -> str:
+        return hashlib.sha256(background.encode("utf-8")).hexdigest()
+
+    def _thumbnail_cache_name(self, background: str, source_stat: os.stat_result) -> str:
+        name_hash = self._thumbnail_name_hash(background)
+        signature = hashlib.sha256(
+            f"{background}\0{source_stat.st_size}\0{source_stat.st_mtime_ns}".encode("utf-8")
+        ).hexdigest()
+        return f"thumbnail-{name_hash}-{signature}.webp"
+
+    @staticmethod
+    def _is_link_or_junction(path: Path) -> bool:
+        is_junction = getattr(path, "is_junction", None)
+        return path.is_symlink() or bool(is_junction and is_junction())
+
+    def _thumbnail_directory_locked(self, *, create: bool) -> Path | None:
+        directory = self.thumbnail_dir
+        if self._is_link_or_junction(directory):
+            raise OSError("thumbnail directory must not be a symbolic link or junction")
+        if not directory.exists():
+            if not create:
+                return None
+            directory.mkdir(mode=0o755)
+        if self._is_link_or_junction(directory) or not directory.is_dir():
+            raise OSError("thumbnail cache path is not a directory")
+        if directory.resolve(strict=True).parent != self.background_dir:
+            raise OSError("thumbnail directory escapes the background directory")
+        return directory
+
+    @staticmethod
+    def _validate_thumbnail(path: Path) -> None:
+        if path.is_symlink() or not path.is_file():
+            raise OSError("thumbnail cache entry is not a regular file")
+        try:
+            with Image.open(path) as image:
+                if image.format != "WEBP" or image.size != (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT):
+                    raise InvalidImage("thumbnail cache entry has invalid properties")
+                image.verify()
+            with Image.open(path) as image:
+                image.load()
+        except InvalidImage:
+            raise
+        except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+            raise InvalidImage("thumbnail cache entry is damaged") from None
+
+    @staticmethod
+    def _write_thumbnail(source: Path, destination: Path) -> None:
+        handle, temporary_name = tempfile.mkstemp(
+            prefix=".thumbnail-",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                with Image.open(source) as image:
+                    if (
+                        image.width <= 0
+                        or image.height <= 0
+                        or image.width * image.height > MAX_BACKGROUND_PIXELS
+                    ):
+                        raise InvalidImage("image dimensions are too large")
+                    transposed = ImageOps.exif_transpose(image)
+                    try:
+                        rgb = transposed.convert("RGB")
+                        try:
+                            thumbnail = ImageOps.fit(
+                                rgb,
+                                (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT),
+                                method=Image.Resampling.LANCZOS,
+                                centering=(0.5, 0.5),
+                            )
+                            try:
+                                with os.fdopen(handle, "wb") as output:
+                                    handle = -1
+                                    thumbnail.save(
+                                        output,
+                                        format="WEBP",
+                                        quality=THUMBNAIL_QUALITY,
+                                        method=6,
+                                    )
+                                    output.flush()
+                                    os.fsync(output.fileno())
+                            finally:
+                                thumbnail.close()
+                        finally:
+                            rgb.close()
+                    finally:
+                        if transposed is not image:
+                            transposed.close()
+            os.replace(temporary, destination)
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise InvalidImage("image dimensions are too large") from None
+        except (UnidentifiedImageError, SyntaxError, ValueError):
+            raise InvalidImage("invalid or damaged image") from None
+        finally:
+            if handle >= 0:
+                os.close(handle)
+            temporary.unlink(missing_ok=True)
+
+    def _thumbnail_for_background_locked(self, background: str) -> tuple[str, str]:
+        source = self.background_dir / background
+        if source.is_symlink() or not source.is_file():
+            raise BackgroundMissing("background file does not exist")
+        source_stat = source.stat()
+        directory = self._thumbnail_directory_locked(create=True)
+        if directory is None:
+            raise OSError("thumbnail directory is unavailable")
+        cache = directory / self._thumbnail_cache_name(background, source_stat)
+        status = "reused"
+        try:
+            self._validate_thumbnail(cache)
+        except (InvalidImage, OSError):
+            if cache.exists() and not cache.is_symlink():
+                cache.unlink(missing_ok=True)
+            self._write_thumbnail(source, cache)
+            self._validate_thumbnail(cache)
+            status = "generated"
+        current_stat = source.stat()
+        if (
+            current_stat.st_size != source_stat.st_size
+            or current_stat.st_mtime_ns != source_stat.st_mtime_ns
+        ):
+            cache.unlink(missing_ok=True)
+            raise OSError("background changed while generating thumbnail")
+        cache_stat = cache.stat()
+        return (
+            f"{THUMBNAIL_DIRECTORY_NAME}/{cache.name}"
+            f"?v={cache_stat.st_size}-{cache_stat.st_mtime_ns}",
+            status,
+        )
+
+    def _remove_thumbnail_caches_locked(self, background: str) -> None:
+        try:
+            directory = self._thumbnail_directory_locked(create=False)
+        except OSError:
+            return
+        if directory is None:
+            return
+        name_hash = self._thumbnail_name_hash(background)
+        prefix = f"thumbnail-{name_hash}-"
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if (
+                entry.name.startswith(prefix)
+                and THUMBNAIL_FILE_PATTERN.fullmatch(entry.name)
+                and entry.is_file()
+                and not entry.is_symlink()
+            ):
+                try:
+                    entry.unlink()
+                except OSError:
+                    logging.getLogger(SERVICE_NAME).warning(
+                        "unable to remove thumbnail cache %s",
+                        entry,
+                        exc_info=True,
+                    )
+
+    def _cleanup_orphaned_thumbnails_locked(self, expected: set[str]) -> None:
+        try:
+            directory = self._thumbnail_directory_locked(create=False)
+        except OSError:
+            return
+        if directory is None:
+            return
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if (
+                entry.name not in expected
+                and THUMBNAIL_FILE_PATTERN.fullmatch(entry.name)
+                and entry.is_file()
+                and not entry.is_symlink()
+            ):
+                try:
+                    entry.unlink()
+                except OSError:
+                    logging.getLogger(SERVICE_NAME).warning(
+                        "unable to remove orphaned thumbnail cache %s",
+                        entry,
+                        exc_info=True,
+                    )
+
+    def list_backgrounds(self) -> dict[str, Any]:
+        with self._lock:
+            backgrounds: list[str] = []
+            for path in self.background_dir.iterdir():
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    backgrounds.append(validate_background_name(path.name))
+                except InvalidBackground:
+                    continue
+            backgrounds.sort(
+                key=lambda name: (
+                    name.casefold() != DEFAULT_BACKGROUND.casefold(),
+                    name.casefold(),
+                    name,
+                )
+            )
+            result: list[dict[str, str | None]] = []
+            statistics = {"generated": 0, "reused": 0, "failed": 0}
+            expected: set[str] = set()
+            for background in backgrounds:
+                source = self.background_dir / background
+                try:
+                    cache_name = self._thumbnail_cache_name(background, source.stat())
+                    expected.add(cache_name)
+                    thumbnail, status = self._thumbnail_for_background_locked(background)
+                except Exception:
+                    logging.getLogger(SERVICE_NAME).warning(
+                        "unable to prepare thumbnail for %s",
+                        background,
+                        exc_info=True,
+                    )
+                    thumbnail = None
+                    status = "failed"
+                statistics[status] += 1
+                result.append({"name": background, "thumbnail": thumbnail})
+            self._cleanup_orphaned_thumbnails_locked(expected)
+            return {
+                "version": BACKGROUND_FILES_VERSION,
+                "backgrounds": result,
+                "thumbnails": statistics,
+            }
+
     def _require_background(self, name: str) -> None:
         validate_background_name(name)
         path = self.background_dir / name
@@ -597,6 +843,14 @@ class StateStore:
                         # An external writer may have won the name after the directory scan.
                         final_name = self._next_available_background_name(requested_name)
                 temporary.unlink()
+                try:
+                    self._thumbnail_for_background_locked(final_name)
+                except Exception:
+                    logging.getLogger(SERVICE_NAME).warning(
+                        "unable to prepare thumbnail for uploaded background %s",
+                        final_name,
+                        exc_info=True,
+                    )
                 return {
                     "background": final_name,
                     "size": content_length,
@@ -659,16 +913,33 @@ class StateStore:
                 if path.is_symlink():
                     raise InvalidBackground("symbolic links cannot be removed")
                 path.unlink()
+                self._remove_thumbnail_caches_locked(background)
                 return "permanent", self._preferences_after_removal()
 
             try:
                 send2trash(str(path))
             except Exception:
                 if not path.exists() and not path.is_symlink():
+                    self._remove_thumbnail_caches_locked(background)
                     return "trash", self._preferences_after_removal()
                 token = self._issue_removal_token(background, now)
                 raise TrashUnavailable(token) from None
+            self._remove_thumbnail_caches_locked(background)
             return "trash", self._preferences_after_removal()
+
+    def rollback_uploaded_background(self, background: str, expected_sha256: str) -> None:
+        with self._lock:
+            path = self.background_dir / background
+            try:
+                if (
+                    path.is_file()
+                    and not path.is_symlink()
+                    and BestdoriHistoryStore._file_sha256(path) == expected_sha256
+                ):
+                    path.unlink()
+                    self._remove_thumbnail_caches_locked(background)
+            except OSError:
+                pass
 
 
 class _RejectBestdoriRedirects(HTTPRedirectHandler):
@@ -1036,14 +1307,6 @@ class BestdoriDrawManager:
         title = title[: max(1, 220 - len(prefix) - len(suffix))]
         return validate_background_name(f"{prefix}{title}{suffix}")
 
-    @staticmethod
-    def _remove_rolled_back_file(path: Path, expected_sha256: str) -> None:
-        try:
-            if path.is_file() and not path.is_symlink() and BestdoriHistoryStore._file_sha256(path) == expected_sha256:
-                path.unlink()
-        except OSError:
-            pass
-
     def draw(
         self,
         mode: str,
@@ -1108,8 +1371,8 @@ class BestdoriDrawManager:
             try:
                 self.history.record(background["background"], digest, card_metadata)
             except Exception:
-                self._remove_rolled_back_file(
-                    self.store.background_dir / background["background"],
+                self.store.rollback_uploaded_background(
+                    background["background"],
                     digest,
                 )
                 raise
@@ -1625,6 +1888,13 @@ class StateRequestHandler(BaseHTTPRequestHandler):
                 self.server.logger.exception("GET %s failed", self.path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
             return
+        if self.path == BACKGROUND_FILES_PATH:
+            try:
+                self._write_json(HTTPStatus.OK, self.server.store.list_backgrounds())
+            except Exception:
+                self.server.logger.exception("GET %s failed", self.path)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
         if self.path == HEALTH_PATH:
             try:
                 self.server.store.get()
@@ -1687,6 +1957,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == BESTDORI_CHARACTERS_PATH:
             self._allow("GET")
             return
+        if self.path == BACKGROUND_FILES_PATH:
+            self._allow("GET")
+            return
         if self.path != API_PATH:
             self._error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -1736,6 +2009,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == BESTDORI_CHARACTERS_PATH:
             self._allow("GET")
             return
+        if self.path == BACKGROUND_FILES_PATH:
+            self._allow("GET")
+            return
         if self.path == SERVICE_STATUS_PATH:
             request = self._read_dashboard_json(MAX_SERVICE_STATUS_BODY)
             if request is None:
@@ -1779,6 +2055,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
     def _method_not_allowed(self) -> None:
         if self.path == API_PATH:
             self._allow("GET, PATCH")
+        elif self.path == BACKGROUND_FILES_PATH:
+            self._allow("GET")
         elif self.path == BESTDORI_CHARACTERS_PATH:
             self._allow("GET")
         elif self.path == SERVICE_STATUS_PATH:

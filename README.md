@@ -7,7 +7,7 @@
 | 项目 | 当前实现 |
 | --- | --- |
 | 页面入口 | `index.html` |
-| 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余图片由部署机器本地保存 |
+| 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余原图由部署机器本地保存；缩略图由后端生成 |
 | 服务入口 | 11 个 HomeLab 子域名 |
 | 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
@@ -22,7 +22,8 @@
 Zoraxy_StaticWebSite/
 ├── backgrounds/
 │   ├── .gitignore               # 仅放行兜底 bg.jpg
-│   └── bg.jpg                   # 拉取后即可使用的默认壁纸
+│   ├── bg.jpg                   # 拉取后即可使用的默认壁纸
+│   └── thumbnails/              # 运行时生成的 WebP 缩略图缓存，不进入 Git
 ├── state-service/
 │   ├── main.py                  # API、入口探测、状态存储、启动器、监视器和首次引导
 │   └── test_main.py             # Python 单元测试
@@ -36,7 +37,7 @@ Zoraxy_StaticWebSite/
 └── README.md
 ```
 
-仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
+仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
 
 ## 运行架构
 
@@ -44,7 +45,9 @@ Zoraxy_StaticWebSite/
 
 ```text
 浏览器
-├── GET /backgrounds/                     -> Zoraxy 静态目录列表
+├── GET /api/background-files             -> Python 状态服务生成/复用缩略图清单
+├── GET /backgrounds/thumbnails/...        -> Zoraxy 静态缩略图
+├── GET /backgrounds/                      -> Zoraxy 静态目录列表（旧后端降级）
 ├── GET/PATCH /api/background-preferences  -> Zoraxy Virtual Directory
 ├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
 ├── GET/POST /api/bestdori/...              -> Python 状态服务
@@ -74,9 +77,32 @@ CLIProxy 点击根地址，但使用 `data-probe-url` 指向 `/management.html/`
 
 ### 背景选择和同步
 
-页面扫描 `/backgrounds/` 的 directory listing，只接收第一层 `.jpg`、`.jpeg`、`.png`、`.webp` 和 `.avif`。目录必须包含 `bg.jpg`，不能包含会阻止目录列表的 index 文件。选择器按“普通壁纸”和“Bestdori 抽卡”分成两个可折叠栏目，两个栏目首次打开都展开，折叠状态只在当前页面会话中保留；状态文案同时显示总数及各栏目数量。
+页面打开背景选择器时优先请求 `GET /api/background-files`。后端扫描 `backgrounds/` 第一层的 `.jpg`、`.jpeg`、`.png`、`.webp` 和 `.avif` 原图，为每张图片生成或复用 480×270、质量 75 的 WebP 缩略图；选择器只加载这些缩略图，用户选中某张图片时才预加载并应用对应原图。目录必须包含 `bg.jpg`，原图继续平铺在第一层；后端管理的 `backgrounds/thumbnails/` 只保存可再生缓存。为保留旧后端降级能力，`backgrounds/` 仍不能包含会阻止目录列表的 index 文件。
 
-分类只发生在浏览器界面中，图片仍平铺保存在 `backgrounds/`，不新增子目录或接口。前端通过抽卡服务生成的稳定文件名结构（角色、三星/四星/五星、标题、数字卡面 ID、`after_training`/`normal`，以及可选的重名序号）识别抽卡壁纸；`bg.jpg` 和其它名称都归入普通壁纸。手动重命名导致文件名不再符合该结构时，图片会显示在普通壁纸栏目。该分类不读取 `BestdoriCardDraws.json`，因此清理或重置去重记录不会改变已有图片所在的栏目。
+清单响应只包含文件名、同源缩略图相对路径和本次缓存统计，不直接传输图片：
+
+```json
+{
+  "version": 1,
+  "backgrounds": [
+    {
+      "name": "bg.jpg",
+      "thumbnail": "thumbnails/安全缓存键.webp?v=缓存版本"
+    }
+  ],
+  "thumbnails": {
+    "generated": 1,
+    "reused": 20,
+    "failed": 0
+  }
+}
+```
+
+首次升级后打开选择器会同步迁移已有图片，图片较多或磁盘较慢时可能等待约 120 秒；之后通常直接复用缓存。清单接口不可用、超时或响应非法时，页面会显示“已进入原图加载降级模式”，再回退到 `/backgrounds/` directory listing，因此旧后端仍可继续使用，但会恢复全量原图传输。单张缩略图生成或加载失败只让对应卡片回退到原图，不影响其它壁纸。右键背景卡片时浏览器打开或保存的是 WebP 缩略图，原图查看和下载入口留待后续版本。
+
+选择器按“普通壁纸”和“Bestdori 抽卡”分成两个可折叠栏目，两个栏目首次打开都展开，折叠状态只在当前页面会话中保留；状态文案同时显示总数及各栏目数量。
+
+分类只发生在浏览器界面中，原图仍平铺保存在 `backgrounds/` 第一层；`thumbnails/` 子目录只承载后端缓存，不参与分类。前端通过抽卡服务生成的稳定文件名结构（角色、三星/四星/五星、标题、数字卡面 ID、`after_training`/`normal`，以及可选的重名序号）识别抽卡壁纸；`bg.jpg` 和其它名称都归入普通壁纸。手动重命名导致文件名不再符合该结构时，图片会显示在普通壁纸栏目。该分类不读取 `BestdoriCardDraws.json`，因此清理或重置去重记录不会改变已有图片所在的栏目。
 
 选择图片后，前端发送现有请求：
 
@@ -100,9 +126,9 @@ Content-Type: application/json
 }
 ```
 
-本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好 API 不传输图片，只同步文件名；其它设备刷新后读取共享设置，没有实时推送。图片文件只在用户主动使用独立上传 API 时传输。
+本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好与清单 API 不传输图片，只同步文件名和缓存地址；缩略图及选中的原图由 Zoraxy 静态服务传输。其它设备刷新后读取共享设置，没有实时推送；新原图只在用户主动使用上传或抽卡 API 时写入。
 
-弹窗中的“上传图片”将 JPEG、PNG、WebP 或 AVIF 原始字节发送到状态服务。单个文件最多 50 MiB、解码后最多 100MP；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`。上传成功只把图片加入列表并聚焦缩略图，不会自动切换当前横屏或竖屏背景。
+弹窗中的“上传图片”将 JPEG、PNG、WebP 或 AVIF 原始字节发送到状态服务。单个文件最多 50 MiB、解码后最多 100MP；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`。上传成功后服务端同步尝试生成缩略图，生成失败不撤销已经保存的原图；页面只把图片加入列表并聚焦缩略图，不会自动切换当前横屏或竖屏背景。
 
 ```http
 POST /api/background-files/upload?name=wallpaper.png
@@ -158,6 +184,7 @@ Content-Type: application/json
 
 `state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
 
+- `GET /api/background-files`：扫描第一层原图、核对缩略图缓存并返回结构化清单；
 - `GET /api/background-preferences`：读取并自愈状态；
 - `PATCH /api/background-preferences`：更新横屏或竖屏槽位；
 - `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
@@ -175,6 +202,7 @@ Content-Type: application/json
 - 强制监听 `127.0.0.1`；
 - 所有写入 API 校验精确 Origin 和请求标记；JSON 与上传接口分别校验 Content-Type、Content-Length 和正文上限；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
+- 缩略图执行 EXIF 方向修正、居中裁切和 WebP 编码，经同目录临时文件、磁盘刷新和原子替换写入；缓存目录必须是真实目录而非符号链接；
 - Bestdori 目录和图片下载只访问代码中固定的 HTTPS API 与资源地址，不接受客户端提供远程 URL；下载图片沿用上传的大小、像素、格式和原子发布约束；
 - 抽卡使用独立的非阻塞互斥锁；永久去重记录只在卡面验证并发布成功后原子写入，符合条件的未记录池耗尽时不会回退到重复卡面；
 - 拒绝未知字段、路径穿越、不支持的扩展名、符号链接和不存在文件；
@@ -258,6 +286,9 @@ HomeLabWallpaperState.exe restart
 │   └── service.log
 
 D:/Zoraxy/www/html/backgrounds/
+├── bg.jpg
+├── <其它原始壁纸>
+└── thumbnails/                  # 后端自动生成，可随时重建且无需备份
 ```
 
 引导会验证 `bg.jpg`、公开目录边界、回环探测入口、域名后缀和超时；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。本次 v2 升级按全新配置处理，不导入旧状态。
@@ -280,7 +311,7 @@ py_compile
 -> 依赖导入与 JPEG/PNG/WebP/AVIF 编解码能力预检
 -> PyInstaller --onefile --console --noupx
 -> 临时端口 EXE 冒烟测试
--> 健康检查、GET、PATCH、真实 PNG 上传、离线抽卡历史维护、批量状态 API、控制关闭
+-> 健康检查、GET、PATCH、真实 PNG 上传与缩略图清单、离线抽卡历史维护、批量状态 API、控制关闭
 -> SHA-256
 -> dist/HomeLabWallpaperState.exe
 ```
@@ -290,13 +321,13 @@ py_compile
 ## 部署和迁移
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
-2. 停止旧后端，将新版 EXE 复制到非公开的 Zoraxy 程序目录。本次配置版本和背景状态版本不变，不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
-3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `4`；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署包含抽卡入口的新版 `index.html`；新版前端不得先于接口版本 4 的 EXE 上线。
-5. 确认浏览器每次刷新只发送一次同源批量状态请求，全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式均正常。
+2. 停止旧后端，将新版 EXE 复制到非公开的 Zoraxy 程序目录。本次配置版本、背景状态版本和 Bestdori 抽卡历史版本均不变，不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
+3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `5`；接口版本不匹配时启动器会拒绝复用旧进程。
+4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署 V2.3.0 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得缩略图流量优化。
+5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
 6. 最后删除 11 个子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复兼容的旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机的 `backgrounds/` 和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；旧版 EXE 不会使用去重记录，但不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名，随后在网页中重新选择对应槽位。已经永久删除的图片只能从独立备份恢复。
+若回滚到旧前端，必须同时恢复兼容的旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版 EXE 不会使用去重记录，但不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -340,6 +371,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 关闭监视器后 `/healthz` 仍正常；
 - `shell:startup` 登录后显示监视器；
 - 网页可以读取和更新横竖屏背景；
+- 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
 - 网页可以上传真实图片但不会自动切换，重名时自动编号；
 - 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；
 - 角色模式和全随机模式只接受 3–5 星，抽卡成功会新增并聚焦图片但不会自动切换背景；
@@ -354,7 +386,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 
 - 修改后先运行统一验证，不要跳过失败项。
 - 新增或删除服务卡片时只需维护卡片 HTML，并手动更新 README 中的当前数量和架构说明；页面数量文案、动画序号和前端验证会根据实际卡片自动适配。
-- `backgrounds/bg.jpg` 作为兜底进入 Git；其它背景文件不进入 Git，应独立备份。
+- `backgrounds/bg.jpg` 作为兜底进入 Git；其它原图不进入 Git，应独立备份；`backgrounds/thumbnails/` 是可再生缓存，不备份、不手工管理。
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
