@@ -699,6 +699,127 @@ if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
 }
 context.backgroundDrawPending = false;
 
+const cardDrawStatusHelperStart = runtimeScript.indexOf('function setCardDrawStatus(');
+const cardDrawStatusHelperEnd = runtimeScript.indexOf('function syncCardDrawControls(', cardDrawStatusHelperStart);
+if (cardDrawStatusHelperStart < 0 || cardDrawStatusHelperEnd < 0) {
+    throw new Error('Unable to extract Bestdori status helpers.');
+}
+let cardDrawModeForStatus = 'character';
+let cardDrawRaritiesForStatus = [3, 4, 5];
+const cardDrawStatusElement = {
+    textContent: '',
+    dataset: {}
+};
+const cardDrawStatusContext = vm.createContext({
+    cardDrawStatus: cardDrawStatusElement,
+    cardDrawCharactersLoaded: false,
+    cardCharacterSelect: {
+        options: []
+    },
+    selectedCardDrawMode: () => cardDrawModeForStatus,
+    selectedCardDrawRarities: () => cardDrawRaritiesForStatus
+});
+vm.runInContext(
+    runtimeScript.slice(cardDrawStatusHelperStart, cardDrawStatusHelperEnd)
+        + '\nglobalThis.__resetCardDrawStatus = resetCardDrawStatus;',
+    cardDrawStatusContext
+);
+
+cardDrawRaritiesForStatus = [];
+cardDrawStatusContext.__resetCardDrawStatus();
+if (cardDrawStatusElement.textContent !== '\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a\u661f\u7ea7\u3002'
+    || cardDrawStatusElement.dataset.kind !== 'error') {
+    throw new Error('An empty rarity selection did not show the Bestdori validation status.');
+}
+
+cardDrawModeForStatus = 'random';
+cardDrawRaritiesForStatus = [4];
+cardDrawStatusContext.__resetCardDrawStatus();
+if (!cardDrawStatusElement.textContent.includes('\u5168\u968f\u673a\u6a21\u5f0f')
+    || Object.prototype.hasOwnProperty.call(cardDrawStatusElement.dataset, 'kind')) {
+    throw new Error('Restoring a rarity in random mode did not clear the stale validation status.');
+}
+
+cardDrawModeForStatus = 'character';
+cardDrawStatusContext.cardDrawCharactersLoaded = true;
+cardDrawStatusContext.cardCharacterSelect.options = Array.from({ length: 40 }, (_, index) => ({
+    value: String(index + 1)
+}));
+cardDrawStatusContext.__resetCardDrawStatus();
+if (!cardDrawStatusElement.textContent.includes('\u5df2\u8bfb\u53d6 40 \u4e2a\u89d2\u8272')
+    || cardDrawStatusElement.dataset.kind !== 'success') {
+    throw new Error('Loaded character mode did not restore its ready status.');
+}
+
+cardDrawStatusContext.cardDrawCharactersLoaded = false;
+cardDrawStatusContext.__resetCardDrawStatus();
+if (cardDrawStatusElement.textContent !== '\u8bf7\u9009\u62e9\u89d2\u8272\u4e0e\u81f3\u5c11\u4e00\u4e2a\u661f\u7ea7\u3002'
+    || Object.prototype.hasOwnProperty.call(cardDrawStatusElement.dataset, 'kind')) {
+    throw new Error('Unloaded character mode did not restore its neutral status.');
+}
+
+const cardDrawCloseStart = runtimeScript.indexOf('function closeCardDrawDialog(');
+const cardDrawCloseEnd = runtimeScript.indexOf('async function openCardDrawDialog(', cardDrawCloseStart);
+if (cardDrawCloseStart < 0 || cardDrawCloseEnd < 0) {
+    throw new Error('Unable to extract the Bestdori dialog closer.');
+}
+let cardDrawDialogClassRemoved = false;
+let cardDrawFocusRestored = false;
+cardDrawStatusContext.cardDrawCharactersLoaded = true;
+cardDrawStatusContext.cardDrawDialog = {
+    open: true,
+    classList: {
+        remove(name) {
+            if (name === 'is-visible') cardDrawDialogClassRemoved = true;
+        }
+    },
+    close() {
+        this.open = false;
+    },
+    removeAttribute() {
+        this.open = false;
+    }
+};
+cardDrawStatusContext.cardDrawDialogIsOpen = () => cardDrawStatusContext.cardDrawDialog.open;
+cardDrawStatusContext.backgroundDrawPending = false;
+cardDrawStatusContext.backgroundDrawButton = {};
+cardDrawStatusContext.focusWithoutScroll = () => {
+    cardDrawFocusRestored = true;
+};
+vm.runInContext(
+    runtimeScript.slice(cardDrawCloseStart, cardDrawCloseEnd)
+        + '\nglobalThis.__closeCardDrawDialog = closeCardDrawDialog;',
+    cardDrawStatusContext
+);
+cardDrawStatusElement.textContent = '\u6b63\u5728\u4ece Bestdori \u62bd\u53d6\u5e76\u4e0b\u8f7d\u5361\u9762\uff0c\u8bf7\u7a0d\u5019\u2026';
+if (!cardDrawStatusContext.__closeCardDrawDialog('close')
+    || cardDrawStatusContext.cardDrawDialog.open
+    || !cardDrawDialogClassRemoved
+    || !cardDrawFocusRestored
+    || !cardDrawStatusElement.textContent.includes('\u5df2\u8bfb\u53d6 40 \u4e2a\u89d2\u8272')) {
+    throw new Error('Closing the Bestdori dialog did not clear its stale operational status.');
+}
+
+cardDrawStatusContext.cardDrawDialog.open = true;
+cardDrawStatusContext.backgroundDrawPending = true;
+cardDrawStatusElement.textContent = '\u6b63\u5728\u4ece Bestdori \u62bd\u53d6\u5e76\u4e0b\u8f7d\u5361\u9762\uff0c\u8bf7\u7a0d\u5019\u2026';
+if (cardDrawStatusContext.__closeCardDrawDialog('close')
+    || !cardDrawStatusContext.cardDrawDialog.open
+    || cardDrawStatusElement.textContent !== '\u6b63\u5728\u4ece Bestdori \u62bd\u53d6\u5e76\u4e0b\u8f7d\u5361\u9762\uff0c\u8bf7\u7a0d\u5019\u2026') {
+    throw new Error('An active Bestdori request was closed or had its progress status cleared.');
+}
+cardDrawStatusContext.backgroundDrawPending = false;
+
+const cardDrawBindingStart = runtimeScript.indexOf('cardDrawModeInputs.forEach((input) => {');
+const cardDrawBindingEnd = runtimeScript.indexOf("cardHistoryReconcile.addEventListener('click'", cardDrawBindingStart);
+if (cardDrawBindingStart < 0 || cardDrawBindingEnd < 0) {
+    throw new Error('Unable to inspect Bestdori form-change bindings.');
+}
+const cardDrawBindingSource = runtimeScript.slice(cardDrawBindingStart, cardDrawBindingEnd);
+if ((cardDrawBindingSource.match(/resetCardDrawStatus\(\);/g) || []).length !== 3) {
+    throw new Error('Mode, rarity, and character changes must all refresh the Bestdori status.');
+}
+
 const originalLinkHelperStart = runtimeScript.indexOf('function syncBackgroundOriginalLink(');
 const originalLinkHelperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', originalLinkHelperStart);
 if (originalLinkHelperStart < 0 || originalLinkHelperEnd < 0) {

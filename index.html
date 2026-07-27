@@ -2808,6 +2808,28 @@
                 }
             }
 
+            function resetCardDrawStatus() {
+                if (selectedCardDrawRarities().length === 0) {
+                    setCardDrawStatus('请至少选择一个星级。', 'error');
+                    return;
+                }
+
+                if (selectedCardDrawMode() === 'random') {
+                    setCardDrawStatus('全随机模式会在所选星级范围内抽取未重复卡面。');
+                    return;
+                }
+
+                if (cardDrawCharactersLoaded) {
+                    setCardDrawStatus(
+                        `已读取 ${cardCharacterSelect.options.length} 个角色，请选择抽取条件。`,
+                        'success'
+                    );
+                    return;
+                }
+
+                setCardDrawStatus('请选择角色与至少一个星级。');
+            }
+
             function syncCardDrawControls() {
                 const mode = selectedCardDrawMode();
                 const hasRarity = selectedCardDrawRarities().length > 0;
@@ -2865,7 +2887,7 @@
                         });
                     cardCharacterSelect.replaceChildren(fragment);
                     cardDrawCharactersLoaded = true;
-                    setCardDrawStatus(`已读取 ${characters.length} 个角色，请选择抽取条件。`, 'success');
+                    resetCardDrawStatus();
                     return true;
                 } catch (error) {
                     console.warn('Bestdori 角色列表读取失败。', error);
@@ -2891,6 +2913,7 @@
                 } else {
                     cardDrawDialog.removeAttribute('open');
                 }
+                resetCardDrawStatus();
                 if (restoreFocus) focusWithoutScroll(backgroundDrawButton);
                 return true;
             }
@@ -2916,6 +2939,7 @@
                 }
 
                 syncCardDrawControls();
+                resetCardDrawStatus();
                 if (!cardDrawCharactersLoaded) await loadBestdoriCharacters();
                 if (cardDrawDialogIsOpen()) {
                     const focusTarget = selectedCardDrawMode() === 'character' && !cardCharacterSelect.disabled
@@ -3495,22 +3519,19 @@
             cardDrawModeInputs.forEach((input) => {
                 input.addEventListener('change', () => {
                     syncCardDrawControls();
-                    if (selectedCardDrawMode() === 'random') {
-                        setCardDrawStatus('全随机模式会在所选星级范围内抽取未重复卡面。');
-                    } else {
-                        setCardDrawStatus('请选择角色与至少一个星级。');
-                    }
+                    resetCardDrawStatus();
                 });
             });
             cardDrawRarityInputs.forEach((input) => {
                 input.addEventListener('change', () => {
                     syncCardDrawControls();
-                    if (selectedCardDrawRarities().length === 0) {
-                        setCardDrawStatus('请至少选择一个星级。', 'error');
-                    }
+                    resetCardDrawStatus();
                 });
             });
-            cardCharacterSelect.addEventListener('change', syncCardDrawControls);
+            cardCharacterSelect.addEventListener('change', () => {
+                syncCardDrawControls();
+                resetCardDrawStatus();
+            });
             cardHistoryReconcile.addEventListener('click', reconcileBestdoriHistory);
             cardHistoryReset.addEventListener('click', openCardHistoryResetDialog);
 
