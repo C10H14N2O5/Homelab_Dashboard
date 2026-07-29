@@ -9,6 +9,7 @@
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余原图由部署机器本地保存；缩略图由后端生成 |
 | 服务入口 | 11 个 HomeLab 子域名 |
+| 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度搜索；默认 Bing，无 JavaScript 时仍可提交 |
 | 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
@@ -65,6 +66,21 @@ Zoraxy_StaticWebSite/
 API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录、配置和状态文件；Zoraxy 只在浏览器请求到达时反向代理。因此两个当前用户 Startup 入口可并行启动，不需要设置顺序。
 
 ## 前端行为
+
+### 多搜索引擎搜索
+
+Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标和名称在其中居中排列；点击后外层以约 300ms 向右展开为输入框，同一枚“图标 + 名称”胶囊同步缩小为引擎列表按钮，不使用元素替换或额外三角符号。列表只显示四个引擎的图标和名称，并可通过按钮、方向键、Home/End、Enter/Space 和 Escape 选择或关闭。桌面端以固定上限向右展开，窄屏时使用 Hero 的可用宽度；组件或窗口失去焦点时会收起，但不会丢弃尚未提交的内容。
+
+首批引擎和固定请求格式如下：
+
+| 引擎 | 搜索地址 | 关键词参数 | 用途 |
+| --- | --- | --- | --- |
+| Bing | `https://www.bing.com/search` | `q` | 默认，国内网络环境兜底 |
+| Google | `https://www.google.com/search` | `q` | 国际网络 |
+| DuckDuckGo | `https://duckduckgo.com/` | `q` | 隐私搜索 |
+| 百度 | `https://www.baidu.com/s` | `wd` | 国内备用 |
+
+搜索使用浏览器原生 GET 表单并在新标签页打开结果，不使用第三方搜索 API，也不调用 Dashboard Python 服务。输入期间不会发送联想或其它网络请求；页面不保存关键词、搜索记录或账号信息。`localStorage` 中只记录当前浏览器选择的引擎 ID，键名为 `homelab-search-engine-v1`；存储不可用、内容无效或 JavaScript 初始化失败时均回退到 Bing。静态 HTML 本身就是可用的 Bing 表单，因此关闭 JavaScript 后仍可搜索。空白提交不会导航，只会在当前组件内依次轮换八句轻量提示；轮换位置仅存在于当前页面会话，刷新后从第一句重新开始。
 
 ### 服务入口状态
 
