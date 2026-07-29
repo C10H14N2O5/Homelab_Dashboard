@@ -182,6 +182,336 @@
             line-height: 1.65;
         }
 
+        .search-form {
+            --search-collapsed-width: 7rem;
+            --search-motion-duration: 300ms;
+            position: relative;
+            width: min(26rem, 100%);
+            margin-top: 1.05rem;
+            text-shadow: none;
+        }
+
+        .search-engine-symbols {
+            position: absolute;
+            width: 0;
+            height: 0;
+            overflow: hidden;
+        }
+
+        .search-shell {
+            width: 100%;
+            height: 3.25rem;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            color: var(--text);
+            background: rgba(8, 20, 36, 0.7);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            box-shadow: 0 12px 32px rgba(2, 8, 23, 0.22);
+            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(16px);
+            transition:
+                width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                background-color 180ms ease,
+                border-color 180ms ease,
+                box-shadow 180ms ease;
+        }
+
+        .search-shell:focus-within {
+            border-color: var(--line-strong);
+            box-shadow:
+                0 12px 32px rgba(2, 8, 23, 0.24),
+                0 0 0 3px rgba(56, 189, 248, 0.13);
+        }
+
+        .search-engine-button {
+            display: none;
+            color: inherit;
+        }
+
+        .search-input {
+            min-width: 0;
+            flex: 1 1 auto;
+            height: 100%;
+            padding: 0 0.35rem 0 1rem;
+            border: 0;
+            outline: 0;
+            color: var(--text);
+            background: transparent;
+            font-size: 0.98rem;
+            line-height: 1.4;
+        }
+
+        .search-input::-webkit-search-cancel-button {
+            cursor: pointer;
+            filter: invert(1);
+            opacity: 0.68;
+        }
+
+        .search-input::placeholder {
+            color: rgba(203, 213, 225, 0.72);
+        }
+
+        .search-submit-button {
+            width: 2.5rem;
+            height: 2.5rem;
+            margin-right: 0.34rem;
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(125, 211, 252, 0.24);
+            border-radius: 50%;
+            color: #e0f2fe;
+            background: rgba(56, 189, 248, 0.12);
+            cursor: pointer;
+            transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+        }
+
+        .search-submit-button:hover {
+            color: #ffffff;
+            border-color: rgba(125, 211, 252, 0.52);
+            background: rgba(56, 189, 248, 0.24);
+        }
+
+        .search-submit-button:active {
+            transform: translateX(1px);
+        }
+
+        .search-submit-button svg {
+            width: 1.08rem;
+            height: 1.08rem;
+        }
+
+        .search-form[data-search-enhanced="true"] .search-shell {
+            width: var(--search-collapsed-width);
+            background: rgba(8, 20, 36, 0.48);
+        }
+
+        .search-form[data-search-enhanced="true"][data-current-engine="google"] {
+            --search-collapsed-width: 7.5rem;
+        }
+
+        .search-form[data-search-enhanced="true"][data-current-engine="duckduckgo"] {
+            --search-collapsed-width: 10rem;
+        }
+
+        .search-form[data-search-enhanced="true"] .search-engine-button {
+            width: calc(var(--search-collapsed-width) - 2px);
+            height: calc(3.25rem - 2px);
+            min-width: 0;
+            margin-left: 0;
+            padding: 0 0.78rem;
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            background: transparent;
+            cursor: pointer;
+            transition:
+                width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                height var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                margin-left var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                padding var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                gap var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                border-color 180ms ease,
+                background-color 180ms ease;
+        }
+
+        .search-form[data-search-enhanced="true"]:not([data-expanded="true"]) .search-engine-button:hover {
+            background: rgba(125, 211, 252, 0.1);
+        }
+
+        .search-engine-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .search-engine-icon svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .search-engine-button .search-engine-icon {
+            transition:
+                width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                height var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .search-engine-name {
+            min-width: 0;
+            flex: 0 0 auto;
+            display: inline-block;
+            overflow: visible;
+            font-size: 0.84rem;
+            font-weight: 650;
+            line-height: 1.35;
+            white-space: nowrap;
+            transition: font-size var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .search-form[data-search-enhanced="true"] .search-input,
+        .search-form[data-search-enhanced="true"] .search-submit-button {
+            width: 0;
+            min-width: 0;
+            flex: 0 0 0;
+            margin: 0;
+            padding: 0;
+            border-width: 0;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 120ms ease, visibility 0s linear 120ms;
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-shell {
+            width: 100%;
+            background: rgba(8, 20, 36, 0.7);
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-button {
+            width: calc(var(--search-collapsed-width) - 1.25rem);
+            height: 2.5rem;
+            margin-left: 0.34rem;
+            padding: 0 0.62rem;
+            gap: 0.42rem;
+            border-color: rgba(125, 211, 252, 0.22);
+            background: rgba(125, 211, 252, 0.08);
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-button:hover {
+            border-color: rgba(125, 211, 252, 0.42);
+            background: rgba(125, 211, 252, 0.15);
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-button .search-engine-icon {
+            width: 1.35rem;
+            height: 1.35rem;
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-name {
+            font-size: 0.82rem;
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-input {
+            width: auto;
+            min-width: 3rem;
+            height: 100%;
+            padding: 0 0.35rem 0 0.72rem;
+            flex: 1 1 auto;
+            border-width: 0;
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transition: opacity 150ms ease 70ms;
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-submit-button {
+            width: 2.5rem;
+            min-width: 2.5rem;
+            height: 2.5rem;
+            margin-right: 0.34rem;
+            padding: 0;
+            flex: 0 0 2.5rem;
+            border-width: 1px;
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transition:
+                opacity 150ms ease 80ms,
+                color 160ms ease,
+                background-color 160ms ease,
+                border-color 160ms ease,
+                transform 160ms ease;
+        }
+
+        .search-engine-menu {
+            position: absolute;
+            z-index: 30;
+            top: calc(3.25rem + 0.55rem);
+            left: 0;
+            width: min(22rem, 100%);
+            padding: 0.42rem;
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1rem;
+            background: rgba(7, 17, 31, 0.94);
+            box-shadow: 0 20px 50px rgba(2, 8, 23, 0.42);
+            -webkit-backdrop-filter: blur(18px);
+            backdrop-filter: blur(18px);
+        }
+
+        .search-engine-menu[hidden] {
+            display: none;
+        }
+
+        .search-engine-option {
+            position: relative;
+            width: 100%;
+            min-height: 2.9rem;
+            display: grid;
+            grid-template-columns: 1.75rem minmax(0, 1fr) 1.25rem;
+            align-items: center;
+            gap: 0.68rem;
+            padding: 0.5rem 0.7rem;
+            border: 0;
+            border-radius: 0.72rem;
+            color: var(--text);
+            text-align: left;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .search-engine-option:hover,
+        .search-engine-option:focus-visible {
+            outline: 0;
+            background: rgba(125, 211, 252, 0.11);
+        }
+
+        .search-engine-option[aria-selected="true"] {
+            background: rgba(56, 189, 248, 0.14);
+        }
+
+        .search-engine-option::after {
+            content: "✓";
+            justify-self: center;
+            color: var(--accent);
+            font-size: 0.95rem;
+            font-weight: 800;
+            opacity: 0;
+        }
+
+        .search-engine-option[aria-selected="true"]::after {
+            opacity: 1;
+        }
+
+        .search-engine-option-name {
+            min-width: 0;
+            overflow: hidden;
+            font-size: 0.88rem;
+            font-weight: 680;
+            line-height: 1.25;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .search-form.is-empty-search .search-shell {
+            border-color: rgba(251, 191, 36, 0.78);
+            box-shadow:
+                0 12px 32px rgba(2, 8, 23, 0.24),
+                0 0 0 3px rgba(251, 191, 36, 0.13);
+            animation: search-empty-nudge 240ms ease-out;
+        }
+
         .dashboard {
             width: min(100%, var(--content-width));
             margin: 0 auto;
@@ -1205,6 +1535,13 @@
             to { opacity: 1; }
         }
 
+        @keyframes search-empty-nudge {
+            0%,
+            100% { transform: translateX(0); }
+            35% { transform: translateX(3px); }
+            70% { transform: translateX(-3px); }
+        }
+
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
@@ -1254,7 +1591,8 @@
             }
 
             .hero-copy {
-                max-width: 24rem;
+                width: 100%;
+                max-width: none;
             }
 
             h1 {
@@ -1263,6 +1601,14 @@
 
             .hero-subtitle {
                 margin-top: 0.65rem;
+            }
+
+            .search-form {
+                width: 100%;
+            }
+
+            .search-engine-menu {
+                width: 100%;
             }
 
             .dashboard {
@@ -1422,6 +1768,7 @@
                 animation-delay: 0ms !important;
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
+                transition-delay: 0ms !important;
             }
 
             .background-layer.is-changing {
@@ -1456,12 +1803,127 @@
     <div class="background-layer" aria-hidden="true"></div>
     <div class="shade-layer" aria-hidden="true"></div>
 
+    <svg class="search-engine-symbols" aria-hidden="true" focusable="false">
+        <symbol id="search-logo-bing" viewBox="0 0 24 24">
+            <path d="M11.97 7.569a.92.92 0 0 0-.805.863c-.013.195-.01.209.43 1.347 1 2.59 1.242 3.214 1.283 3.302.099.213.237.413.41.592.134.138.222.212.37.311.26.176.39.224 1.405.527.989.295 1.529.49 1.994.723.603.302 1.024.644 1.29 1.051.191.292.36.815.434 1.342.029.206.029.661 0 .847a2.491 2.491 0 0 1-.376 1.026c-.1.151-.065.126.081-.058.415-.52.838-1.408 1.054-2.213a6.728 6.728 0 0 0 .102-3.012 6.626 6.626 0 0 0-3.291-4.53 104.157 104.157 0 0 0-1.322-.698l-.254-.133a737.941 737.941 0 0 1-1.575-.827c-.548-.29-.78-.406-.846-.426a1.376 1.376 0 0 0-.29-.045l-.093.01z" fill="url(#search-logo-bing-gradient-0)"/>
+            <path d="M13.164 17.24a4.385 4.385 0 0 0-.202.125 511.45 511.45 0 0 0-1.795 1.115 163.087 163.087 0 0 1-.989.614l-.463.288a99.198 99.198 0 0 1-1.502.941c-.326.2-.704.334-1.09.387-.18.024-.52.024-.7 0a2.807 2.807 0 0 1-1.318-.538 3.665 3.665 0 0 1-.543-.545 2.837 2.837 0 0 1-.506-1.141 2.161 2.161 0 0 0-.041-.182c-.008-.008.006.138.032.33.027.199.085.487.147.733.482 1.907 1.85 3.457 3.705 4.195a6.31 6.31 0 0 0 1.658.412c.22.025.844.035 1.074.017 1.054-.08 1.972-.393 2.913-.992a325.28 325.28 0 0 1 .937-.596l.384-.244.684-.435.234-.149.009-.005.025-.017.013-.007.172-.11.597-.38c.76-.481.987-.65 1.34-.998.148-.146.37-.394.381-.425.002-.007.042-.068.088-.136a2.49 2.49 0 0 0 .373-1.023 4.181 4.181 0 0 0 0-.847 4.336 4.336 0 0 0-.318-1.137c-.224-.472-.7-.9-1.383-1.245a2.972 2.972 0 0 0-.406-.181c-.01 0-.646.392-1.413.87a7089.171 7089.171 0 0 0-1.658 1.031l-.439.274z" fill="url(#search-logo-bing-gradient-1)" fill-rule="nonzero"/>
+            <path d="m4.003 14.946.004 3.33.042.193c.134.604.366 1.04.77 1.445a2.701 2.701 0 0 0 1.955.814c.536 0 1-.135 1.479-.43l.703-.435.556-.346V8.003c0-2.306-.004-3.675-.012-3.782a2.734 2.734 0 0 0-.797-1.765c-.145-.144-.268-.24-.637-.496A1780.102 1780.102 0 0 1 5.762.362C5.406.115 5.38.098 5.271.059a.943.943 0 0 0-1.254.696C4.003.818 4 1.659 4 6.223v5.394h.001l.002 3.329z" fill="url(#search-logo-bing-gradient-2)" fill-rule="nonzero"/>
+            <defs>
+                <radialGradient id="search-logo-bing-gradient-0" cx="93.717%" cy="77.818%" fx="93.717%" fy="77.818%" gradientTransform="scale(-1 -.7146) rotate(49.288 2.035 -2.198)" r="143.691%">
+                    <stop offset="0%" stop-color="#00CACC"/>
+                    <stop offset="100%" stop-color="#048FCE"/>
+                </radialGradient>
+                <radialGradient id="search-logo-bing-gradient-1" cx="13.893%" cy="71.448%" fx="13.893%" fy="71.448%" gradientTransform="scale(.6042 1) rotate(-23.34 .184 .494)" r="149.21%">
+                    <stop offset="0%" stop-color="#00BBEC"/>
+                    <stop offset="100%" stop-color="#2756A9"/>
+                </radialGradient>
+                <linearGradient id="search-logo-bing-gradient-2" x1="50%" x2="50%" y1="0%" y2="100%">
+                    <stop offset="0%" stop-color="#00BBEC"/>
+                    <stop offset="100%" stop-color="#2756A9"/>
+                </linearGradient>
+            </defs>
+        </symbol>
+
+        <symbol id="search-logo-google" viewBox="0 0 32 32">
+            <path d="M23.75 16A7.7446 7.7446 0 0 1 8.7177 18.6259l-4.4328 3.5462A13.244 13.244 0 0 0 29.25 16" fill="#00ac47"/>
+            <path d="M23.75 16a7.7387 7.7387 0 0 1-3.2516 6.2987l4.3824 3.5059A13.2042 13.2042 0 0 0 29.25 16" fill="#4285f4"/>
+            <path d="M8.25 16a7.698 7.698 0 0 1 .4677-2.6259L4.2849 9.8279a13.177 13.177 0 0 0 0 12.3442l4.4328-3.5462A7.698 7.698 0 0 1 8.25 16Z" fill="#ffba00"/>
+            <path d="M16 8.25a7.699 7.699 0 0 1 4.558 1.4958l4.06-3.7893A13.2152 13.2152 0 0 0 4.2849 9.8279l4.4328 3.5462A7.756 7.756 0 0 1 16 8.25Z" fill="#ea4435"/>
+            <path d="M29.25 15v1L27 19.5H16.5V14h11.75a1 1 0 0 1 1 1Z" fill="#4285f4"/>
+        </symbol>
+
+        <symbol id="search-logo-duckduckgo" viewBox="0 0 32 32">
+            <defs>
+                <path id="search-logo-ddg-clip-shape" d="M178.684 78.824c0 28.316-23.035 51.354-51.354 51.354-28.313 0-51.348-23.04-51.348-51.354s23.036-51.35 51.348-51.35c28.318 0 51.354 23.036 51.354 51.35z"/>
+                <clipPath id="search-logo-ddg-clip">
+                    <use href="#search-logo-ddg-clip-shape"/>
+                </clipPath>
+                <linearGradient id="search-logo-ddg-gradient-left" gradientUnits="userSpaceOnUse" x1="105.318" y1="60.979" x2="113.887" y2="60.979">
+                    <stop offset=".006" stop-color="#6176b9"/>
+                    <stop offset=".691" stop-color="#394a9f"/>
+                </linearGradient>
+                <linearGradient id="search-logo-ddg-gradient-right" gradientUnits="userSpaceOnUse" x1="132.273" y1="58.371" x2="140.078" y2="58.371">
+                    <stop offset=".006" stop-color="#6176b9"/>
+                    <stop offset=".691" stop-color="#394a9f"/>
+                </linearGradient>
+            </defs>
+            <g transform="matrix(.266667 0 0 .266667 -17.954934 -5.057333)">
+                <circle cx="127.332" cy="78.966" r="51.15" fill="#de5833"/>
+                <g clip-path="url(#search-logo-ddg-clip)">
+                    <path d="M148.293 155.158c-1.8-8.285-12.262-27.04-16.23-34.97s-7.938-19.1-6.13-26.322c.328-1.312-3.436-11.308-2.354-12.015 8.416-5.5 10.632.6 14.002-1.862 1.734-1.273 4.1 1.047 4.7-1.06 2.158-7.567-3.006-20.76-8.77-26.526-1.885-1.88-4.77-3.06-8.03-3.687-1.254-1.713-3.275-3.36-6.138-4.88-3.188-1.697-10.12-3.938-13.717-4.535-2.492-.4-3.055.287-4.12.46.992.088 5.7 2.414 6.615 2.55-.916.62-3.607-.028-5.324.742-.865.392-1.512 1.877-1.506 2.58 4.9-.496 12.574-.016 17.1 2-3.602.4-9.08.867-11.436 2.105-6.848 3.608-9.873 12.035-8.07 22.133 1.804 10.075 9.738 46.85 12.262 59.13 2.525 12.264-5.408 20.2-10.455 22.354l5.408.363-1.8 3.967c6.484.72 13.695-1.44 13.695-1.44-1.438 3.965-11.176 5.412-11.176 5.412s4.7 1.438 12.258-1.447l12.263-4.688 3.604 9.373 6.854-6.847 2.885 7.2c.014-.001 5.424-1.808 3.62-10.103z" fill="#d5d7d8"/>
+                    <path d="M150.47 153.477c-1.795-8.3-12.256-27.043-16.228-34.98s-7.935-19.112-6.13-26.32c.335-1.3.34-6.668 1.43-7.38 8.4-5.494 7.812-.184 11.187-2.645 1.74-1.27 3.133-2.806 3.738-4.912 2.164-7.572-3.006-20.76-8.773-26.53-1.88-1.88-4.768-3.062-8.023-3.686-1.252-1.718-3.27-3.36-6.13-4.882-5.4-2.862-12.074-4.006-18.266-2.883 1 .1 3.256 2.138 4.168 2.273-1.38.936-5.053.815-5.03 2.896 4.916-.492 10.303.285 14.834 2.297-3.602.4-6.955 1.3-9.3 2.543-6.854 3.603-8.656 10.812-6.854 20.914 1.807 10.097 9.742 46.873 12.256 59.126 2.527 12.26-5.402 20.188-10.45 22.354l5.408.36-1.8 3.973c6.484.72 13.695-1.44 13.695-1.44-1.438 3.974-11.176 5.406-11.176 5.406s4.686 1.44 12.258-1.445l12.27-4.688 3.604 9.373 6.852-6.85 2.9 7.215c-.016.007 5.388-1.797 3.58-10.088z" fill="#fff"/>
+                    <path d="M109.02 70.69c0-2.093 1.693-3.787 3.79-3.787 2.1 0 3.785 1.694 3.785 3.787s-1.695 3.786-3.785 3.786c-2.096.001-3.79-1.692-3.79-3.786z" fill="#2d4f8e"/>
+                    <path d="M113.507 69.43a.98.98 0 0 1 .98-.983c.543 0 .984.438.984.983s-.44.984-.984.984c-.538.001-.98-.44-.98-.984z" fill="#fff"/>
+                    <path d="M134.867 68.445c0-1.793 1.46-3.25 3.252-3.25 1.8 0 3.256 1.457 3.256 3.25 0 1.8-1.455 3.258-3.256 3.258a3.26 3.26 0 0 1-3.252-3.258z" fill="#2d4f8e"/>
+                    <path d="M138.725 67.363c0-.463.38-.843.838-.843a.84.84 0 0 1 .846.843c0 .47-.367.842-.846.842a.84.84 0 0 1-.838-.842z" fill="#fff"/>
+                    <path d="M113.886 59.718s-2.854-1.3-5.63.453-2.668 3.523-2.668 3.523-1.473-3.283 2.453-4.892 5.844.916 5.844.916z" fill="url(#search-logo-ddg-gradient-left)"/>
+                    <path d="M140.078 59.458s-2.05-1.172-3.643-1.152c-3.27.043-4.162 1.488-4.162 1.488s.55-3.445 4.732-2.754c2.268.377 3.073 2.418 3.073 2.418z" fill="url(#search-logo-ddg-gradient-right)"/>
+                </g>
+                <path d="M124.4 85.295c.38-2.3 6.3-6.625 10.5-6.887 4.2-.265 5.5-.205 9-1.043s12.535-3.088 15.033-4.242c2.504-1.156 13.104.572 5.63 4.738-3.232 1.8-11.943 5.13-18.172 6.987-6.22 1.86-10-1.776-12.06 1.28-1.646 2.432-.334 5.762 7.1 6.453 10.037.93 19.66-4.52 20.72-1.625s-8.625 6.508-14.525 6.623c-5.893.1-17.77-3.896-19.555-5.137s-4.165-4.13-3.67-7.148z" fill="#fdd20a"/>
+                <path d="M128.943 115.592s-14.102-7.52-14.332-4.47c-.238 3.056 0 15.5 1.643 16.45s13.396-6.108 13.396-6.108zm5.403-.474s9.635-7.285 11.754-6.815c2.1.48 2.582 15.5.7 16.23-1.88.7-12.908-3.813-12.908-3.813z" fill="#65bc46"/>
+                <path d="M125.53 116.4c0 4.932-.7 7.05 1.4 7.52s6.104 0 7.518-.938.232-7.28-.232-8.465c-.477-1.174-8.696-.232-8.696 1.884z" fill="#43a244"/>
+                <path d="M126.426 115.292c0 4.933-.707 7.05 1.4 7.52 2.106.48 6.104 0 7.52-.938 1.4-.94.23-7.28-.236-8.466-.473-1.173-8.692-.227-8.692 1.885z" fill="#65bc46"/>
+                <circle cx="127.331" cy="78.965" r="57.5" fill="none" stroke="#de5833" stroke-width="5"/>
+            </g>
+        </symbol>
+
+        <symbol id="search-logo-baidu" viewBox="0 0 64 64">
+            <path fill="currentColor" d="M11.518 33.724c6.957-1.495 6.012-9.8 5.802-11.63-.342-2.803-3.638-7.7-8.113-7.313-5.63.505-6.454 8.64-6.454 8.64-.753 3.763 1.823 11.8 8.765 10.303zm12.917-13.947c3.842 0 6.948-4.423 6.948-9.892C31.383 4.422 28.277 0 24.435 0s-6.952 4.422-6.952 9.885c0 5.47 3.114 9.892 6.952 9.892zm16.55.653c5.138.667 8.44-4.815 9.097-8.97.67-4.15-2.644-8.97-6.28-9.798-3.645-.835-8.195 5.002-8.6 8.808-.496 4.653.666 9.3 5.793 9.96zm20.363 6.977c0-1.987-1.65-7.974-7.775-7.974-6.137 0-6.954 5.65-6.954 9.643 0 3.812.32 9.132 7.94 8.963s6.787-8.633 6.787-10.633zM18.906 48.2c-.203.585-.66 2.08-.265 3.382.33 1.626 1.667 2.857 3.314 3.052H25.6v-8.908h-3.902a4.28 4.28 0 0 0-2.791 2.473zm34.668-3.334s-7.948-6.148-12.588-12.795c-6.288-9.8-15.224-5.8-18.212-.828-2.975 4.983-7.612 8.135-8.272 8.97-.666.822-9.6 5.643-7.615 14.452 1.98 8.802 8.945 8.633 8.945 8.633a39.04 39.04 0 0 0 11.088-.828 23.39 23.39 0 0 1 11.085.33s13.913 4.66 17.72-4.312-2.15-13.622-2.15-13.622zm-23.807 13.35h-9.045c-3.905-.778-5.462-3.444-5.66-3.9-.192-.46-1.298-2.603-.713-6.248 1.688-5.463 6.504-5.855 6.504-5.855h4.814v-5.918l4.1.062zm16.846-.062h-10.4C32.18 57.114 32 54.248 32 54.248v-11.5l4.223-.068v10.347c.258 1.103 1.63 1.3 1.63 1.3h4.3v-11.58h4.5z"/>
+        </symbol>
+    </svg>
+
     <main class="page-shell">
         <header class="hero">
             <div class="hero-copy">
                 <p class="eyebrow">Private Infrastructure</p>
                 <h1>HomeLab</h1>
                 <p class="hero-subtitle">Service Dashboard · <span id="service-count-label">家庭服务入口</span></p>
+                <form class="search-form" id="homepage-search-form" action="https://www.bing.com/search" method="get" target="_blank" rel="noopener noreferrer" role="search" data-expanded="false" data-menu-open="false">
+                    <div class="search-shell">
+                        <button class="search-engine-button" id="search-engine-button" type="button" aria-label="使用 Bing 搜索，点击展开搜索框" aria-controls="homepage-search-input" aria-expanded="false">
+                            <span class="search-engine-icon search-engine-current-icon">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                                    <use class="search-current-engine-use" href="#search-logo-bing"/>
+                                </svg>
+                            </span>
+                            <span class="search-engine-name" id="search-engine-name">Bing</span>
+                        </button>
+                        <label class="sr-only" for="homepage-search-input">搜索关键词</label>
+                        <input class="search-input" id="homepage-search-input" type="search" name="q" placeholder="把问题丢给互联网" autocomplete="off" enterkeyhint="search" pattern=".*\S.*" required>
+                        <button class="search-submit-button" id="search-submit-button" type="submit" aria-label="使用 Bing 搜索">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M5 12h13M14 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="search-engine-menu" id="search-engine-list" role="listbox" aria-label="选择搜索引擎" hidden>
+                        <button class="search-engine-option" type="button" role="option" data-search-engine="bing" aria-selected="true" tabindex="-1">
+                            <span class="search-engine-icon">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><use href="#search-logo-bing"/></svg>
+                            </span>
+                            <span class="search-engine-option-name">Bing</span>
+                        </button>
+                        <button class="search-engine-option" type="button" role="option" data-search-engine="google" aria-selected="false" tabindex="-1">
+                            <span class="search-engine-icon">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32"><use href="#search-logo-google"/></svg>
+                            </span>
+                            <span class="search-engine-option-name">Google</span>
+                        </button>
+                        <button class="search-engine-option" type="button" role="option" data-search-engine="duckduckgo" aria-selected="false" tabindex="-1">
+                            <span class="search-engine-icon">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 32 32"><use href="#search-logo-duckduckgo"/></svg>
+                            </span>
+                            <span class="search-engine-option-name">DuckDuckGo</span>
+                        </button>
+                        <button class="search-engine-option" type="button" role="option" data-search-engine="baidu" aria-selected="false" tabindex="-1">
+                            <span class="search-engine-icon">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 64 64"><use href="#search-logo-baidu"/></svg>
+                            </span>
+                            <span class="search-engine-option-name">百度</span>
+                        </button>
+                    </div>
+                    <p class="sr-only" id="search-status" role="status" aria-live="polite"></p>
+                </form>
             </div>
         </header>
 
@@ -3698,6 +4160,382 @@
             });
             syncBackgroundControlsBusy();
             loadSharedBackgroundPreferences();
+
+            const SEARCH_ENGINE_STORAGE_KEY = 'homelab-search-engine-v1';
+            const SEARCH_DEFAULT_PLACEHOLDER = '把问题丢给互联网';
+            const SEARCH_EMPTY_PLACEHOLDERS = Object.freeze([
+                'Null 也算问题吗？',
+                '关键词不会自己长出来哦',
+                '这里是不是该写点啥？',
+                '搜索框也需要一点线索',
+                '互联网还在等你开口',
+                '先给我一个关键词吧',
+                '空气不能拿来搜索啦',
+                '搜索引擎还没学会读心术'
+            ]);
+            const SEARCH_ENGINES = Object.freeze([
+                Object.freeze({
+                    id: 'bing',
+                    name: 'Bing',
+                    action: 'https://www.bing.com/search',
+                    queryParameter: 'q',
+                    symbol: '#search-logo-bing'
+                }),
+                Object.freeze({
+                    id: 'google',
+                    name: 'Google',
+                    action: 'https://www.google.com/search',
+                    queryParameter: 'q',
+                    symbol: '#search-logo-google'
+                }),
+                Object.freeze({
+                    id: 'duckduckgo',
+                    name: 'DuckDuckGo',
+                    action: 'https://duckduckgo.com/',
+                    queryParameter: 'q',
+                    symbol: '#search-logo-duckduckgo'
+                }),
+                Object.freeze({
+                    id: 'baidu',
+                    name: '百度',
+                    action: 'https://www.baidu.com/s',
+                    queryParameter: 'wd',
+                    symbol: '#search-logo-baidu'
+                })
+            ]);
+
+            function resolveSearchEngine(engineId) {
+                return SEARCH_ENGINES.find((engine) => engine.id === engineId) || SEARCH_ENGINES[0];
+            }
+
+            function readStoredSearchEngineId(storage) {
+                try {
+                    return resolveSearchEngine(storage.getItem(SEARCH_ENGINE_STORAGE_KEY)).id;
+                } catch (error) {
+                    return SEARCH_ENGINES[0].id;
+                }
+            }
+
+            function storeSearchEngineId(storage, engineId) {
+                try {
+                    storage.setItem(SEARCH_ENGINE_STORAGE_KEY, resolveSearchEngine(engineId).id);
+                } catch (error) {
+                    // A storage failure must not prevent the current in-memory selection from working.
+                }
+            }
+
+            function availableSearchStorage() {
+                try {
+                    return window.localStorage;
+                } catch (error) {
+                    return {
+                        getItem() { return null; },
+                        setItem() {}
+                    };
+                }
+            }
+
+            function createHomepageSearchController(elements, environment = {}) {
+                const {
+                    form,
+                    input,
+                    engineButton,
+                    engineName,
+                    submitButton,
+                    menu,
+                    options,
+                    status,
+                    currentEngineUses
+                } = elements;
+                const storage = environment.storage || {
+                    getItem() { return null; },
+                    setItem() {}
+                };
+                const schedule = environment.schedule || ((callback, delay) => window.setTimeout(callback, delay));
+                const cancelSchedule = environment.cancelSchedule || ((timer) => window.clearTimeout(timer));
+                const activeElement = environment.activeElement || (() => document.activeElement);
+                let currentEngine = SEARCH_ENGINES[0];
+                let expanded = false;
+                let menuOpen = false;
+                let emptyFeedbackTimer = 0;
+                let emptyFeedbackIndex = 0;
+
+                function syncSearchEngineButtonState() {
+                    if (expanded) {
+                        engineButton.setAttribute(
+                            'aria-label',
+                            `切换搜索引擎，当前为 ${currentEngine.name}`
+                        );
+                        engineButton.setAttribute('aria-haspopup', 'listbox');
+                        engineButton.setAttribute('aria-controls', 'search-engine-list');
+                        engineButton.setAttribute('aria-expanded', String(menuOpen));
+                    } else {
+                        engineButton.setAttribute(
+                            'aria-label',
+                            `使用 ${currentEngine.name} 搜索，点击展开搜索框`
+                        );
+                        engineButton.removeAttribute('aria-haspopup');
+                        engineButton.setAttribute('aria-controls', 'homepage-search-input');
+                        engineButton.setAttribute('aria-expanded', 'false');
+                    }
+                }
+
+                function applySearchEngine(engineId, persist = false) {
+                    currentEngine = resolveSearchEngine(engineId);
+                    form.setAttribute('action', currentEngine.action);
+                    input.setAttribute('name', currentEngine.queryParameter);
+                    form.dataset.currentEngine = currentEngine.id;
+                    engineName.textContent = currentEngine.name;
+                    submitButton.setAttribute('aria-label', `使用 ${currentEngine.name} 搜索`);
+                    currentEngineUses.forEach((use) => use.setAttribute('href', currentEngine.symbol));
+                    options.forEach((option) => {
+                        const selected = option.dataset.searchEngine === currentEngine.id;
+                        option.setAttribute('aria-selected', String(selected));
+                        option.tabIndex = selected ? 0 : -1;
+                    });
+                    syncSearchEngineButtonState();
+                    if (persist) {
+                        storeSearchEngineId(storage, currentEngine.id);
+                    }
+                    return currentEngine;
+                }
+
+                function clearEmptySearchFeedback() {
+                    if (emptyFeedbackTimer) {
+                        cancelSchedule(emptyFeedbackTimer);
+                        emptyFeedbackTimer = 0;
+                    }
+                    form.classList.remove('is-empty-search');
+                    input.placeholder = SEARCH_DEFAULT_PLACEHOLDER;
+                }
+
+                function showEmptySearchFeedback() {
+                    clearEmptySearchFeedback();
+                    const feedback = SEARCH_EMPTY_PLACEHOLDERS[emptyFeedbackIndex];
+                    emptyFeedbackIndex = (emptyFeedbackIndex + 1) % SEARCH_EMPTY_PLACEHOLDERS.length;
+                    void form.offsetWidth;
+                    form.classList.add('is-empty-search');
+                    input.placeholder = feedback;
+                    status.textContent = `请输入搜索内容。${feedback}`;
+                    emptyFeedbackTimer = schedule(() => {
+                        form.classList.remove('is-empty-search');
+                        input.placeholder = SEARCH_DEFAULT_PLACEHOLDER;
+                        emptyFeedbackTimer = 0;
+                    }, 1800);
+                }
+
+                function setSearchExpanded(nextExpanded, focusInput = false, restoreFocus = false) {
+                    expanded = Boolean(nextExpanded);
+                    form.dataset.expanded = String(expanded);
+                    if (!expanded && menuOpen) {
+                        setSearchMenuOpen(false, false);
+                    } else {
+                        syncSearchEngineButtonState();
+                    }
+                    if (focusInput && expanded) {
+                        input.focus({ preventScroll: true });
+                    } else if (restoreFocus && !expanded) {
+                        engineButton.focus({ preventScroll: true });
+                    }
+                    return expanded;
+                }
+
+                function setSearchMenuOpen(nextOpen, restoreFocus = false) {
+                    menuOpen = expanded && Boolean(nextOpen);
+                    form.dataset.menuOpen = String(menuOpen);
+                    menu.hidden = !menuOpen;
+                    syncSearchEngineButtonState();
+                    if (menuOpen) {
+                        const selected = options.find((option) => option.dataset.searchEngine === currentEngine.id);
+                        (selected || options[0]).focus({ preventScroll: true });
+                    } else if (restoreFocus) {
+                        engineButton.focus({ preventScroll: true });
+                    }
+                    return menuOpen;
+                }
+
+                function selectSearchEngine(engineId) {
+                    const engine = applySearchEngine(engineId, true);
+                    setSearchMenuOpen(false, false);
+                    setSearchExpanded(true, true, false);
+                    status.textContent = `已切换到 ${engine.name}。`;
+                    return engine;
+                }
+
+                function moveSearchMenuFocus(direction) {
+                    const focusedIndex = Math.max(0, options.indexOf(activeElement()));
+                    const nextIndex = direction === 'first'
+                        ? 0
+                        : direction === 'last'
+                            ? options.length - 1
+                            : (focusedIndex + direction + options.length) % options.length;
+                    options[nextIndex].focus({ preventScroll: true });
+                }
+
+                function handleSearchMenuKeydown(event) {
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        moveSearchMenuFocus(1);
+                    } else if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        moveSearchMenuFocus(-1);
+                    } else if (event.key === 'Home') {
+                        event.preventDefault();
+                        moveSearchMenuFocus('first');
+                    } else if (event.key === 'End') {
+                        event.preventDefault();
+                        moveSearchMenuFocus('last');
+                    } else if (event.key === 'Enter' || event.key === ' ') {
+                        const focused = activeElement();
+                        if (focused && focused.dataset && focused.dataset.searchEngine) {
+                            event.preventDefault();
+                            selectSearchEngine(focused.dataset.searchEngine);
+                        }
+                    } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setSearchMenuOpen(false, true);
+                    }
+                }
+
+                function handleSearchSubmit(event) {
+                    if (!input.value.trim()) {
+                        event.preventDefault();
+                        input.value = '';
+                        setSearchExpanded(true, true, false);
+                        showEmptySearchFeedback();
+                        return false;
+                    }
+                    clearEmptySearchFeedback();
+                    status.textContent = `正在使用 ${currentEngine.name} 搜索。`;
+                    schedule(() => {
+                        input.value = '';
+                        setSearchMenuOpen(false, false);
+                        setSearchExpanded(false, false, false);
+                        status.textContent = '';
+                    }, 0);
+                    return true;
+                }
+
+                function collapseSearchForWindowBlur() {
+                    const focused = activeElement();
+                    if (focused && form.contains(focused) && typeof focused.blur === 'function') {
+                        focused.blur();
+                    }
+                    setSearchMenuOpen(false, false);
+                    setSearchExpanded(false, false, false);
+                }
+
+                return {
+                    applySearchEngine,
+                    setSearchExpanded,
+                    setSearchMenuOpen,
+                    selectSearchEngine,
+                    handleSearchMenuKeydown,
+                    handleSearchSubmit,
+                    collapseSearchForWindowBlur,
+                    isExpanded: () => expanded,
+                    isMenuOpen: () => menuOpen,
+                    currentEngine: () => currentEngine
+                };
+            }
+
+            function restoreStaticBingSearch(form, input, menu) {
+                form.removeAttribute('data-search-enhanced');
+                form.removeAttribute('data-current-engine');
+                form.dataset.expanded = 'false';
+                form.dataset.menuOpen = 'false';
+                form.noValidate = false;
+                form.setAttribute('action', SEARCH_ENGINES[0].action);
+                if (input) {
+                    input.setAttribute('name', SEARCH_ENGINES[0].queryParameter);
+                }
+                if (menu) {
+                    menu.hidden = true;
+                }
+            }
+
+            function initializeHomepageSearch() {
+                const form = document.getElementById('homepage-search-form');
+                if (!form) return null;
+                const input = document.getElementById('homepage-search-input');
+                const engineButton = document.getElementById('search-engine-button');
+                const engineName = document.getElementById('search-engine-name');
+                const submitButton = document.getElementById('search-submit-button');
+                const menu = document.getElementById('search-engine-list');
+                const status = document.getElementById('search-status');
+                if (!input || !engineButton || !engineName || !submitButton || !menu || !status) {
+                    throw new Error('搜索栏结构不完整');
+                }
+                const options = Array.from(menu.querySelectorAll('[data-search-engine]'));
+                const currentEngineUses = Array.from(form.querySelectorAll('.search-current-engine-use'));
+                if (options.length !== SEARCH_ENGINES.length || currentEngineUses.length !== 1) {
+                    throw new Error('搜索栏结构不完整');
+                }
+
+                const storage = availableSearchStorage();
+                const controller = createHomepageSearchController({
+                    form,
+                    input,
+                    engineButton,
+                    engineName,
+                    submitButton,
+                    menu,
+                    options,
+                    status,
+                    currentEngineUses
+                }, { storage });
+                controller.applySearchEngine(readStoredSearchEngineId(storage));
+
+                engineButton.addEventListener('click', () => {
+                    if (!controller.isExpanded()) {
+                        controller.setSearchExpanded(true, true, false);
+                        return;
+                    }
+                    controller.setSearchMenuOpen(!controller.isMenuOpen(), false);
+                });
+                options.forEach((option) => {
+                    option.addEventListener('click', () => controller.selectSearchEngine(option.dataset.searchEngine));
+                });
+                menu.addEventListener('keydown', controller.handleSearchMenuKeydown);
+                form.addEventListener('submit', controller.handleSearchSubmit);
+                form.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Escape' || controller.isMenuOpen()) return;
+                    event.preventDefault();
+                    controller.setSearchExpanded(false, false, true);
+                });
+                form.addEventListener('focusout', () => {
+                    window.setTimeout(() => {
+                        if (!form.contains(document.activeElement)) {
+                            controller.setSearchMenuOpen(false, false);
+                            controller.setSearchExpanded(false, false, false);
+                        }
+                    }, 0);
+                });
+                document.addEventListener('pointerdown', (event) => {
+                    if (!form.contains(event.target)) {
+                        controller.setSearchMenuOpen(false, false);
+                        controller.setSearchExpanded(false, false, false);
+                    }
+                });
+                window.addEventListener('blur', controller.collapseSearchForWindowBlur);
+                form.noValidate = true;
+                form.dataset.searchEnhanced = 'true';
+                return controller;
+            }
+
+            const homepageSearchForm = document.getElementById('homepage-search-form');
+            try {
+                initializeHomepageSearch();
+            } catch (error) {
+                console.warn('搜索栏增强初始化失败，已保留基础 Bing 搜索。', error);
+                if (homepageSearchForm) {
+                    restoreStaticBingSearch(
+                        homepageSearchForm,
+                        document.getElementById('homepage-search-input'),
+                        document.getElementById('search-engine-list')
+                    );
+                }
+            }
 
             const cards = Array.from(document.querySelectorAll('.service-card'));
             const serviceCountLabel = document.getElementById('service-count-label');

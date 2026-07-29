@@ -177,6 +177,86 @@ if (html.indexOf('id="background-original-link"') > html.indexOf('id="background
     throw new Error('The original-background link must remain to the left of the Bestdori draw button.');
 }
 
+const searchFormMatch = html.match(/<form\b[^>]*\bid="homepage-search-form"[^>]*>/);
+if (!searchFormMatch) throw new Error('Missing the progressive-enhancement search form.');
+const searchFormTag = searchFormMatch[0];
+if (!/\baction="https:\/\/www\.bing\.com\/search"/.test(searchFormTag)
+    || !/\bmethod="get"/i.test(searchFormTag)
+    || !/\btarget="_blank"/.test(searchFormTag)) {
+    throw new Error('The static search form must remain a native Bing GET form that opens a new tab.');
+}
+const searchFormRel = searchFormTag.match(/\brel="([^"]+)"/);
+const searchFormRelTokens = searchFormRel ? searchFormRel[1].split(/\s+/) : [];
+if (!searchFormRelTokens.includes('noopener') || !searchFormRelTokens.includes('noreferrer')) {
+    throw new Error('The search form is missing safe rel tokens.');
+}
+if (/\bdata-search-enhanced=/.test(searchFormTag)) {
+    throw new Error('The search form must not claim JavaScript enhancement before runtime initialization succeeds.');
+}
+
+const searchInputMatch = html.match(/<input\b[^>]*\bid="homepage-search-input"[^>]*>/);
+const defaultSearchPlaceholder = '\u628a\u95ee\u9898\u4e22\u7ed9\u4e92\u8054\u7f51';
+if (!searchInputMatch
+    || !searchInputMatch[0].includes('type="search"')
+    || !searchInputMatch[0].includes('name="q"')
+    || !searchInputMatch[0].includes(`placeholder="${defaultSearchPlaceholder}"`)
+    || !searchInputMatch[0].includes('pattern=".*\\S.*"')
+    || !searchInputMatch[0].includes(' required')) {
+    const inputTag = searchInputMatch ? searchInputMatch[0] : '';
+    throw new Error(`The static Bing search input contract is incomplete: ${JSON.stringify([
+        inputTag.includes('type="search"'),
+        inputTag.includes('name="q"'),
+        inputTag.includes(`placeholder="${defaultSearchPlaceholder}"`),
+        inputTag.includes('pattern=".*\\S.*"'),
+        inputTag.includes(' required')
+    ])} ${inputTag || 'missing'}`);
+}
+for (const [id, expectedType] of [
+    ['search-engine-button', 'button'],
+    ['search-submit-button', 'submit']
+]) {
+    const button = html.match(new RegExp(`<button\\b[^>]*\\bid="${id}"[^>]*>`));
+    if (!button || !new RegExp(`\\btype="${expectedType}"`).test(button[0])) {
+        throw new Error(`${id} has the wrong button type.`);
+    }
+}
+const searchOptionIds = [...html.matchAll(/\bdata-search-engine="([^"]+)"/g)].map((match) => match[1]);
+if (JSON.stringify(searchOptionIds) !== JSON.stringify(['bing', 'google', 'duckduckgo', 'baidu'])) {
+    throw new Error(`Search engine option order mismatch: ${searchOptionIds.join(', ')}`);
+}
+if (html.includes('search-engine-option-note')
+    || html.includes('默认 · 国内可用')
+    || html.includes('国际网络')
+    || html.includes('隐私搜索')
+    || html.includes('国内备用')) {
+    throw new Error('Search engine options must contain only the icon and engine name.');
+}
+if (html.includes('search-expand-button')
+    || html.includes('search-expand-engine-name')
+    || html.includes('search-engine-chevron')) {
+    throw new Error('Search expansion and engine selection must use one persistent icon-and-name pill without a chevron.');
+}
+if (html.indexOf('id="homepage-search-form"') < html.indexOf('class="hero-subtitle"')
+    || html.indexOf('id="homepage-search-form"') > html.indexOf('<section class="dashboard"')) {
+    throw new Error('The search form must remain below the Hero subtitle and above the service dashboard.');
+}
+for (const symbolId of ['search-logo-bing', 'search-logo-google', 'search-logo-duckduckgo', 'search-logo-baidu']) {
+    if (!html.includes(`id="${symbolId}"`)) throw new Error(`Missing inline search icon symbol: ${symbolId}`);
+}
+if (!/<symbol\b[^>]*\bid="search-logo-baidu"[\s\S]*?<path\b[^>]*\bfill="currentColor"/.test(html)) {
+    throw new Error('The Baidu search icon must use the high-contrast monochrome foreground color.');
+}
+if (!/\.search-form\s*\{[^}]*--search-collapsed-width:\s*7rem;[^}]*--search-motion-duration:\s*300ms;/.test(html)
+    || !/data-current-engine="duckduckgo"[\s\S]*?--search-collapsed-width:\s*10rem;/.test(html)
+    || !/\.search-shell\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)
+    || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-collapsed-width\) - 2px\);[^}]*display:\s*inline-flex;/.test(html)
+    || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)[^}]*height\s+var\(--search-motion-duration\)[^}]*margin-left\s+var\(--search-motion-duration\)[^}]*padding\s+var\(--search-motion-duration\)[^}]*gap\s+var\(--search-motion-duration\)/.test(html)
+    || !/data-expanded="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-collapsed-width\) - 1\.25rem\);/.test(html)
+    || !/\.search-engine-name\s*\{[^}]*overflow:\s*visible;[^}]*line-height:\s*1\.35;/.test(html)
+    || !/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?transition-duration:\s*0\.01ms\s*!important;[\s\S]*?transition-delay:\s*0ms\s*!important;/.test(html)) {
+    throw new Error('The persistent engine pill is missing its 300ms continuous size transition or unclipped text contract.');
+}
+
 const requiredMarkers = [
     '/api/background-preferences',
     'const backgroundInventoryEndpoint',
@@ -234,7 +314,14 @@ const requiredMarkers = [
     'result.payload && result.payload.preferences',
     'id="service-count-label"',
     'initializeServiceCards',
-    "'X-Requested-With': 'homelab-dashboard'"
+    "'X-Requested-With': 'homelab-dashboard'",
+    'homelab-search-engine-v1',
+    'id="homepage-search-form"',
+    'id="homepage-search-input"',
+    'id="search-engine-list"',
+    'id="search-status"',
+    'initializeHomepageSearch',
+    'data-search-enhanced'
 ];
 requiredMarkers.forEach((marker) => {
     if (!html.includes(marker)) throw new Error(`Missing frontend contract marker: ${marker}`);
@@ -242,7 +329,7 @@ requiredMarkers.forEach((marker) => {
 
 const runtimeScript = scripts[1];
 if (runtimeScript.includes('window.open(')) {
-    throw new Error('Original-background navigation must use the native safe link instead of window.open().');
+    throw new Error('New-tab navigation must use native safe links or forms instead of window.open().');
 }
 const helperStart = runtimeScript.indexOf('function fetchWithTimeout(');
 const helperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', helperStart);
@@ -1149,6 +1236,340 @@ if (successfulRemoval.requiresPermanentConfirmation
     throw new Error('Successful removal did not retain the nested preference response.');
 }
 
+const searchSourceStart = runtimeScript.indexOf("const SEARCH_ENGINE_STORAGE_KEY = 'homelab-search-engine-v1'");
+const searchSourceEnd = runtimeScript.indexOf('const homepageSearchForm', searchSourceStart);
+if (searchSourceStart < 0 || searchSourceEnd < 0) {
+    throw new Error('Unable to extract the homepage search implementation.');
+}
+const searchSource = runtimeScript.slice(searchSourceStart, searchSourceEnd);
+if (/\bfetch\s*\(|\bXMLHttpRequest\b|\bsendBeacon\b/.test(searchSource)) {
+    throw new Error('Homepage search initialization, input, and engine switching must not send network requests.');
+}
+const submitBindingIndex = searchSource.indexOf("form.addEventListener('submit'");
+const enhancementFlagIndex = searchSource.indexOf("form.dataset.searchEnhanced = 'true'");
+if (submitBindingIndex < 0
+    || enhancementFlagIndex < 0
+    || enhancementFlagIndex < submitBindingIndex) {
+    throw new Error('The search form claims enhancement before its event bindings are installed.');
+}
+
+const searchContext = vm.createContext({
+    console: { warn() {} },
+    document: { activeElement: null },
+    window: { setTimeout, clearTimeout }
+});
+vm.runInContext(
+    searchSource
+        + '\nglobalThis.__searchHelpers = { SEARCH_EMPTY_PLACEHOLDERS, SEARCH_ENGINES, resolveSearchEngine, readStoredSearchEngineId, storeSearchEngineId, createHomepageSearchController };',
+    searchContext
+);
+const expectedEmptySearchPlaceholders = [
+    'Null \u4e5f\u7b97\u95ee\u9898\u5417\uff1f',
+    '\u5173\u952e\u8bcd\u4e0d\u4f1a\u81ea\u5df1\u957f\u51fa\u6765\u54e6',
+    '\u8fd9\u91cc\u662f\u4e0d\u662f\u8be5\u5199\u70b9\u5565\uff1f',
+    '\u641c\u7d22\u6846\u4e5f\u9700\u8981\u4e00\u70b9\u7ebf\u7d22',
+    '\u4e92\u8054\u7f51\u8fd8\u5728\u7b49\u4f60\u5f00\u53e3',
+    '\u5148\u7ed9\u6211\u4e00\u4e2a\u5173\u952e\u8bcd\u5427',
+    '\u7a7a\u6c14\u4e0d\u80fd\u62ff\u6765\u641c\u7d22\u5566',
+    '\u641c\u7d22\u5f15\u64ce\u8fd8\u6ca1\u5b66\u4f1a\u8bfb\u5fc3\u672f'
+];
+if (!Object.isFrozen(searchContext.__searchHelpers.SEARCH_EMPTY_PLACEHOLDERS)
+    || JSON.stringify(Array.from(searchContext.__searchHelpers.SEARCH_EMPTY_PLACEHOLDERS))
+        !== JSON.stringify(expectedEmptySearchPlaceholders)) {
+    throw new Error('The fixed empty-search feedback registry or order is incorrect.');
+}
+const expectedSearchEngines = [
+    ['bing', 'Bing', 'https://www.bing.com/search', 'q', '#search-logo-bing'],
+    ['google', 'Google', 'https://www.google.com/search', 'q', '#search-logo-google'],
+    ['duckduckgo', 'DuckDuckGo', 'https://duckduckgo.com/', 'q', '#search-logo-duckduckgo'],
+    ['baidu', '\u767e\u5ea6', 'https://www.baidu.com/s', 'wd', '#search-logo-baidu']
+];
+const actualSearchEngines = Array.from(searchContext.__searchHelpers.SEARCH_ENGINES, (engine) => [
+    engine.id,
+    engine.name,
+    engine.action,
+    engine.queryParameter,
+    engine.symbol
+]);
+if (JSON.stringify(actualSearchEngines) !== JSON.stringify(expectedSearchEngines)) {
+    throw new Error('The fixed search engine registry or order is incorrect.');
+}
+for (const invalidEngineId of ['', '__proto__', 'constructor', 'toString', 'unknown']) {
+    if (searchContext.__searchHelpers.resolveSearchEngine(invalidEngineId).id !== 'bing') {
+        throw new Error(`Unsafe or unknown search engine id did not fall back to Bing: ${invalidEngineId}`);
+    }
+}
+if (searchContext.__searchHelpers.readStoredSearchEngineId({
+    getItem() { throw new Error('storage disabled'); }
+}) !== 'bing') {
+    throw new Error('A storage read failure did not fall back to Bing.');
+}
+
+function makeSearchClassList() {
+    const values = new Set();
+    return {
+        add(...items) { items.forEach((item) => values.add(item)); },
+        remove(...items) { items.forEach((item) => values.delete(item)); },
+        contains(item) { return values.has(item); }
+    };
+}
+let activeSearchElement = null;
+const searchElements = [];
+function makeSearchElement() {
+    const element = {
+        dataset: {},
+        attributes: {},
+        classList: makeSearchClassList(),
+        textContent: '',
+        hidden: false,
+        tabIndex: -1,
+        focusCount: 0,
+        blurCount: 0,
+        offsetWidth: 416,
+        setAttribute(name, value) {
+            this.attributes[name] = String(value);
+            if (name === 'action') this.action = String(value);
+            if (name === 'name') this.name = String(value);
+        },
+        removeAttribute(name) { delete this.attributes[name]; },
+        focus() {
+            activeSearchElement = this;
+            this.focusCount += 1;
+        },
+        blur() {
+            if (activeSearchElement === this) activeSearchElement = null;
+            this.blurCount += 1;
+        },
+        contains(candidate) { return searchElements.includes(candidate); }
+    };
+    searchElements.push(element);
+    return element;
+}
+
+const searchForm = makeSearchElement();
+const searchInput = makeSearchElement();
+searchInput.value = 'keep this query';
+searchInput.placeholder = '\u628a\u95ee\u9898\u4e22\u7ed9\u4e92\u8054\u7f51';
+const searchEngineButton = makeSearchElement();
+const searchEngineName = makeSearchElement();
+const searchSubmitButton = makeSearchElement();
+const searchMenu = makeSearchElement();
+searchMenu.hidden = true;
+const searchStatus = makeSearchElement();
+const searchOptions = expectedSearchEngines.map(([id]) => {
+    const option = makeSearchElement();
+    option.dataset.searchEngine = id;
+    return option;
+});
+const searchCurrentUses = [makeSearchElement()];
+const searchStorageValues = new Map([[`homelab-search-engine-v1`, 'google']]);
+const searchStorageWrites = [];
+const searchStorage = {
+    getItem(key) { return searchStorageValues.has(key) ? searchStorageValues.get(key) : null; },
+    setItem(key, value) {
+        searchStorageWrites.push([key, value]);
+        searchStorageValues.set(key, value);
+    }
+};
+const searchTimers = [];
+const searchSchedule = (callback, delay) => {
+    const timer = { callback, delay, cancelled: false };
+    searchTimers.push(timer);
+    return timer;
+};
+const searchCancelSchedule = (timer) => {
+    timer.cancelled = true;
+};
+const searchController = searchContext.__searchHelpers.createHomepageSearchController({
+    form: searchForm,
+    input: searchInput,
+    engineButton: searchEngineButton,
+    engineName: searchEngineName,
+    submitButton: searchSubmitButton,
+    menu: searchMenu,
+    options: searchOptions,
+    status: searchStatus,
+    currentEngineUses: searchCurrentUses
+}, {
+    storage: searchStorage,
+    schedule: searchSchedule,
+    cancelSchedule: searchCancelSchedule,
+    activeElement: () => activeSearchElement
+});
+
+searchController.applySearchEngine(
+    searchContext.__searchHelpers.readStoredSearchEngineId(searchStorage)
+);
+if (searchController.currentEngine().id !== 'google'
+    || searchForm.action !== 'https://www.google.com/search'
+    || searchInput.name !== 'q'
+    || searchForm.dataset.currentEngine !== 'google'
+    || searchEngineName.textContent !== 'Google'
+    || searchEngineButton.attributes['aria-controls'] !== 'homepage-search-input'
+    || searchEngineButton.attributes['aria-expanded'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(searchEngineButton.attributes, 'aria-haspopup')
+    || searchInput.value !== 'keep this query') {
+    throw new Error('Stored search engine initialization changed the query or applied the wrong form contract.');
+}
+searchController.applySearchEngine('baidu', true);
+if (searchForm.action !== 'https://www.baidu.com/s'
+    || searchInput.name !== 'wd'
+    || searchInput.value !== 'keep this query'
+    || JSON.stringify(searchStorageWrites) !== JSON.stringify([['homelab-search-engine-v1', 'baidu']])) {
+    throw new Error('Search engine selection was not safely persisted as an id-only preference.');
+}
+searchContext.__searchHelpers.storeSearchEngineId({
+    setItem() { throw new Error('storage disabled'); }
+}, 'google');
+
+searchController.setSearchExpanded(true);
+if (searchEngineButton.attributes['aria-controls'] !== 'search-engine-list'
+    || searchEngineButton.attributes['aria-haspopup'] !== 'listbox'
+    || searchEngineButton.attributes['aria-expanded'] !== 'false') {
+    throw new Error('Expanding search did not convert the persistent pill into the listbox trigger.');
+}
+searchController.setSearchMenuOpen(true);
+if (searchEngineButton.attributes['aria-expanded'] !== 'true') {
+    throw new Error('Opening the search engine menu did not update the persistent pill state.');
+}
+searchController.selectSearchEngine('duckduckgo');
+if (!searchController.isExpanded()
+    || searchController.isMenuOpen()
+    || searchForm.dataset.currentEngine !== 'duckduckgo'
+    || activeSearchElement !== searchInput
+    || searchInput.value !== 'keep this query') {
+    throw new Error('Selecting an engine from the expanded state did not preserve and refocus the query.');
+}
+
+searchController.setSearchMenuOpen(true);
+activeSearchElement = searchOptions[0];
+let menuPrevented = false;
+searchController.handleSearchMenuKeydown({
+    key: 'ArrowUp',
+    preventDefault() { menuPrevented = true; }
+});
+if (!menuPrevented || activeSearchElement !== searchOptions[searchOptions.length - 1]) {
+    throw new Error('Search engine menu keyboard wrapping is broken.');
+}
+searchController.handleSearchMenuKeydown({ key: 'Escape', preventDefault() {} });
+if (searchController.isMenuOpen() || activeSearchElement !== searchEngineButton) {
+    throw new Error('Escape did not close the search engine menu and restore focus.');
+}
+searchController.setSearchExpanded(false);
+searchController.setSearchMenuOpen(true);
+if (searchController.isExpanded()
+    || searchController.isMenuOpen()
+    || searchEngineButton.attributes['aria-controls'] !== 'homepage-search-input'
+    || Object.prototype.hasOwnProperty.call(searchEngineButton.attributes, 'aria-haspopup')) {
+    throw new Error('The collapsed persistent pill exposed the engine menu instead of the search input.');
+}
+
+let previousEmptyFeedbackTimer = null;
+const expectedEmptySearchSequence = [
+    ...expectedEmptySearchPlaceholders,
+    expectedEmptySearchPlaceholders[0]
+];
+for (const expectedFeedback of expectedEmptySearchSequence) {
+    searchInput.value = ' \t ';
+    let blankPrevented = false;
+    if (searchController.handleSearchSubmit({
+        preventDefault() { blankPrevented = true; }
+    }) !== false
+        || !blankPrevented
+        || searchInput.value !== ''
+        || searchInput.placeholder !== expectedFeedback
+        || searchStatus.textContent !== `\u8bf7\u8f93\u5165\u641c\u7d22\u5185\u5bb9\u3002${expectedFeedback}`
+        || !searchForm.classList.contains('is-empty-search')
+        || !searchController.isExpanded()
+        || activeSearchElement !== searchInput) {
+        throw new Error(`Blank search did not show the planned feedback: ${expectedFeedback}`);
+    }
+    const currentEmptyFeedbackTimer = [...searchTimers]
+        .reverse()
+        .find((timer) => timer.delay === 1800 && !timer.cancelled);
+    if (!currentEmptyFeedbackTimer
+        || (previousEmptyFeedbackTimer && !previousEmptyFeedbackTimer.cancelled)) {
+        throw new Error('Repeated blank search did not replace the previous feedback timer.');
+    }
+    previousEmptyFeedbackTimer = currentEmptyFeedbackTimer;
+}
+previousEmptyFeedbackTimer.callback();
+if (searchInput.placeholder !== '\u628a\u95ee\u9898\u4e22\u7ed9\u4e92\u8054\u7f51'
+    || searchForm.classList.contains('is-empty-search')) {
+    throw new Error('Empty-search feedback did not reset after 1800ms.');
+}
+
+const validQuery = '中文 & URL https://example.com/?a=1';
+searchInput.value = validQuery;
+let validPrevented = false;
+if (!searchController.handleSearchSubmit({
+    preventDefault() { validPrevented = true; }
+}) || validPrevented || searchInput.value !== validQuery) {
+    throw new Error('A valid native search submit was blocked or cleared synchronously.');
+}
+const submitTimer = [...searchTimers].reverse().find((timer) => timer.delay === 0 && !timer.cancelled);
+if (!submitTimer) throw new Error('Valid search submit did not schedule post-navigation cleanup.');
+submitTimer.callback();
+if (searchInput.value !== '' || searchController.isExpanded() || searchController.isMenuOpen()) {
+    throw new Error('Post-submit cleanup did not clear and collapse the search form.');
+}
+
+searchInput.value = '';
+let postSearchBlankPrevented = false;
+searchController.handleSearchSubmit({
+    preventDefault() { postSearchBlankPrevented = true; }
+});
+if (!postSearchBlankPrevented
+    || searchInput.placeholder !== expectedEmptySearchPlaceholders[1]) {
+    throw new Error('A valid search unexpectedly reset the empty-feedback sequence.');
+}
+
+searchController.applySearchEngine('bing');
+searchController.setSearchExpanded(false);
+searchInput.value = '';
+let postStateChangeBlankPrevented = false;
+searchController.handleSearchSubmit({
+    preventDefault() { postStateChangeBlankPrevented = true; }
+});
+if (!postStateChangeBlankPrevented
+    || searchInput.placeholder !== expectedEmptySearchPlaceholders[2]) {
+    throw new Error('Engine switching or collapsing unexpectedly reset the empty-feedback sequence.');
+}
+
+const resetSearchForm = makeSearchElement();
+const resetSearchInput = makeSearchElement();
+resetSearchInput.value = '';
+const resetSearchStatus = makeSearchElement();
+const resetSearchController = searchContext.__searchHelpers.createHomepageSearchController({
+    form: resetSearchForm,
+    input: resetSearchInput,
+    engineButton: makeSearchElement(),
+    engineName: makeSearchElement(),
+    submitButton: makeSearchElement(),
+    menu: makeSearchElement(),
+    options: expectedSearchEngines.map(([id]) => {
+        const option = makeSearchElement();
+        option.dataset.searchEngine = id;
+        return option;
+    }),
+    status: resetSearchStatus,
+    currentEngineUses: [makeSearchElement()]
+}, {
+    schedule: searchSchedule,
+    cancelSchedule: searchCancelSchedule,
+    activeElement: () => activeSearchElement
+});
+let resetBlankPrevented = false;
+resetSearchController.handleSearchSubmit({
+    preventDefault() { resetBlankPrevented = true; }
+});
+if (!resetBlankPrevented
+    || resetSearchInput.placeholder !== expectedEmptySearchPlaceholders[0]
+    || resetSearchStatus.textContent
+        !== `\u8bf7\u8f93\u5165\u641c\u7d22\u5185\u5bb9\u3002${expectedEmptySearchPlaceholders[0]}`) {
+    throw new Error('A new search controller did not restart the empty-feedback sequence.');
+}
+
 const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
 const serviceHelperEnd = runtimeScript.indexOf('initializeServiceCards();', serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
@@ -1306,7 +1727,8 @@ try {
         'service.log',
         'service.log.1',
         'HomeLabWallpaperState.json',
-        'HomeLabWallpaperState-data/state.json'
+        'HomeLabWallpaperState-data/state.json',
+        'temp/verify-probe.svg'
     )
     foreach ($probe in $ignoreProbes) {
         & $git.Source check-ignore --no-index --quiet -- $probe
