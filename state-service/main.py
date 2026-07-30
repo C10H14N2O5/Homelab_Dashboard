@@ -73,11 +73,16 @@ MAX_BESTDORI_REQUEST_BODY = 4 * 1024
 MAX_BACKGROUND_UPLOAD_BODY = 50 * 1024 * 1024
 MAX_BESTDORI_CATALOG_BODY = 24 * 1024 * 1024
 MAX_BACKGROUND_PIXELS = 100_000_000
+MAX_BACKGROUND_FILES = 512
+MAX_BACKGROUND_DIRECTORY_ENTRIES = 2048
+MAX_BACKGROUND_NAME_COLLISIONS = 16
 BACKGROUND_UPLOAD_CHUNK_SIZE = 1024 * 1024
 THUMBNAIL_DIRECTORY_NAME = "thumbnails"
 THUMBNAIL_WIDTH = 480
 THUMBNAIL_HEIGHT = 270
 THUMBNAIL_QUALITY = 75
+MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16
+MAX_THUMBNAIL_CACHE_ENTRIES = 2048
 THUMBNAIL_FILE_PATTERN = re.compile(
     r"^thumbnail-(?P<name>[0-9a-f]{64})-(?P<source>[0-9a-f]{64})\.webp$"
 )
@@ -124,6 +129,10 @@ class InvalidImage(ValueError):
 
 
 class UploadTooLarge(ValueError):
+    pass
+
+
+class BackgroundQuotaExceeded(ValueError):
     pass
 
 
@@ -451,6 +460,7 @@ class StateStore:
         monotonic=time.monotonic,
     ) -> None:
         self._lock = threading.Lock()
+        self._thumbnail_lock = threading.Lock()
         self.background_dir = background_dir.resolve()
         self.state_file = state_file.resolve()
         self.clock = clock
@@ -564,7 +574,12 @@ class StateStore:
                 os.close(handle)
             temporary.unlink(missing_ok=True)
 
-    def _thumbnail_for_background_locked(self, background: str) -> tuple[str, str]:
+    def _thumbnail_for_background_locked(
+        self,
+        background: str,
+        *,
+        allow_generate: bool = True,
+    ) -> tuple[str | None, str]:
         source = self.background_dir / background
         if source.is_symlink() or not source.is_file():
             raise BackgroundMissing("background file does not exist")
@@ -577,6 +592,8 @@ class StateStore:
         try:
             self._validate_thumbnail(cache)
         except (InvalidImage, OSError):
+            if not allow_generate:
+                return None, "deferred"
             if cache.exists() and not cache.is_symlink():
                 cache.unlink(missing_ok=True)
             self._write_thumbnail(source, cache)
@@ -606,22 +623,27 @@ class StateStore:
         name_hash = self._thumbnail_name_hash(background)
         prefix = f"thumbnail-{name_hash}-"
         try:
-            entries = list(directory.iterdir())
+            entries = os.scandir(directory)
         except OSError:
             return
-        for entry in entries:
+        with entries:
+            bounded_entries = []
+            for index, entry in enumerate(entries):
+                if index >= MAX_THUMBNAIL_CACHE_ENTRIES:
+                    break
+                bounded_entries.append(entry)
+        for entry in bounded_entries:
             if (
                 entry.name.startswith(prefix)
                 and THUMBNAIL_FILE_PATTERN.fullmatch(entry.name)
-                and entry.is_file()
-                and not entry.is_symlink()
+                and entry.is_file(follow_symlinks=False)
             ):
                 try:
-                    entry.unlink()
+                    Path(entry.path).unlink()
                 except OSError:
                     logging.getLogger(SERVICE_NAME).warning(
                         "unable to remove thumbnail cache %s",
-                        entry,
+                        entry.path,
                         exc_info=True,
                     )
 
@@ -633,52 +655,104 @@ class StateStore:
         if directory is None:
             return
         try:
-            entries = list(directory.iterdir())
+            entries = os.scandir(directory)
         except OSError:
             return
-        for entry in entries:
+        with entries:
+            bounded_entries = []
+            for index, entry in enumerate(entries):
+                if index >= MAX_THUMBNAIL_CACHE_ENTRIES:
+                    return
+                bounded_entries.append(entry)
+        for entry in bounded_entries:
             if (
                 entry.name not in expected
                 and THUMBNAIL_FILE_PATTERN.fullmatch(entry.name)
-                and entry.is_file()
-                and not entry.is_symlink()
+                and entry.is_file(follow_symlinks=False)
             ):
                 try:
-                    entry.unlink()
+                    Path(entry.path).unlink()
                 except OSError:
                     logging.getLogger(SERVICE_NAME).warning(
                         "unable to remove orphaned thumbnail cache %s",
-                        entry,
+                        entry.path,
                         exc_info=True,
                     )
 
-    def list_backgrounds(self) -> dict[str, Any]:
-        with self._lock:
-            backgrounds: list[str] = []
-            for path in self.background_dir.iterdir():
-                if path.is_symlink() or not path.is_file():
+    def _scan_background_directory(self) -> tuple[list[str], set[str], bool]:
+        backgrounds: list[str] = []
+        occupied_names: set[str] = set()
+        complete = True
+        with os.scandir(self.background_dir) as entries:
+            for index, entry in enumerate(entries):
+                if index >= MAX_BACKGROUND_DIRECTORY_ENTRIES:
+                    complete = False
+                    break
+                occupied_names.add(entry.name.casefold())
+                if not entry.is_file(follow_symlinks=False):
                     continue
                 try:
-                    backgrounds.append(validate_background_name(path.name))
+                    backgrounds.append(validate_background_name(entry.name))
                 except InvalidBackground:
                     continue
-            backgrounds.sort(
-                key=lambda name: (
-                    name.casefold() != DEFAULT_BACKGROUND.casefold(),
-                    name.casefold(),
-                    name,
-                )
+        backgrounds.sort(
+            key=lambda name: (
+                name.casefold() != DEFAULT_BACKGROUND.casefold(),
+                name.casefold(),
+                name,
             )
+        )
+        return backgrounds, occupied_names, complete
+
+    @staticmethod
+    def _prioritize_backgrounds(
+        backgrounds: list[str],
+        preferred: tuple[str, ...],
+    ) -> list[str]:
+        remaining = list(backgrounds)
+        prioritized: list[str] = []
+        for preferred_name in preferred:
+            preferred_key = preferred_name.casefold()
+            for index, background in enumerate(remaining):
+                if background.casefold() == preferred_key:
+                    prioritized.append(remaining.pop(index))
+                    break
+        prioritized.extend(remaining)
+        return prioritized
+
+    def list_backgrounds(self) -> dict[str, Any]:
+        with self._lock:
+            preferred = (
+                DEFAULT_BACKGROUND,
+                self.state["landscape"],
+                self.state["portrait"],
+            )
+        backgrounds, _, scan_complete = self._scan_background_directory()
+        total = len(backgrounds) if scan_complete else None
+        truncated = not scan_complete or len(backgrounds) > MAX_BACKGROUND_FILES
+        backgrounds = self._prioritize_backgrounds(backgrounds, preferred)[:MAX_BACKGROUND_FILES]
+        with self._thumbnail_lock:
             result: list[dict[str, str | None]] = []
-            statistics = {"generated": 0, "reused": 0, "failed": 0}
+            statistics = {"generated": 0, "reused": 0, "failed": 0, "deferred": 0}
             expected: set[str] = set()
+            generation_attempts = 0
             for background in backgrounds:
                 source = self.background_dir / background
                 try:
                     cache_name = self._thumbnail_cache_name(background, source.stat())
                     expected.add(cache_name)
-                    thumbnail, status = self._thumbnail_for_background_locked(background)
+                    allow_generate = generation_attempts < MAX_THUMBNAIL_GENERATION_ATTEMPTS
+                    thumbnail, status = self._thumbnail_for_background_locked(
+                        background,
+                        allow_generate=allow_generate,
+                    )
+                    if status == "generated":
+                        generation_attempts += 1
+                except BackgroundMissing:
+                    continue
                 except Exception:
+                    if generation_attempts < MAX_THUMBNAIL_GENERATION_ATTEMPTS:
+                        generation_attempts += 1
                     logging.getLogger(SERVICE_NAME).warning(
                         "unable to prepare thumbnail for %s",
                         background,
@@ -688,11 +762,14 @@ class StateStore:
                     status = "failed"
                 statistics[status] += 1
                 result.append({"name": background, "thumbnail": thumbnail})
-            self._cleanup_orphaned_thumbnails_locked(expected)
+            if scan_complete and not truncated:
+                self._cleanup_orphaned_thumbnails_locked(expected)
             return {
                 "version": BACKGROUND_FILES_VERSION,
                 "backgrounds": result,
                 "thumbnails": statistics,
+                "total": total,
+                "truncated": truncated,
             }
 
     def _require_background(self, name: str) -> None:
@@ -782,17 +859,21 @@ class StateStore:
                     raise
             return dict(self.state)
 
-    def _next_available_background_name(self, requested_name: str) -> str:
-        existing = {path.name.casefold() for path in self.background_dir.iterdir()}
-        if requested_name.casefold() not in existing:
-            return requested_name
+    def _next_available_background_name(
+        self,
+        requested_name: str,
+        existing: set[str],
+    ) -> str:
         requested = Path(requested_name)
-        index = 2
-        while True:
-            candidate = f"{requested.stem} ({index}){requested.suffix}"
+        for attempt in range(MAX_BACKGROUND_NAME_COLLISIONS):
+            candidate = (
+                requested_name
+                if attempt == 0
+                else f"{requested.stem} ({attempt + 1}){requested.suffix}"
+            )
             if candidate.casefold() not in existing:
                 return candidate
-            index += 1
+        raise BackgroundQuotaExceeded("unable to allocate a background filename")
 
     def _validate_uploaded_image(self, path: Path, suffix: str) -> tuple[int, int]:
         try:
@@ -827,23 +908,29 @@ class StateStore:
             raise InvalidImage("invalid upload length")
         if content_length > MAX_BACKGROUND_UPLOAD_BODY:
             raise UploadTooLarge("uploaded image is too large")
-        with self._lock:
-            final_name = self._next_available_background_name(requested_name)
-            handle, temporary_name = tempfile.mkstemp(prefix=".upload-", suffix=".tmp", dir=self.background_dir)
-            temporary = Path(temporary_name)
-            try:
-                remaining = content_length
-                with os.fdopen(handle, "wb") as output:
-                    while remaining:
-                        chunk = stream.read(min(BACKGROUND_UPLOAD_CHUNK_SIZE, remaining))
-                        if not chunk:
-                            raise InvalidImage("incomplete upload")
-                        output.write(chunk)
-                        remaining -= len(chunk)
-                    output.flush()
-                    os.fsync(output.fileno())
-                width, height = self._validate_uploaded_image(temporary, Path(final_name).suffix)
-                while True:
+        handle, temporary_name = tempfile.mkstemp(prefix=".upload-", suffix=".tmp", dir=self.background_dir)
+        temporary = Path(temporary_name)
+        try:
+            remaining = content_length
+            with os.fdopen(handle, "wb") as output:
+                while remaining:
+                    chunk = stream.read(min(BACKGROUND_UPLOAD_CHUNK_SIZE, remaining))
+                    if not chunk:
+                        raise InvalidImage("incomplete upload")
+                    output.write(chunk)
+                    remaining -= len(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            width, height = self._validate_uploaded_image(temporary, Path(requested_name).suffix)
+            with self._lock:
+                backgrounds, occupied_names, scan_complete = self._scan_background_directory()
+                if not scan_complete or len(backgrounds) >= MAX_BACKGROUND_FILES:
+                    raise BackgroundQuotaExceeded("background file quota is full")
+                for _ in range(MAX_BACKGROUND_NAME_COLLISIONS):
+                    final_name = self._next_available_background_name(
+                        requested_name,
+                        occupied_names,
+                    )
                     destination = self.background_dir / final_name
                     try:
                         # A hard-link publish is atomic and, unlike replace(), never overwrites
@@ -851,9 +938,11 @@ class StateStore:
                         os.link(temporary, destination)
                         break
                     except FileExistsError:
-                        # An external writer may have won the name after the directory scan.
-                        final_name = self._next_available_background_name(requested_name)
-                temporary.unlink()
+                        occupied_names.add(final_name.casefold())
+                else:
+                    raise BackgroundQuotaExceeded("unable to publish a unique background filename")
+            temporary.unlink()
+            with self._thumbnail_lock:
                 try:
                     self._thumbnail_for_background_locked(final_name)
                 except Exception:
@@ -862,14 +951,14 @@ class StateStore:
                         final_name,
                         exc_info=True,
                     )
-                return {
-                    "background": final_name,
-                    "size": content_length,
-                    "width": width,
-                    "height": height,
-                }
-            finally:
-                temporary.unlink(missing_ok=True)
+            return {
+                "background": final_name,
+                "size": content_length,
+                "width": width,
+                "height": height,
+            }
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _purge_expired_removal_tokens(self, now: float) -> None:
         for token, (_, expires_at) in list(self._removal_tokens.items()):
@@ -924,21 +1013,28 @@ class StateStore:
                 if path.is_symlink():
                     raise InvalidBackground("symbolic links cannot be removed")
                 path.unlink()
-                self._remove_thumbnail_caches_locked(background)
-                return "permanent", self._preferences_after_removal()
+                disposition = "permanent"
+                preferences = self._preferences_after_removal()
+            else:
+                try:
+                    send2trash(str(path))
+                except Exception:
+                    if not path.exists() and not path.is_symlink():
+                        disposition = "trash"
+                        preferences = self._preferences_after_removal()
+                    else:
+                        token = self._issue_removal_token(background, now)
+                        raise TrashUnavailable(token) from None
+                else:
+                    disposition = "trash"
+                    preferences = self._preferences_after_removal()
 
-            try:
-                send2trash(str(path))
-            except Exception:
-                if not path.exists() and not path.is_symlink():
-                    self._remove_thumbnail_caches_locked(background)
-                    return "trash", self._preferences_after_removal()
-                token = self._issue_removal_token(background, now)
-                raise TrashUnavailable(token) from None
+        with self._thumbnail_lock:
             self._remove_thumbnail_caches_locked(background)
-            return "trash", self._preferences_after_removal()
+        return disposition, preferences
 
     def rollback_uploaded_background(self, background: str, expected_sha256: str) -> None:
+        removed = False
         with self._lock:
             path = self.background_dir / background
             try:
@@ -948,9 +1044,12 @@ class StateStore:
                     and BestdoriHistoryStore._file_sha256(path) == expected_sha256
                 ):
                     path.unlink()
-                    self._remove_thumbnail_caches_locked(background)
+                    removed = True
             except OSError:
                 pass
+        if removed:
+            with self._thumbnail_lock:
+                self._remove_thumbnail_caches_locked(background)
 
 
 class _RejectBestdoriRedirects(HTTPRedirectHandler):
@@ -1749,6 +1848,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         except UploadTooLarge:
             self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "uploaded image is too large")
             return
+        except BackgroundQuotaExceeded:
+            self._error(HTTPStatus.CONFLICT, "background_file_quota_exceeded")
+            return
         except InvalidImage as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
             return
@@ -1846,6 +1948,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         except BestdoriPoolExhausted:
             self._error(HTTPStatus.CONFLICT, "bestdori_card_pool_exhausted")
+            return
+        except BackgroundQuotaExceeded:
+            self._error(HTTPStatus.CONFLICT, "background_file_quota_exceeded")
             return
         except BestdoriHistoryError:
             self.server.logger.exception("Bestdori draw history is unavailable")

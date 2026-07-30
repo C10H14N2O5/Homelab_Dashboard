@@ -2237,6 +2237,8 @@
             const serviceStatusEndpoint = new URL('/api/service-status', document.baseURI);
             const backgroundPreferencesCacheKey = 'homelab-background-state-cache-v1';
             const legacyBackgroundStorageKey = 'homelab-background';
+            const maximumBackgroundResponseBytes = 512 * 1024;
+            const maximumBackgroundInventoryItems = 512;
             const backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
             const backgroundModes = ['landscape', 'portrait'];
             const backgroundModeLabels = {
@@ -2382,6 +2384,63 @@
                 }
             }
 
+            async function readBoundedResponseText(response, maximumBytes = maximumBackgroundResponseBytes) {
+                const declaredValue = response.headers && response.headers.get
+                    ? response.headers.get('Content-Length')
+                    : null;
+                let declaredLength = null;
+                if (declaredValue !== null) {
+                    if (!/^\d+$/.test(declaredValue)) {
+                        throw new Error('响应包含无效的 Content-Length');
+                    }
+                    declaredLength = Number(declaredValue);
+                    if (!Number.isSafeInteger(declaredLength) || declaredLength > maximumBytes) {
+                        throw new Error('响应内容超过安全上限');
+                    }
+                }
+
+                if (response.body && typeof response.body.getReader === 'function') {
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder('utf-8', { fatal: true });
+                    let received = 0;
+                    let text = '';
+                    try {
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            if (!(value instanceof Uint8Array)) {
+                                throw new Error('响应流包含无效数据');
+                            }
+                            received += value.byteLength;
+                            if (received > maximumBytes) {
+                                await reader.cancel();
+                                throw new Error('响应内容超过安全上限');
+                            }
+                            text += decoder.decode(value, { stream: true });
+                        }
+                        text += decoder.decode();
+                        if (declaredLength !== null && received !== declaredLength) {
+                            throw new Error('响应长度与 Content-Length 不一致');
+                        }
+                    } catch (error) {
+                        try {
+                            await reader.cancel();
+                        } catch (cancelError) {
+                            // The response may already be closed.
+                        }
+                        throw error;
+                    } finally {
+                        if (reader.releaseLock) reader.releaseLock();
+                    }
+                    return text;
+                }
+
+                if (declaredLength === null || typeof response.text !== 'function') {
+                    throw new Error('当前浏览器无法安全读取无长度响应');
+                }
+                return response.text();
+            }
+
             function normalizeBackgroundInventory(value) {
                 if (
                     !value
@@ -2389,23 +2448,33 @@
                     || value.version !== 1
                     || !Array.isArray(value.backgrounds)
                     || value.backgrounds.length === 0
+                    || value.backgrounds.length > maximumBackgroundInventoryItems
                     || !value.thumbnails
                     || typeof value.thumbnails !== 'object'
                 ) return null;
 
                 const thumbnailStats = {};
-                for (const key of ['generated', 'reused', 'failed']) {
-                    const count = value.thumbnails[key];
+                for (const key of ['generated', 'reused', 'failed', 'deferred']) {
+                    const count = key === 'deferred' && value.thumbnails[key] === undefined
+                        ? 0
+                        : value.thumbnails[key];
                     if (!Number.isSafeInteger(count) || count < 0) return null;
                     thumbnailStats[key] = count;
                 }
+                const total = value.total === undefined ? value.backgrounds.length : value.total;
+                const truncated = value.truncated === undefined ? false : value.truncated;
+                if (
+                    (total !== null && (!Number.isSafeInteger(total) || total < value.backgrounds.length))
+                    || typeof truncated !== 'boolean'
+                ) return null;
 
                 const seenNames = new Set();
                 const backgrounds = [];
                 for (const item of value.backgrounds) {
                     if (!item || typeof item !== 'object') return null;
                     const name = normalizeBackgroundName(item.name);
-                    if (!name || seenNames.has(name)) return null;
+                    const nameKey = name && name.toLocaleLowerCase('en-US');
+                    if (!name || seenNames.has(nameKey)) return null;
 
                     const url = backgroundUrlFromName(name);
                     if (!url) return null;
@@ -2416,13 +2485,19 @@
                         if (!thumbnailUrl) return null;
                     }
 
-                    seenNames.add(name);
+                    seenNames.add(nameKey);
                     backgrounds.push({ url, thumbnailUrl });
                 }
+                if (
+                    Object.values(thumbnailStats).reduce((sum, count) => sum + count, 0)
+                    !== backgrounds.length
+                ) return null;
 
                 return {
                     backgrounds,
-                    thumbnails: thumbnailStats
+                    thumbnails: thumbnailStats,
+                    total,
+                    truncated
                 };
             }
 
@@ -3782,15 +3857,24 @@
                     }
                 });
 
-                return Array.from(merged.values()).sort((left, right) => {
-                    if (left.url.href === defaultBackground.href) return -1;
-                    if (right.url.href === defaultBackground.href) return 1;
+                const sorted = Array.from(merged.values()).sort((left, right) => {
                     return backgroundFileName(left.url).localeCompare(
                         backgroundFileName(right.url),
                         'zh-CN',
                         { numeric: true }
                     );
                 });
+                const prioritized = [];
+                const priorityUrls = [
+                    defaultBackground,
+                    currentBackground,
+                    ...backgroundModes.map((mode) => backgroundUrlForMode(mode))
+                ];
+                priorityUrls.forEach((priorityUrl) => {
+                    const index = sorted.findIndex((background) => background.url.href === priorityUrl.href);
+                    if (index >= 0) prioritized.push(sorted.splice(index, 1)[0]);
+                });
+                return prioritized.concat(sorted);
             }
 
             async function requestBackgroundInventory(controller) {
@@ -3804,7 +3888,7 @@
                     if (!response.ok) throw new Error(`背景清单接口返回 ${response.status}`);
                     let payload;
                     try {
-                        payload = await response.json();
+                        payload = JSON.parse(await readBoundedResponseText(response));
                     } catch (error) {
                         throw new Error('背景清单接口返回了非 JSON 响应');
                     }
@@ -3822,7 +3906,7 @@
                     if (!response.ok) throw new Error(`目录请求返回 ${response.status}`);
                     return {
                         response,
-                        listingText: await response.text()
+                        listingText: await readBoundedResponseText(response)
                     };
                 });
 
@@ -3911,7 +3995,14 @@
                     if (scanId !== backgroundScanSequence) return;
                     const backgrounds = mergeAndSortBackgrounds(inventory.backgrounds);
                     const counts = renderBackgroundOptions(backgrounds);
-                    const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
+                    const inventoryScope = inventory.truncated
+                        ? (
+                            inventory.total === null
+                                ? `显示前 ${counts.total} 张`
+                                : `显示 ${counts.total}/${inventory.total} 张`
+                        )
+                        : `共 ${counts.total} 张`;
+                    const inventorySummary = `${inventoryScope}：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
                     const originalFallbackCount = backgrounds.filter(
                         (background) => !background.thumbnailUrl
                     ).length;

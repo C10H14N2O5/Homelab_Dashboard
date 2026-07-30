@@ -418,6 +418,9 @@ const context = vm.createContext({
     console: { warn() {} },
     Error,
     Promise,
+    TextDecoder,
+    TextEncoder,
+    Uint8Array,
     URL,
     fetch: null,
     Image: null,
@@ -476,10 +479,12 @@ if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
 }
 vm.runInContext(
     runtimeScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
-        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
+        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, readBoundedResponseText, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
     context
 );
 context.backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
+context.maximumBackgroundResponseBytes = 512 * 1024;
+context.maximumBackgroundInventoryItems = 512;
 context.pageBase = new URL('https://home.example.test/');
 context.backgroundDirectory = new URL('backgrounds/', context.pageBase);
 context.backgroundThumbnailDirectory = new URL('thumbnails/', context.backgroundDirectory);
@@ -517,14 +522,19 @@ const normalizedInventory = context.__backgroundManagerHelpers.normalizeBackgrou
         },
         { name: 'fallback.png', thumbnail: null }
     ],
-    thumbnails: { generated: 1, reused: 1, failed: 0 }
+    thumbnails: { generated: 1, reused: 1, failed: 0, deferred: 0 },
+    total: 2,
+    truncated: false
 });
 if (!normalizedInventory
     || normalizedInventory.backgrounds.length !== 2
     || normalizedInventory.backgrounds[0].url.href !== 'https://home.example.test/backgrounds/wallpaper.jpg'
     || !normalizedInventory.backgrounds[0].thumbnailUrl
     || normalizedInventory.backgrounds[1].thumbnailUrl !== null
-    || normalizedInventory.thumbnails.generated !== 1) {
+    || normalizedInventory.thumbnails.generated !== 1
+    || normalizedInventory.thumbnails.deferred !== 0
+    || normalizedInventory.total !== 2
+    || normalizedInventory.truncated) {
     throw new Error('A valid background inventory was not normalized correctly.');
 }
 if (context.__backgroundManagerHelpers.normalizeBackgroundInventory({
@@ -537,6 +547,67 @@ if (context.__backgroundManagerHelpers.normalizeBackgroundInventory({
 })) {
     throw new Error('A background inventory containing duplicate original names was accepted.');
 }
+const tooManyBackgrounds = Array.from({ length: 513 }, (_, index) => ({
+    name: `wallpaper-${index}.jpg`,
+    thumbnail: null
+}));
+if (context.__backgroundManagerHelpers.normalizeBackgroundInventory({
+    version: 1,
+    backgrounds: tooManyBackgrounds,
+    thumbnails: { generated: 0, reused: 0, failed: 513, deferred: 0 },
+    total: 513,
+    truncated: false
+})) {
+    throw new Error('A background inventory larger than 512 items was accepted.');
+}
+
+const boundedText = await context.__backgroundManagerHelpers.readBoundedResponseText({
+    headers: { get: () => '5' },
+    body: {
+        getReader() {
+            let sent = false;
+            return {
+                async read() {
+                    if (sent) return { done: true };
+                    sent = true;
+                    return { done: false, value: new Uint8Array([104, 101, 108, 108, 111]) };
+                },
+                async cancel() {},
+                releaseLock() {}
+            };
+        }
+    }
+}, 5);
+if (boundedText !== 'hello') {
+    throw new Error('The bounded response reader did not decode a valid response.');
+}
+await expectRejection(
+    context.__backgroundManagerHelpers.readBoundedResponseText({
+        headers: { get: () => null },
+        body: {
+            getReader() {
+                let sent = false;
+                return {
+                    async read() {
+                        if (sent) return { done: true };
+                        sent = true;
+                        return { done: false, value: new Uint8Array(6) };
+                    },
+                    async cancel() {},
+                    releaseLock() {}
+                };
+            }
+        }
+    }, 5),
+    'Oversized streamed background response'
+);
+await expectRejection(
+    context.__backgroundManagerHelpers.readBoundedResponseText({
+        headers: { get: () => null },
+        text: async () => 'unbounded'
+    }, 5),
+    'Unbounded non-streaming background response'
+);
 
 const validUpload = { name: 'wallpaper.avif', size: 50 * 1024 * 1024 };
 if (context.__backgroundManagerHelpers.validateBackgroundUploadFile(validUpload) !== '') {
@@ -632,10 +703,15 @@ context.fetchWithTimeout = async (resource, options, timeout, controller, transf
     return transform({
         ok: true,
         status: 200,
-        json: async () => ({
+        headers: {
+            get: (name) => name === 'Content-Length' ? '135' : null
+        },
+        text: async () => JSON.stringify({
             version: 1,
             backgrounds: [{ name: 'wallpaper.jpg', thumbnail: null }],
-            thumbnails: { generated: 0, reused: 0, failed: 1 }
+            thumbnails: { generated: 0, reused: 0, failed: 1, deferred: 0 },
+            total: 1,
+            truncated: false
         })
     });
 };
