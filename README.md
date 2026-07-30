@@ -8,7 +8,7 @@
 | --- | --- |
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余原图由部署机器本地保存；缩略图由后端生成 |
-| 服务入口 | 11 个 HomeLab 子域名 |
+| 服务入口 | 由 `index.html` 中的服务卡片定义，并由页面自动统计 |
 | 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度搜索；默认 Bing，无 JavaScript 时仍可提交 |
 | 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
@@ -33,14 +33,16 @@ Zoraxy_StaticWebSite/
 │   ├── uninstall-state-service.ps1 # 卸载EXE自启动注册
 │   └── verify-project.ps1       # 全仓库验证入口
 ├── audits/
-│   ├── README.md                # 审计报告管理规则、编号和模板
-│   └── 2026-07-23-business-implementation-audit.md # 已关闭的历史审计
-├── requirements.txt             # 固定 PyInstaller、Pillow 和 Send2Trash 依赖
+│   ├── README.md                # 审计报告索引、管理规则和模板
+│   └── YYYY-MM-DD-*-audit.md    # 按日期归档的历次审计报告
+├── requirements.txt             # Python 构建依赖及固定版本
 ├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
 ├── CHANGELOG.md
 ├── TODO.md
 └── README.md
 ```
+
+历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
 仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
 
@@ -60,7 +62,7 @@ Zoraxy_StaticWebSite/
 │                                               -> Bestdori 固定 HTTPS API/资源
 └── POST /api/service-status               -> Python 状态服务
                                                 -> 127.0.0.1:443 Zoraxy
-                                                -> 11 个服务上游
+                                                -> 各服务卡片对应的上游
 ```
 
 API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录、配置和状态文件；Zoraxy 只在浏览器请求到达时反向代理。因此两个当前用户 Startup 入口可并行启动，不需要设置顺序。
@@ -84,7 +86,7 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标和
 
 ### 服务入口状态
 
-当前 11 张 `.service-card` 提供导航，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。页面标题、检测中数量和卡片入场动画序号均根据实际卡片集合自动生成；每次刷新只发送一次同源批量请求。最终 HTTP 状态分类如下：
+每张 `.service-card` 提供一个导航入口，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。页面标题、检测中数量和卡片入场动画序号均根据实际卡片集合自动生成；每次刷新只发送一次同源批量请求。最终 HTTP 状态分类如下：
 
 - 2xx/3xx：绿色“服务端可达”；
 - 4xx：黄色“异常 · HTTP 状态码”；
@@ -244,7 +246,7 @@ Content-Type: application/json
 
 ### 严格 v2 配置
 
-新版只接受完整的 v2 配置，v1、缺失字段和未知字段都会拒绝启动。升级时删除旧配置并重新运行首次引导：
+状态服务只接受完整的 v2 配置，v1、缺失字段和未知字段都会拒绝启动。从 v1 迁移时应删除旧配置并重新运行首次引导：
 
 ```json
 {
@@ -319,11 +321,11 @@ D:/Zoraxy/www/html/backgrounds/
 └── thumbnails/                  # 后端自动生成，可随时重建且无需备份
 ```
 
-引导会验证 `bg.jpg`、公开目录边界、回环探测入口、域名后缀和超时；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。本次 v2 升级按全新配置处理，不导入旧状态。
+引导会验证 `bg.jpg`、公开目录边界、回环探测入口、域名后缀和超时；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。从 v1 迁移到 v2 时按全新配置处理，不导入旧状态。
 
 ## 构建
 
-当前开发环境使用 Python 3.14。构建依赖固定为 PyInstaller 6.21.0、Pillow 12.3.0 和 Send2Trash 2.1.0；Bestdori HTTPS 请求使用 Python 标准库，不新增第三方依赖。三项固定依赖会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
+当前开发环境使用 Python 3.14；依赖及其固定版本以 `requirements.txt` 为准。Bestdori HTTPS 请求使用 Python 标准库，不新增第三方依赖。构建依赖会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
 
 ```powershell
 python -m venv .venv
@@ -349,13 +351,13 @@ py_compile
 ## 部署和迁移
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
-2. 停止旧后端，将新版 EXE 复制到非公开的 Zoraxy 程序目录。本次配置版本、背景状态版本和 Bestdori 抽卡历史版本均不变，不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
-3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `6`；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署 V2.5.2 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
+2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
+3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
+4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署与后端配套的 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
 5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
-6. 最后删除 11 个子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
+6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复兼容的旧 EXE、旧 JSON、旧 `index.html` 和 11 个 Host Rule 的 CORS 响应头。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版 EXE 不会使用去重记录，但不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
+若回滚到旧前端，必须同时恢复与其兼容的 EXE、JSON、`index.html` 和相关 Host Rule 配置。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -414,7 +416,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 ## 维护原则
 
 - 修改后先运行统一验证，不要跳过失败项。
-- 新增或删除服务卡片时只需维护卡片 HTML，并手动更新 README 中的当前数量和架构说明；页面数量文案、动画序号和前端验证会根据实际卡片自动适配。
+- 新增或删除服务卡片时只需维护卡片 HTML；页面数量文案、动画序号、README 概览和前端验证均不依赖手写数量。
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它原图不进入 Git，应独立备份；`backgrounds/thumbnails/` 是可再生缓存，不备份、不手工管理。
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
