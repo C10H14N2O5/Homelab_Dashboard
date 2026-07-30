@@ -9,6 +9,7 @@
 | 页面入口 | `index.html` |
 | 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余原图由部署机器本地保存；缩略图由后端生成 |
 | 服务入口 | 由 `index.html` 中的服务卡片定义，并由页面自动统计 |
+| 快捷入口 | Services / Quick Links 双频道；Quick Links 固定维护 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini |
 | 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度搜索；默认 Bing，无 JavaScript 时仍可提交 |
 | 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
@@ -83,6 +84,14 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标和
 | 百度 | `https://www.baidu.com/s` | `wd` | 国内备用 |
 
 搜索使用浏览器原生 GET 表单并在新标签页打开结果，不使用第三方搜索 API，也不调用 Dashboard Python 服务。输入期间不会发送联想或其它网络请求；页面不保存关键词、搜索记录或账号信息。`localStorage` 中只记录当前浏览器选择的引擎 ID，键名为 `homelab-search-engine-v1`；存储不可用、内容无效或 JavaScript 初始化失败时均回退到 Bing。静态 HTML 本身就是可用的 Bing 表单，因此关闭 JavaScript 后仍可搜索。空白提交不会导航，只会在当前组件内依次轮换八句轻量提示；轮换位置仅存在于当前页面会话，刷新后从第一句重新开始。
+
+### Services / Quick Links 双频道
+
+服务卡片区域默认显示 Services，不保存频道状态。标题式玻璃按钮可切换到 Quick Links；五个快捷入口依次为 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini，均使用内联 SVG、官方主页以及带 `noopener noreferrer` 的新标签页链接。Quick Links 不包含状态、副标题或探测目标，切换频道也不会新增服务状态请求；批量探测始终只读取现有 `.service-card`。
+
+宽度不小于 768px 且未启用减少动态效果时，按钮先用 800ms 向左翻面，面板延迟 200ms 后执行同向 800ms 翻面，两面保持 Services 面板的固定尺寸。窄屏下不使用 3D：按钮先淡变，120ms 后旧网格整体淡出，新频道卡片再按 DOM 顺序以 25ms 间隔逐张淡入并轻微上移。切换期间按钮保持焦点，离场面立即停止接收焦点，入场完成后才恢复交互。
+
+`prefers-reduced-motion` 下频道直接切换，不播放翻面、错峰或逐卡动画。静态 HTML 默认暴露可用的 Services 面并隐藏、隔离 Quick Links；JavaScript 不可用或频道初始化失败时仍可打开全部服务入口。
 
 ### 服务入口状态
 
@@ -393,7 +402,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、单次批量请求、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
+验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
 
 人工部署后还应检查：
 
@@ -402,6 +411,8 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 - 按 `X` 后只有精确输入大写 `Y` 并回车才会停止 API 和关闭监视器；其它输入取消，停机失败时监视器保持运行；
 - `shell:startup` 登录后显示监视器；
 - 网页可以读取和更新横竖屏背景；
+- Services / Quick Links 在桌面、平板和手机尺寸下均可双向切换；Quick Links 不触发额外状态请求，键盘焦点不会进入非活动面；
+- 系统启用减少动态效果后，频道切换应立即完成且保持可操作；
 - 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
 - 网页可以上传真实图片但不会自动切换，重名时自动编号；
 - 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；

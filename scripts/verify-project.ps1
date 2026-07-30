@@ -237,6 +237,162 @@ cards.forEach((tag, index) => {
     }
 });
 
+const quickLinkPanelMatch = html.match(/<div\b[^>]*\bid="quick-links-panel"[^>]*\bhidden[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>\s*<footer\b/);
+if (!quickLinkPanelMatch) throw new Error('Missing the hidden static Quick Links panel.');
+const quickLinkPanel = quickLinkPanelMatch[1];
+const quickLinks = [...quickLinkPanel.matchAll(/<a\b([^>]*)\bclass="quick-link-card"([^>]*)>([\s\S]*?)<\/a>/g)]
+    .map((match) => ({ tag: `<a${match[1]}class="quick-link-card"${match[2]}>`, body: match[3] }));
+const expectedQuickLinks = [
+    ['https://www.bilibili.com/', 'Bilibili'],
+    ['https://github.com/', 'GitHub'],
+    ['https://mail.google.com/', 'Gmail'],
+    ['https://chatgpt.com/', 'ChatGPT'],
+    ['https://gemini.google.com/', 'Gemini']
+];
+if (quickLinks.length !== expectedQuickLinks.length) {
+    throw new Error(`Expected ${expectedQuickLinks.length} final Quick Links cards, found ${quickLinks.length}.`);
+}
+quickLinks.forEach(({ tag, body }, index) => {
+    const [expectedHref, expectedName] = expectedQuickLinks[index];
+    if (!tag.includes(`href="${expectedHref}"`) || !tag.includes('target="_blank"')) {
+        throw new Error(`Quick Link card ${index + 1} has the wrong destination or target.`);
+    }
+    const rel = tag.match(/\brel="([^"]+)"/);
+    const tokens = rel ? rel[1].split(/\s+/) : [];
+    if (!tokens.includes('noopener') || !tokens.includes('noreferrer')) {
+        throw new Error(`Quick Link card ${index + 1} is missing safe rel tokens.`);
+    }
+    if (!body.includes(`<span class="quick-link-name">${expectedName}</span>`)
+        || !/<svg\b[^>]*\bfocusable="false"/.test(body)) {
+        throw new Error(`Quick Link card ${index + 1} is missing its expected name or inline SVG.`);
+    }
+    if (/service-state|service-desc|data-probe-url/.test(tag + body)) {
+        throw new Error(`Quick Link card ${index + 1} must not participate in service status UI or probing.`);
+    }
+});
+if (/GitHub (?:Black|Blue|White)|Gemini \u00b7|quick-gemma-gradient/.test(quickLinkPanel)) {
+    throw new Error('Unselected Stage 1A icon candidates remain in the final Quick Links panel.');
+}
+const quickLinkSvgMarkup = quickLinks.map(({ body }) => body).join('');
+if (/<(?:script|foreignObject|image)\b/i.test(quickLinkSvgMarkup)
+    || /\son[a-z]+\s*=/i.test(quickLinkSvgMarkup)
+    || /(?:href|src)\s*=\s*["'](?:https?:|\/\/|data:)/i.test(quickLinkSvgMarkup)) {
+    throw new Error('Quick Links inline SVG contains active or external content.');
+}
+const channelSwitchTag = html.match(/<button\b[^>]*\bid="channel-switch"[^>]*>/);
+if (!channelSwitchTag
+    || !/\bdisabled(?:\s|>)/.test(channelSwitchTag[0])
+    || !/\baria-pressed="false"/.test(channelSwitchTag[0])
+    || !/\baria-controls="services-panel quick-links-panel"/.test(channelSwitchTag[0])) {
+    throw new Error('The static channel switch must default to a disabled Services-safe state.');
+}
+for (const requiredId of [
+    'channel-switch-anchor',
+    'channel-switch-face-front',
+    'channel-switch-face-back',
+    'channel-switch-measure-services',
+    'channel-switch-measure-quick-links',
+    'channel-panel-rotor'
+]) {
+    if (!html.includes(`id="${requiredId}"`)) {
+        throw new Error(`Missing Stage 2 motion structure: ${requiredId}.`);
+    }
+}
+const sharedLeftFlipAnimations = html.match(/animation:\s*channel-flip-left 800ms/g) || [];
+if (!/@keyframes channel-flip-left\s*\{[^}]*rotateY\(0deg\)[\s\S]*?rotateY\(-180deg\)/.test(html)
+    || sharedLeftFlipAnimations.length !== 2
+    || !/animation:\s*channel-flip-left 800ms[^;]*both;/.test(html)
+    || !/animation:\s*channel-flip-left 800ms[^;]*200ms both;/.test(html)
+    || !/@keyframes channel-switch-expand\s*\{[\s\S]*?40%,[\s\S]*?--channel-switch-quick-links-width/.test(html)
+    || !/@keyframes channel-switch-contract\s*\{[\s\S]*?40%[^}]*--channel-switch-quick-links-width[\s\S]*?60%[^}]*--channel-switch-services-width/.test(html)
+    || !/const channelSwitchFallbackMs = 1200;/.test(html)
+    || !/\.channel-switch-face\s*\{[^}]*white-space:\s*nowrap;/.test(html)
+    || !/\.channel-motion-ready\.is-channel-resetting \.channel-switch[\s\S]*?animation:\s*none !important;[\s\S]*?transition:\s*none !important;/.test(html)) {
+    throw new Error('Stage 2R.2 must share one 800ms left flip, delay the panel by 200ms, contract at 40%-60%, and reset atomically.');
+}
+if (!/#service-count-label,[\s\S]*?\.dashboard-footer-brand,[\s\S]*?#last-checked\s*\{[^}]*transition:\s*opacity 180ms ease;/.test(html)
+    || !/#service-count-label\.is-channel-copy-exiting,[\s\S]*?#last-checked\.is-channel-copy-exiting\s*\{[^}]*opacity:\s*0;/.test(html)
+    || !/#service-count-label\.is-channel-copy-entering,[\s\S]*?#last-checked\.is-channel-copy-entering\s*\{[^}]*transition-duration:\s*240ms;/.test(html)
+    || !/function transitionChannelCopy\(note, channel\)/.test(html)
+    || !/function revealServicesFooterCopy\(\)/.test(html)) {
+    throw new Error('Stage 2R.2 must cross-fade the Hero count and both footer side labels at 180ms/240ms.');
+}
+if (!/\.refresh-button\[hidden\]\s*\{[^}]*display:\s*none;/.test(html)) {
+    throw new Error('Quick Links must visibly hide the refresh button even when its component display rule is active.');
+}
+if (!/function finishIntro\(\)\s*\{[\s\S]*?root\.classList\.remove\('intro-first', 'intro-play'\);/.test(html)
+    || !/event\.animationName === 'copy-reveal'/.test(html)
+    || !/introCleanupTimer = window\.setTimeout\(finishIntro, 1500\);/.test(html)) {
+    throw new Error('Stage 2R.2 must remove the first-intro trigger classes after the initial page reveal.');
+}
+const expectedQuickLinkNotes = [
+    '\u5927\u5bb6\u4e00\u8d77KIRAKIRA',
+    ' \u2606 ',
+    'DOKIDOKI \uff01',
+    '\u30e2\u30ab\u3061\u3083\u3093\u3084\u3063\u3061\u3083\u3046\u3088\uff5e',
+    '\u307e\u3093\u307e\u308b\u304a\u5c71\u306b\u5f69\u308a\u3092!',
+    '\u4e38\u5c71\u5f69',
+    '\u3067\u30fc\u3059!',
+    'POPIPA! PIPOPA! POPIPAPAPIPOPA!',
+    'Happy! Lucky! Smile! Yeah!!',
+    '\u3042\u306a\u305f\u9054\u3001',
+    'Roselia',
+    '\u306b\u3059\u3079\u3066\u3092\u8ced\u3051\u308b\u899a\u609f\u306f\u3042\u308b?',
+    '\u{1f91c}\u{1f62f}\u{1f446}\u3068\u270b\u{1f603}\u{1f44c}\u304c\u{1f590}\ufe0f\u{1f609}\u{1f590}\ufe0f\u308f\u{1f603}\u{1f450}\u30b0\u30eb\u30fc\u30d7\u2661',
+    '\u306a\u3093\u3067\u300c',
+    '\u6625\u65e5\u5f71',
+    '\u300d\u3084\u3063\u305f\u306e\uff1f\uff01\uff01',
+    '\u5922\u306f\u3001\u9650\u308a\u306a\u304f\u5927\u304d\u304f\uff01'
+];
+expectedQuickLinkNotes.forEach((note) => {
+    if (!html.includes(note)) throw new Error(`Missing Stage 2R Quick Links note fragment: ${note}`);
+});
+if (!/href:\s*'https:\/\/www\.bilibili\.com\/video\/BV14z42167Uj'/.test(html)
+    || !/link\.target = '_blank';/.test(html)
+    || !/link\.rel = 'noopener noreferrer';/.test(html)
+    || !/const channelNoteExitMs = 180;/.test(html)
+    || !/const channelNoteEnterMs = 240;/.test(html)) {
+    throw new Error('Stage 2R note rotation is missing its safe Haruhikage link or 180ms/240ms cross-fade.');
+}
+const servicesPanelTag = html.match(/<div\b[^>]*\bid="services-panel"[^>]*>/);
+const quickLinksPanelTag = html.match(/<div\b[^>]*\bid="quick-links-panel"[^>]*>/);
+if (!servicesPanelTag
+    || !/\baria-hidden="false"/.test(servicesPanelTag[0])
+    || !quickLinksPanelTag
+    || !/\baria-hidden="true"/.test(quickLinksPanelTag[0])
+    || !/\binert(?:\s|>)/.test(quickLinksPanelTag[0])
+    || !/\bhidden(?:\s|>)/.test(quickLinksPanelTag[0])) {
+    throw new Error('Stage 3 static fallback must expose Services and isolate the hidden Quick Links panel.');
+}
+if (!/@keyframes channel-mobile-button-exit\s*\{[\s\S]*?opacity:\s*0;[\s\S]*?translateY\(-4px\)/.test(html)
+    || !/@keyframes channel-mobile-button-enter\s*\{[\s\S]*?opacity:\s*0;[\s\S]*?translateY\(4px\)[\s\S]*?opacity:\s*1;/.test(html)
+    || !/@keyframes channel-mobile-panel-exit\s*\{[\s\S]*?opacity:\s*0;[\s\S]*?translateY\(-6px\)/.test(html)
+    || !/@keyframes channel-mobile-card-enter\s*\{[\s\S]*?opacity:\s*0;[\s\S]*?translateY\(10px\)[\s\S]*?opacity:\s*1;/.test(html)
+    || !/channel-mobile-button-exit 160ms ease both/.test(html)
+    || !/channel-mobile-button-enter 240ms ease both/.test(html)
+    || !/channel-mobile-panel-exit 180ms ease both/.test(html)
+    || !/channel-mobile-card-enter 280ms[\s\S]*?var\(--channel-card-index, 0\) \* 25ms/.test(html)
+    || !/const channelMobilePanelDelayMs = 120;/.test(html)
+    || !/const channelMobileCardStaggerMs = 25;/.test(html)) {
+    throw new Error('Stage 3 mobile motion must fade the button first, delay the grid by 120ms, and stagger cards by 25ms.');
+}
+if (!/matchMedia\('\(max-width: 767px\) and \(prefers-reduced-motion: no-preference\)'\)/.test(html)
+    || !/function setChannelPanelInteractive\(panel, interactive\)[\s\S]*?toggleAttribute\('inert', !interactive\)/.test(html)
+    || !/channelSwitch\.focus\(\{ preventScroll: true \}\)/.test(html)
+    || !/function beginMobileChannelSwitch\(channel\)/.test(html)
+    || !/function finishMobileChannelSwitch\(\)/.test(html)) {
+    throw new Error('Stage 3 mobile motion is missing reduced-motion routing, panel isolation, or focus retention.');
+}
+if (!/\.channel-motion-ready \.channel-panel-stage\s*\{[^}]*height:\s*var\(--channel-panel-height, var\(--services-panel-height, auto\)\);/.test(html)
+    || !/\.quick-links-grid\s*\{[^}]*width:\s*min\(100%, var\(--quick-links-width\)\);[^}]*justify-content:\s*center;/.test(html)
+    || !/@media \(min-width: 981px\)\s*\{[\s\S]*?\.quick-links-panel:not\(\[hidden\]\)\s*\{[^}]*min-height:\s*var\(--services-panel-height, auto\);/.test(html)
+    || !/@media \(max-width: 767px\)\s*\{[\s\S]*?\.service-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(html)) {
+    throw new Error('Final channel layout must keep the wide panel fixed and centered while preserving a natural narrow-screen grid.');
+}
+if (!/\.quick-link-name\s*\{[^}]*font-size:\s*1\.04rem;[^}]*font-weight:\s*700;[^}]*text-align:\s*center;/.test(html)) {
+    throw new Error('Quick Link names must be enlarged and centered within the space to the right of the icon.');
+}
+
 const originalLinkMatch = html.match(/<a\b[^>]*\bid="background-original-link"[^>]*>/);
 if (!originalLinkMatch) throw new Error('Missing the original-background link.');
 const originalLinkTag = originalLinkMatch[0];
@@ -1754,13 +1910,382 @@ if (!resetBlankPrevented
     throw new Error('A new search controller did not restart the empty-feedback sequence.');
 }
 
+const channelHelperStart = runtimeScript.indexOf('const serviceChannelDescription =');
+const channelHelperEnd = runtimeScript.indexOf('function setCardState(', channelHelperStart);
+if (channelHelperStart < 0 || channelHelperEnd < 0) {
+    throw new Error('Unable to extract Stage 2R channel helpers for behavior checks.');
+}
+const channelHelperSource = runtimeScript.slice(channelHelperStart, channelHelperEnd);
+if (/refreshStatuses|fetchWithTimeout|serviceStatusEndpoint/.test(channelHelperSource)) {
+    throw new Error('Channel switching must not initiate or alter service-status requests.');
+}
+function makeStageOneStyle() {
+    return {
+        properties: {},
+        setProperty(name, value) { this.properties[name] = value; },
+        removeProperty(name) { delete this.properties[name]; }
+    };
+}
+function makeClassList() {
+    const values = new Set();
+    return {
+        add(...items) { items.forEach((value) => values.add(value)); },
+        remove(...items) { items.forEach((value) => values.delete(value)); },
+        contains(value) { return values.has(value); },
+        toggle(value, force) {
+            if (force === true) values.add(value);
+            else if (force === false) values.delete(value);
+            else if (values.has(value)) values.delete(value);
+            else values.add(value);
+            return values.has(value);
+        }
+    };
+}
+function makeStageOneElement(extra = {}) {
+    return {
+        hidden: false,
+        disabled: false,
+        dataset: {},
+        attributes: {},
+        classList: makeClassList(),
+        style: makeStageOneStyle(),
+        textContent: '',
+        setAttribute(name, value) { this.attributes[name] = value; },
+        removeAttribute(name) { delete this.attributes[name]; },
+        toggleAttribute(name, force) {
+            if (force) this.attributes[name] = '';
+            else delete this.attributes[name];
+        },
+        focus(options) {
+            this.focusCalls = (this.focusCalls || 0) + 1;
+            this.lastFocusOptions = options;
+        },
+        addEventListener(name, handler) {
+            this[`${name}Handler`] = handler;
+        },
+        replaceChildren(...children) {
+            this.children = children;
+            this.textContent = children.map((child) => (
+                typeof child === 'string' ? child : child.textContent
+            )).join('');
+        },
+        ...extra
+    };
+}
+let nextChannelTimerId = 1;
+const channelTimers = new Map();
+function runChannelTimer(delay) {
+    const entry = [...channelTimers.entries()].find(([, timer]) => timer.delay === delay);
+    if (!entry) throw new Error(`Missing channel timer for ${delay}ms.`);
+    channelTimers.delete(entry[0]);
+    entry[1].callback();
+}
+const channelContext = vm.createContext({
+    Error,
+    Number,
+    console: { warn() {} },
+    document: {
+        createElement() { return makeStageOneElement(); }
+    },
+    window: {
+        getComputedStyle() { return { columnGap: '12px' }; },
+        requestAnimationFrame(callback) {
+            callback();
+            return null;
+        },
+        cancelAnimationFrame() {},
+        addEventListener() {},
+        setTimeout(callback, delay) {
+            const timerId = nextChannelTimerId++;
+            channelTimers.set(timerId, { callback, delay });
+            return timerId;
+        },
+        clearTimeout(timerId) { channelTimers.delete(timerId); }
+    }
+});
+channelContext.cards = [
+    makeStageOneElement({ getBoundingClientRect() { return { width: 180 }; } }),
+    makeStageOneElement({ getBoundingClientRect() { return { width: 180 }; } })
+];
+channelContext.quickLinks = Array.from({ length: 5 }, () => makeStageOneElement());
+channelContext.serviceCountLabel = makeStageOneElement();
+channelContext.refreshButton = makeStageOneElement();
+channelContext.lastChecked = makeStageOneElement({ textContent: 'service status' });
+channelContext.dashboard = makeStageOneElement();
+channelContext.channelSwitchAnchor = makeStageOneElement();
+channelContext.channelSwitch = makeStageOneElement({ disabled: true });
+channelContext.channelSwitchLabel = { textContent: 'Services' };
+channelContext.channelSwitchFaceFront = { textContent: 'Services' };
+channelContext.channelSwitchFaceBack = { textContent: 'Quick Links' };
+channelContext.channelSwitchMeasureServices = makeStageOneElement({
+    getBoundingClientRect() { return { width: 88 }; }
+});
+channelContext.channelSwitchMeasureQuickLinks = makeStageOneElement({
+    getBoundingClientRect() { return { width: 116 }; }
+});
+channelContext.serviceChannelNote = makeStageOneElement();
+channelContext.channelPanelStage = makeStageOneElement();
+channelContext.channelPanelRotor = makeStageOneElement();
+channelContext.servicesPanel = makeStageOneElement();
+channelContext.quickLinksPanel = makeStageOneElement({ hidden: true });
+channelContext.serviceGrid = makeStageOneElement({
+    getBoundingClientRect() { return { height: 190 }; }
+});
+channelContext.quickLinksGrid = makeStageOneElement({
+    getBoundingClientRect() { return { height: 90 }; }
+});
+channelContext.dashboardFooterBrand = makeStageOneElement({
+    textContent: 'HomeLab \u00b7 Private service gateway'
+});
+channelContext.channelMotionMedia = {
+    matches: true,
+    addEventListener(name, handler) {
+        if (name === 'change') this.changeHandler = handler;
+    }
+};
+channelContext.channelMobileMotionMedia = {
+    matches: false,
+    addEventListener(name, handler) {
+        if (name === 'change') this.changeHandler = handler;
+    }
+};
+vm.runInContext(
+    channelHelperSource
+        + '\nglobalThis.__channelHelpers = { initializeChannelSwitch, setActiveChannel, configureChannelMotion, finishChannelSwitch, renderChannelNote, quickLinkChannelNotes, restoreStaticServicesChannel };',
+    channelContext
+);
+channelContext.__channelHelpers.initializeChannelSwitch();
+if (channelContext.channelSwitch.disabled
+    || typeof channelContext.channelSwitch.clickHandler !== 'function'
+    || typeof channelContext.channelPanelRotor.animationendHandler !== 'function'
+    || !channelContext.dashboard.classList.contains('channel-motion-ready')
+    || channelContext.servicesPanel.hidden
+    || !channelContext.quickLinksPanel.hidden
+    || channelContext.serviceCountLabel.textContent !== '\u0032 \u4e2a\u5bb6\u5ead\u670d\u52a1\u5165\u53e3'
+    || channelContext.servicesPanel.attributes['aria-hidden'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'true'
+    || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.cards[1].style.properties['--channel-card-index'] !== '1'
+    || channelContext.quickLinks[4].style.properties['--channel-card-index'] !== '4') {
+    throw new Error('Stage 2R channel switch did not initialize its settled Services state.');
+}
+channelContext.channelSwitch.clickHandler();
+if (channelContext.dashboard.dataset.activeChannel !== 'services'
+    || channelContext.servicesPanel.hidden
+    || channelContext.quickLinksPanel.hidden
+    || channelContext.channelSwitch.attributes['aria-disabled'] !== 'true'
+    || !channelContext.channelSwitch.classList.contains('is-channel-flipping')
+    || !channelContext.channelSwitch.classList.contains('is-switching-to-quick-links')
+    || !channelContext.channelPanelRotor.classList.contains('is-channel-flipping')
+    || !channelContext.quickLinksPanel.classList.contains('is-channel-incoming')
+    || !channelContext.serviceChannelNote.classList.contains('is-note-exiting')
+    || !channelContext.serviceCountLabel.classList.contains('is-channel-copy-exiting')
+    || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
+    || !channelContext.lastChecked.classList.contains('is-channel-copy-exiting')
+    || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.channelSwitch.focusCalls !== 1
+    || !channelContext.channelSwitch.lastFocusOptions.preventScroll) {
+    throw new Error('Stage 2R did not prepare the same-direction Quick Links flip.');
+}
+if (channelContext.quickLinksGrid.style.properties['--quick-card-width'] !== '180px'
+    || channelContext.quickLinksGrid.style.properties['--quick-links-width'] !== '948px'
+    || channelContext.channelPanelStage.style.properties['--services-panel-height'] !== '190px'
+    || channelContext.channelPanelStage.style.properties['--channel-panel-height'] !== '190px'
+    || channelContext.channelSwitchAnchor.style.properties['--channel-switch-services-width'] !== '88px'
+    || channelContext.channelSwitchAnchor.style.properties['--channel-switch-quick-links-width'] !== '116px') {
+    throw new Error('Stage 2R layout did not preserve measured button, card, and panel dimensions.');
+}
+channelContext.channelSwitch.clickHandler();
+if (!channelContext.channelSwitch.classList.contains('is-switching-to-quick-links')
+    || [...channelTimers.values()].filter((timer) => timer.delay === 1200).length !== 1) {
+    throw new Error('Stage 2R did not ignore repeated switching or schedule its 1200ms fallback.');
+}
+runChannelTimer(180);
+if (channelContext.serviceChannelNote.textContent !== '\u5927\u5bb6\u4e00\u8d77KIRAKIRA \u2606 DOKIDOKI \uff01'
+    || !channelContext.serviceChannelNote.classList.contains('is-note-entering')
+    || channelContext.serviceCountLabel.textContent !== '\u0035 \u4e2a\u5feb\u6377\u5165\u53e3'
+    || !channelContext.serviceCountLabel.classList.contains('is-channel-copy-entering')) {
+    throw new Error('Stage 2R.2 did not reveal the first Quick Links note and Hero count after their 180ms fade-out.');
+}
+runChannelTimer(200);
+if (channelContext.dashboard.dataset.activeChannel !== 'quick-links'
+    || channelContext.channelSwitchLabel.textContent !== 'Quick Links'
+    || channelContext.channelSwitch.attributes['aria-pressed'] !== 'true'
+    || channelContext.serviceCountLabel.textContent !== '\u0035 \u4e2a\u5feb\u6377\u5165\u53e3'
+    || !channelContext.refreshButton.hidden
+    || !channelContext.dashboardFooterBrand.hidden
+    || !channelContext.lastChecked.hidden
+    || channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
+    || channelContext.lastChecked.classList.contains('is-channel-copy-exiting')) {
+    throw new Error('Stage 2R did not commit Quick Links chrome at the 200ms panel start.');
+}
+channelContext.channelPanelRotor.animationendHandler({ animationName: 'channel-flip-left' });
+if (!channelContext.servicesPanel.hidden
+    || channelContext.quickLinksPanel.hidden
+    || channelContext.channelSwitch.attributes['aria-disabled']
+    || channelContext.channelSwitch.classList.contains('is-channel-flipping')
+    || channelContext.channelSwitchFaceFront.textContent !== 'Quick Links'
+    || channelContext.channelSwitchFaceBack.textContent !== 'Services'
+    || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.servicesPanel.attributes['aria-hidden'] !== 'true'
+    || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || channelContext.channelSwitch.focusCalls !== 2
+    || channelTimers.size !== 0) {
+    throw new Error('Stage 2R did not normalize the completed Quick Links flip without residual state.');
+}
+channelContext.channelSwitch.clickHandler();
+if (!channelContext.channelSwitch.classList.contains('is-switching-to-services')
+    || !channelContext.channelPanelRotor.classList.contains('is-channel-flipping')
+    || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
+    || !channelContext.lastChecked.classList.contains('is-channel-copy-exiting')) {
+    throw new Error('Stage 2R Services return did not reuse the same left-flip animation.');
+}
+runChannelTimer(180);
+if (channelContext.serviceChannelNote.textContent
+        !== '\u72b6\u6001\u8868\u793a\u5165\u53e3\u8282\u70b9\u7ecf Zoraxy \u5230\u4e0a\u6e38\u7684\u670d\u52a1\u7aef\u94fe\u8def\uff0c\u4e0d\u4ee3\u8868\u5e94\u7528\u5185\u90e8\u5065\u5eb7\u3002'
+    || channelContext.serviceCountLabel.textContent !== '\u0032 \u4e2a\u5bb6\u5ead\u670d\u52a1\u5165\u53e3'
+    || !channelContext.serviceCountLabel.classList.contains('is-channel-copy-entering')) {
+    throw new Error('Stage 2R.2 did not restore the Services description and Hero count through the shared fade.');
+}
+runChannelTimer(200);
+if (channelContext.dashboardFooterBrand.hidden
+    || channelContext.lastChecked.hidden
+    || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-entering')
+    || !channelContext.lastChecked.classList.contains('is-channel-copy-entering')
+    || channelContext.dashboardFooterBrand.textContent !== 'HomeLab \u00b7 Private service gateway'
+    || channelContext.lastChecked.textContent !== 'service status') {
+    throw new Error('Stage 2R.2 did not restore both footer side labels through a 240ms fade without overwriting status text.');
+}
+channelContext.channelPanelRotor.animationendHandler({ animationName: 'channel-flip-left' });
+if (channelContext.serviceCountLabel.classList.contains('is-channel-copy-entering')
+    || channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-entering')
+    || channelContext.lastChecked.classList.contains('is-channel-copy-entering')) {
+    throw new Error('Stage 2R.2 left auxiliary copy fade classes behind after the Services flip.');
+}
+channelContext.channelSwitch.clickHandler();
+runChannelTimer(180);
+if (channelContext.serviceChannelNote.textContent !== '\u30e2\u30ab\u3061\u3083\u3093\u3084\u3063\u3061\u3083\u3046\u3088\uff5e') {
+    throw new Error('Stage 2R Quick Links notes did not advance only on the next Quick Links entry.');
+}
+runChannelTimer(200);
+channelContext.channelPanelRotor.animationendHandler({ animationName: 'channel-flip-left' });
+const haruhikageNote = channelContext.__channelHelpers.quickLinkChannelNotes[7];
+channelContext.__channelHelpers.renderChannelNote(haruhikageNote);
+const haruhikageLink = channelContext.serviceChannelNote.children[1];
+if (haruhikageLink.textContent !== '\u6625\u65e5\u5f71'
+    || haruhikageLink.href !== 'https://www.bilibili.com/video/BV14z42167Uj'
+    || haruhikageLink.target !== '_blank'
+    || haruhikageLink.rel !== 'noopener noreferrer') {
+    throw new Error('Stage 2R Haruhikage note link did not retain its exact safe destination.');
+}
+channelContext.channelMotionMedia.matches = false;
+channelContext.channelMobileMotionMedia.matches = true;
+channelContext.__channelHelpers.configureChannelMotion();
+if (channelContext.dashboard.classList.contains('channel-motion-ready')
+    || !channelContext.dashboard.classList.contains('channel-mobile-motion-ready')) {
+    throw new Error('Stage 3 did not select the mobile motion path below 768px.');
+}
+channelContext.channelSwitch.clickHandler();
+if (!channelContext.dashboard.classList.contains('is-mobile-channel-switching')
+    || !channelContext.channelSwitch.classList.contains('is-mobile-channel-fading-out')
+    || channelContext.quickLinksPanel.hidden
+    || !channelContext.servicesPanel.hidden
+    || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')) {
+    throw new Error('Stage 3 mobile switching did not immediately isolate both channel panels and fade the button.');
+}
+channelContext.channelSwitch.clickHandler();
+if ([...channelTimers.values()].filter((timer) => timer.delay === 1200).length !== 1) {
+    throw new Error('Stage 3 mobile switching did not ignore a repeated click.');
+}
+runChannelTimer(120);
+if (!channelContext.quickLinksPanel.classList.contains('is-mobile-channel-outgoing')) {
+    throw new Error('Stage 3 mobile outgoing grid did not begin its fade after 120ms.');
+}
+runChannelTimer(160);
+if (!channelContext.channelSwitch.classList.contains('is-mobile-channel-fading-in')
+    || !channelContext.channelSwitch.classList.contains('is-mobile-target-services')
+    || channelContext.channelSwitchFaceFront.textContent !== 'Services') {
+    throw new Error('Stage 3 mobile button did not swap labels while transparent.');
+}
+runChannelTimer(180);
+runChannelTimer(200);
+runChannelTimer(300);
+if (!channelContext.quickLinksPanel.hidden
+    || channelContext.servicesPanel.hidden
+    || !channelContext.servicesPanel.classList.contains('is-mobile-channel-incoming')
+    || channelContext.servicesPanel.attributes['aria-hidden'] !== 'true'
+    || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')) {
+    throw new Error('Stage 3 mobile incoming cards became interactive before their staggered entrance completed.');
+}
+runChannelTimer(605);
+if (channelContext.dashboard.dataset.activeChannel !== 'services'
+    || channelContext.servicesPanel.hidden
+    || !channelContext.quickLinksPanel.hidden
+    || channelContext.servicesPanel.attributes['aria-hidden'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.channelSwitch.attributes['aria-disabled']
+    || channelContext.dashboard.classList.contains('is-mobile-channel-switching')
+    || channelContext.channelSwitch.focusCalls !== 8
+    || channelTimers.size !== 0) {
+    throw new Error('Stage 3 mobile Services entrance did not settle into one interactive active panel.');
+}
+channelContext.channelSwitch.clickHandler();
+runChannelTimer(120);
+runChannelTimer(160);
+runChannelTimer(180);
+runChannelTimer(200);
+runChannelTimer(300);
+if (!channelContext.quickLinksPanel.classList.contains('is-mobile-channel-incoming')
+    || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'true'
+    || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')) {
+    throw new Error('Stage 3 mobile Quick Links cards were focusable during their staggered entrance.');
+}
+runChannelTimer(680);
+if (channelContext.dashboard.dataset.activeChannel !== 'quick-links'
+    || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.channelSwitch.focusCalls !== 10
+    || channelTimers.size !== 0) {
+    throw new Error('Stage 3 mobile Quick Links entrance did not restore interaction after its last card.');
+}
+channelContext.channelMobileMotionMedia.matches = false;
+channelContext.__channelHelpers.configureChannelMotion();
+channelContext.channelSwitch.clickHandler();
+if (channelContext.servicesPanel.hidden
+    || !channelContext.quickLinksPanel.hidden
+    || channelContext.dashboard.classList.contains('channel-motion-ready')
+    || channelContext.dashboard.classList.contains('channel-mobile-motion-ready')
+    || channelContext.servicesPanel.attributes['aria-hidden'] !== 'false'
+    || Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || channelTimers.size !== 0) {
+    throw new Error('Stage 3 reduced-motion fallback did not remain an instant accessible channel switch.');
+}
+channelContext.__channelHelpers.restoreStaticServicesChannel();
+if (!channelContext.channelSwitch.disabled
+    || channelContext.dashboard.dataset.activeChannel !== 'services'
+    || channelContext.quickLinksPanel.hidden !== true
+    || channelContext.serviceChannelNote.textContent
+        !== '\u72b6\u6001\u8868\u793a\u5165\u53e3\u8282\u70b9\u7ecf Zoraxy \u5230\u4e0a\u6e38\u7684\u670d\u52a1\u7aef\u94fe\u8def\uff0c\u4e0d\u4ee3\u8868\u5e94\u7528\u5185\u90e8\u5065\u5eb7\u3002') {
+    throw new Error('Stage 2R JavaScript failure fallback did not preserve static Services.');
+}
+
 const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
 const serviceHelperEnd = runtimeScript.indexOf('initializeServiceCards();', serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
     throw new Error('Unable to extract service status helpers for behavior checks.');
 }
+const serviceHelperSource = runtimeScript.slice(serviceHelperStart, serviceHelperEnd);
+if (!/const targets = cards\.map\(\(card\) => card\.dataset\.probeUrl \|\| card\.href\);/.test(serviceHelperSource)
+    || /\bquickLinks\b/.test(serviceHelperSource)) {
+    throw new Error('Service probing must continue to derive its batch exclusively from service cards.');
+}
 vm.runInContext(
-    runtimeScript.slice(serviceHelperStart, serviceHelperEnd)
+    serviceHelperSource
         + '\nglobalThis.__serviceHelpers = { initializeServiceCards, classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses };',
     context
 );

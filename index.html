@@ -527,12 +527,123 @@
             gap: 1rem;
         }
 
-        .dashboard-title {
-            margin: 0;
+        .dashboard-channel-copy {
+            min-width: 0;
+        }
+
+        .channel-switch-anchor {
+            --channel-switch-services-width: 5.75rem;
+            --channel-switch-quick-links-width: 7.5rem;
+            position: relative;
+            width: var(--channel-switch-services-width);
+            height: 2.35rem;
             font-size: 0.76rem;
             font-weight: 700;
             letter-spacing: 0.17em;
+            line-height: 1;
             text-transform: uppercase;
+            perspective: 520px;
+        }
+
+        .channel-switch {
+            position: absolute;
+            inset: 0 auto auto 50%;
+            width: var(--channel-switch-services-width);
+            min-height: 2.35rem;
+            padding: 0;
+            border: 0;
+            color: var(--text);
+            background: transparent;
+            cursor: pointer;
+            font: inherit;
+            letter-spacing: inherit;
+            text-transform: inherit;
+            transform: translateX(-50%);
+        }
+
+        .dashboard[data-active-channel="quick-links"] .channel-switch {
+            width: var(--channel-switch-quick-links-width);
+        }
+
+        .channel-switch-rotor {
+            position: absolute;
+            inset: 0;
+            display: block;
+            transform-style: preserve-3d;
+        }
+
+        .channel-switch-face {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.52rem 0.76rem;
+            border: 1px solid var(--line);
+            border-radius: 0.78rem;
+            background: var(--panel);
+            box-shadow: 0 10px 28px rgba(2, 8, 23, 0.2);
+            -webkit-backdrop-filter: blur(18px) saturate(125%);
+            backdrop-filter: blur(18px) saturate(125%);
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            white-space: nowrap;
+            transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+        }
+
+        .channel-switch-face-back {
+            transform: rotateY(180deg);
+        }
+
+        .channel-switch-measure {
+            position: absolute;
+            inset: 0 auto auto 0;
+            width: max-content;
+            min-height: 2.35rem;
+            padding: 0.52rem 0.76rem;
+            border: 1px solid transparent;
+            font: inherit;
+            letter-spacing: inherit;
+            line-height: inherit;
+            text-transform: inherit;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .channel-motion-ready .channel-switch.is-switching-to-quick-links {
+            animation: channel-switch-expand 800ms cubic-bezier(0.22, 0.75, 0.2, 1) both;
+        }
+
+        .channel-motion-ready .channel-switch.is-switching-to-services {
+            animation: channel-switch-contract 800ms cubic-bezier(0.22, 0.75, 0.2, 1) both;
+        }
+
+        .channel-motion-ready .channel-switch.is-channel-flipping .channel-switch-rotor {
+            transform-origin: center center;
+            animation: channel-flip-left 800ms cubic-bezier(0.22, 0.75, 0.2, 1) both;
+        }
+
+        .channel-motion-ready.is-channel-resetting .channel-switch,
+        .channel-motion-ready.is-channel-resetting .channel-switch-rotor,
+        .channel-motion-ready.is-channel-resetting .channel-panel-rotor {
+            animation: none !important;
+            transition: none !important;
+        }
+
+        .channel-switch:hover:not(:disabled):not([aria-disabled="true"]) .channel-switch-face {
+            color: #ffffff;
+            border-color: var(--line-strong);
+            background: var(--panel-hover);
+            box-shadow: 0 14px 34px rgba(2, 8, 23, 0.25), 0 0 0 1px rgba(56, 189, 248, 0.08);
+        }
+
+        .channel-switch:active:not(:disabled):not([aria-disabled="true"]) .channel-switch-face {
+            box-shadow: 0 8px 20px rgba(2, 8, 23, 0.18);
+        }
+
+        .channel-switch:disabled,
+        .channel-switch[aria-disabled="true"] {
+            cursor: default;
         }
 
         .dashboard-note {
@@ -540,6 +651,50 @@
             color: var(--muted);
             font-size: 0.76rem;
             line-height: 1.5;
+            opacity: 1;
+            transition: opacity 180ms ease;
+        }
+
+        .dashboard-note.is-note-exiting {
+            opacity: 0;
+        }
+
+        .dashboard-note.is-note-entering {
+            transition-duration: 240ms;
+        }
+
+        #service-count-label,
+        .dashboard-footer-brand,
+        #last-checked {
+            opacity: 1;
+            transition: opacity 180ms ease;
+        }
+
+        #service-count-label.is-channel-copy-exiting,
+        .dashboard-footer-brand.is-channel-copy-exiting,
+        #last-checked.is-channel-copy-exiting {
+            opacity: 0;
+        }
+
+        #service-count-label.is-channel-copy-entering,
+        .dashboard-footer-brand.is-channel-copy-entering,
+        #last-checked.is-channel-copy-entering {
+            transition-duration: 240ms;
+        }
+
+        .dashboard-note a {
+            color: inherit;
+            font: inherit;
+            text-decoration-color: rgba(148, 163, 184, 0.72);
+            text-decoration-thickness: 1px;
+            text-underline-offset: 0.16em;
+            transition: color 160ms ease, text-decoration-color 160ms ease;
+        }
+
+        .dashboard-note a:hover,
+        .dashboard-note a:focus-visible {
+            color: var(--text);
+            text-decoration-color: var(--accent);
         }
 
         .refresh-button {
@@ -576,6 +731,10 @@
             opacity: 0.72;
         }
 
+        .refresh-button[hidden] {
+            display: none;
+        }
+
         .refresh-button svg {
             width: 1rem;
             height: 1rem;
@@ -586,13 +745,80 @@
             animation: spin 800ms linear infinite;
         }
 
+        .channel-panel-stage {
+            width: 100%;
+        }
+
+        .channel-panel-rotor {
+            width: 100%;
+        }
+
+        .channel-panel[hidden] {
+            display: none !important;
+        }
+
+        .channel-motion-ready .channel-panel-stage {
+            height: var(--channel-panel-height, var(--services-panel-height, auto));
+            perspective: 1600px;
+        }
+
+        .channel-motion-ready .channel-panel-rotor {
+            position: relative;
+            height: 100%;
+            transform-style: preserve-3d;
+        }
+
+        .channel-motion-ready .channel-panel-rotor.is-channel-flipping {
+            transform-origin: center center;
+            animation: channel-flip-left 800ms cubic-bezier(0.22, 0.75, 0.2, 1) 200ms both;
+        }
+
+        .channel-motion-ready .channel-panel {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            min-height: 100%;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            pointer-events: none;
+        }
+
+        .channel-motion-ready .channel-panel.is-channel-incoming {
+            transform: rotateY(180deg);
+        }
+
+        .channel-motion-ready .channel-panel.is-channel-active {
+            pointer-events: auto;
+        }
+
+        .channel-motion-ready.is-channel-switching .channel-panel {
+            pointer-events: none;
+        }
+
         .service-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(174px, 1fr));
             gap: 0.78rem;
         }
 
-        .service-card {
+        .quick-links-panel:not([hidden]) {
+            display: grid;
+            align-items: center;
+        }
+
+        .quick-links-grid {
+            --quick-card-width: 174px;
+            --quick-links-width: 100%;
+            width: min(100%, var(--quick-links-width));
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--quick-card-width)), var(--quick-card-width)));
+            justify-content: center;
+            gap: 0.78rem;
+        }
+
+        .service-card,
+        .quick-link-card {
             position: relative;
             min-width: 0;
             min-height: 5.7rem;
@@ -613,7 +839,8 @@
             transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
         }
 
-        .service-card::after {
+        .service-card::after,
+        .quick-link-card::after {
             content: "";
             position: absolute;
             inset: 0;
@@ -623,7 +850,8 @@
             transition: opacity 220ms ease;
         }
 
-        .service-card:hover {
+        .service-card:hover,
+        .quick-link-card:hover {
             z-index: 1;
             transform: translateY(-4px);
             border-color: var(--line-strong);
@@ -631,21 +859,26 @@
             box-shadow: 0 20px 45px rgba(2, 8, 23, 0.28), 0 0 0 1px rgba(56, 189, 248, 0.08);
         }
 
-        .service-card:hover::after {
+        .service-card:hover::after,
+        .quick-link-card:hover::after {
             opacity: 1;
         }
 
-        .service-card:active {
+        .service-card:active,
+        .quick-link-card:active {
             transform: translateY(-1px) scale(0.99);
         }
 
         .service-card:focus-visible,
+        .quick-link-card:focus-visible,
+        .channel-switch:focus-visible,
         .refresh-button:focus-visible {
             outline: 3px solid rgba(125, 211, 252, 0.9);
             outline-offset: 3px;
         }
 
-        .service-icon {
+        .service-icon,
+        .quick-link-icon {
             width: 2.65rem;
             height: 2.65rem;
             display: grid;
@@ -657,7 +890,8 @@
             transition: color 220ms ease, border-color 220ms ease, transform 220ms ease, background-color 220ms ease;
         }
 
-        .service-card:hover .service-icon {
+        .service-card:hover .service-icon,
+        .quick-link-card:hover .quick-link-icon {
             color: #bae6fd;
             border-color: rgba(125, 211, 252, 0.38);
             background: rgba(14, 116, 144, 0.22);
@@ -674,19 +908,40 @@
             stroke-linejoin: round;
         }
 
+        .quick-link-icon {
+            color: #f8fafc;
+        }
+
+        .quick-link-icon svg {
+            width: 1.55rem;
+            height: 1.55rem;
+            display: block;
+        }
+
         .service-copy {
             min-width: 0;
             display: grid;
             gap: 0.34rem;
         }
 
-        .service-name {
+        .service-name,
+        .quick-link-name {
             min-width: 0;
             overflow-wrap: anywhere;
             font-size: 0.93rem;
             font-weight: 670;
             line-height: 1.15;
             letter-spacing: -0.01em;
+        }
+
+        .quick-link-name {
+            display: -webkit-box;
+            overflow: hidden;
+            font-size: 1.04rem;
+            font-weight: 700;
+            text-align: center;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
         }
 
         .service-meta {
@@ -763,6 +1018,15 @@
 
         #last-checked {
             text-align: right;
+        }
+
+        .dashboard[data-active-channel="quick-links"] .dashboard-footer-brand,
+        .dashboard[data-active-channel="quick-links"] #last-checked {
+            display: none;
+        }
+
+        .dashboard[data-active-channel="quick-links"] .background-picker-button {
+            grid-column: 2;
         }
 
         .background-picker-button {
@@ -1536,6 +1800,44 @@
             to { opacity: 1; }
         }
 
+        @keyframes channel-flip-left {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(-180deg); }
+        }
+
+        @keyframes channel-switch-expand {
+            from { width: var(--channel-switch-services-width); }
+            40%,
+            to { width: var(--channel-switch-quick-links-width); }
+        }
+
+        @keyframes channel-switch-contract {
+            from,
+            40% { width: var(--channel-switch-quick-links-width); }
+            60%,
+            to { width: var(--channel-switch-services-width); }
+        }
+
+        @keyframes channel-mobile-button-exit {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-4px); }
+        }
+
+        @keyframes channel-mobile-button-enter {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes channel-mobile-panel-exit {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-6px); }
+        }
+
+        @keyframes channel-mobile-card-enter {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         @keyframes search-empty-nudge {
             0%,
             100% { transform: translateX(0); }
@@ -1554,6 +1856,12 @@
 
             .service-grid {
                 grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+            }
+        }
+
+        @media (min-width: 981px) {
+            .quick-links-panel:not([hidden]) {
+                min-height: var(--services-panel-height, auto);
             }
         }
 
@@ -1621,12 +1929,44 @@
                 align-items: center;
             }
 
+            .channel-mobile-motion-ready .channel-switch.is-mobile-channel-fading-out .channel-switch-rotor {
+                animation: channel-mobile-button-exit 160ms ease both;
+            }
+
+            .channel-mobile-motion-ready .channel-switch.is-mobile-channel-fading-in .channel-switch-rotor {
+                animation: channel-mobile-button-enter 240ms ease both;
+            }
+
+            .channel-mobile-motion-ready .channel-switch.is-mobile-target-quick-links {
+                width: var(--channel-switch-quick-links-width);
+            }
+
+            .channel-mobile-motion-ready .channel-switch.is-mobile-target-services {
+                width: var(--channel-switch-services-width);
+            }
+
+            .channel-mobile-motion-ready .channel-panel.is-mobile-channel-outgoing > .service-grid,
+            .channel-mobile-motion-ready .channel-panel.is-mobile-channel-outgoing > .quick-links-grid {
+                animation: channel-mobile-panel-exit 180ms ease both;
+            }
+
+            .channel-mobile-motion-ready .channel-panel.is-mobile-channel-incoming .service-card,
+            .channel-mobile-motion-ready .channel-panel.is-mobile-channel-incoming .quick-link-card {
+                animation: channel-mobile-card-enter 280ms cubic-bezier(0.2, 0.8, 0.2, 1)
+                    calc(var(--channel-card-index, 0) * 25ms) both;
+            }
+
+            .channel-mobile-motion-ready.is-mobile-channel-switching .channel-panel {
+                pointer-events: none;
+            }
+
             .service-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 0.7rem;
             }
 
-            .service-card {
+            .service-card,
+            .quick-link-card {
                 min-height: 6.25rem;
                 grid-template-columns: 2.35rem minmax(0, 1fr);
                 gap: 0.65rem;
@@ -1636,7 +1976,8 @@
                 backdrop-filter: none;
             }
 
-            .service-icon {
+            .service-icon,
+            .quick-link-icon {
                 width: 2.35rem;
                 height: 2.35rem;
             }
@@ -1667,6 +2008,16 @@
                 margin-block: 0.2rem;
             }
 
+            .dashboard[data-active-channel="quick-links"] .dashboard-footer {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+                align-items: center;
+            }
+
+            .dashboard[data-active-channel="quick-links"] .background-picker-button {
+                align-self: center;
+            }
+
             html.intro-first .background-layer,
             html.intro-first .shade-layer {
                 animation: none !important;
@@ -1685,12 +2036,14 @@
                 grid-template-columns: 1fr;
             }
 
-            .service-card {
+            .service-card,
+            .quick-link-card {
                 min-height: 5.3rem;
                 grid-template-columns: 2.55rem minmax(0, 1fr);
             }
 
-            .service-icon {
+            .service-icon,
+            .quick-link-icon {
                 width: 2.55rem;
                 height: 2.55rem;
             }
@@ -1928,11 +2281,21 @@
             </div>
         </header>
 
-        <section class="dashboard" aria-labelledby="service-heading">
+        <section class="dashboard" id="dashboard" data-active-channel="services" aria-label="Homepage navigation">
             <div class="dashboard-head">
-                <div>
-                    <h2 class="dashboard-title" id="service-heading">Services</h2>
-                    <p class="dashboard-note">状态表示入口节点经 Zoraxy 到上游的服务端链路，不代表应用内部健康。</p>
+                <div class="dashboard-channel-copy">
+                    <div class="channel-switch-anchor" id="channel-switch-anchor">
+                        <button class="channel-switch" id="channel-switch" type="button" aria-controls="services-panel quick-links-panel" aria-pressed="false" aria-label="切换到 Quick Links" disabled>
+                            <span class="channel-switch-rotor" aria-hidden="true">
+                                <span class="channel-switch-face channel-switch-face-front" id="channel-switch-face-front">Services</span>
+                                <span class="channel-switch-face channel-switch-face-back" id="channel-switch-face-back">Quick Links</span>
+                            </span>
+                            <span class="sr-only" id="channel-switch-label">Services</span>
+                        </button>
+                        <span class="channel-switch-measure" id="channel-switch-measure-services" aria-hidden="true">Services</span>
+                        <span class="channel-switch-measure" id="channel-switch-measure-quick-links" aria-hidden="true">Quick Links</span>
+                    </div>
+                    <p class="dashboard-note" id="service-channel-note">状态表示入口节点经 Zoraxy 到上游的服务端链路，不代表应用内部健康。</p>
                 </div>
                 <button class="refresh-button" id="refresh-status" type="button" aria-busy="false">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1942,7 +2305,10 @@
                 </button>
             </div>
 
-            <div class="service-grid" id="service-grid">
+            <div class="channel-panel-stage" id="channel-panel-stage">
+                <div class="channel-panel-rotor" id="channel-panel-rotor">
+                    <div class="channel-panel services-panel is-channel-active" id="services-panel" data-channel-panel="services" aria-hidden="false">
+                    <div class="service-grid" id="service-grid">
                 <a href="https://nas.home.c10h14n2o5.com/" class="service-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Synology NAS，数据存储中心">
                     <span class="service-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></svg>
@@ -2052,10 +2418,53 @@
                         <span class="service-meta"><span class="service-desc">带外管理</span><span class="service-state" data-state="checking"><span class="state-dot"></span><span class="state-label">检测中</span></span></span>
                     </span>
                 </a>
+                    </div>
+                </div>
+
+                    <div class="channel-panel quick-links-panel" id="quick-links-panel" data-channel-panel="quick-links" aria-hidden="true" inert hidden>
+                    <div class="quick-links-grid" id="quick-links-grid">
+                        <a href="https://www.bilibili.com/" class="quick-link-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Bilibili">
+                            <span class="quick-link-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" focusable="false"><path clip-rule="evenodd" d="M4.977 3.561a1.31 1.31 0 111.818-1.884l2.828 2.728c.08.078.149.163.205.254h4.277a1.32 1.32 0 01.205-.254l2.828-2.728a1.31 1.31 0 011.818 1.884L17.82 4.66h.848A5.333 5.333 0 0124 9.992v7.34a5.333 5.333 0 01-5.333 5.334H5.333A5.333 5.333 0 010 17.333V9.992a5.333 5.333 0 015.333-5.333h.781L4.977 3.56zm.356 3.67a2.667 2.667 0 00-2.666 2.667v7.529a2.667 2.667 0 002.666 2.666h13.334a2.667 2.667 0 002.666-2.666v-7.53a2.667 2.667 0 00-2.666-2.666H5.333zm1.334 5.192a1.333 1.333 0 112.666 0v1.192a1.333 1.333 0 11-2.666 0v-1.192zM16 11.09c-.736 0-1.333.597-1.333 1.333v1.192a1.333 1.333 0 102.666 0v-1.192c0-.736-.597-1.333-1.333-1.333z" fill="#FB7299" fill-rule="evenodd"/></svg>
+                            </span>
+                            <span class="quick-link-name">Bilibili</span>
+                        </a>
+
+                        <a href="https://github.com/" class="quick-link-card" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub">
+                            <span class="quick-link-icon" aria-hidden="true">
+                                <svg viewBox="0 0 12 12" focusable="false"><path fill="currentColor" d="M6 0a6 6 0 110 12A6 6 0 016 0zm0 .98C3.243.98 1 3.223 1 6a5.02 5.02 0 003.437 4.77.594.594 0 00.045.005c.203.01.279-.129.279-.25l-.007-.854c-1.39.303-1.684-.674-1.684-.674-.227-.58-.555-.734-.555-.734-.454-.312.034-.306.034-.306.365.026.604.288.708.43l.058.088c.446.767 1.17.546 1.455.418.046-.325.174-.546.317-.672-1.11-.127-2.277-.558-2.277-2.482 0-.548.195-.996.515-1.348l-.03-.085c-.064-.203-.152-.658.079-1.244l.04-.007c.124-.016.548-.013 1.335.522A4.77 4.77 0 016 3.408c.425.002.853.058 1.252.17.955-.65 1.374-.516 1.374-.516.272.692.1 1.202.05 1.33.32.35.513.799.513 1.347 0 1.93-1.169 2.354-2.283 2.478.18.155.34.462.34.93l-.006 1.378c0 .13.085.282.323.245A5.02 5.02 0 0011 6C11 3.223 8.757.98 6 .98z"/></svg>
+                            </span>
+                            <span class="quick-link-name">GitHub</span>
+                        </a>
+
+                        <a href="https://mail.google.com/" class="quick-link-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Gmail">
+                            <span class="quick-link-icon" aria-hidden="true">
+                                <svg viewBox="0 0 32 32" focusable="false"><path d="m16.58 19.107-12.69-8.076A3 3 0 017.111 5.97l9.31 5.924 8.359-5.851a3 3 0 013.44 4.915z" fill="#ea4435"/><path d="M25.5 5.5h4v18a3 3 0 01-3 3 3 3 0 01-3-3v-16a2 2 0 012-2z" fill="#00ac47" transform="rotate(180 26.5 16)"/><path d="M29.456 8.066c-.009-.06-.008-.122-.02-.182-.02-.092-.055-.177-.083-.265-.028-.102-.057-.203-.095-.3-.02-.047-.051-.089-.074-.135a2.984 2.984 0 00-.215-.384c-.04-.058-.09-.108-.135-.163a3.028 3.028 0 00-.245-.284c-.067-.065-.143-.119-.215-.177a3.02 3.02 0 00-.24-.186c-.079-.052-.166-.092-.25-.136-.088-.046-.175-.096-.267-.133-.089-.036-.184-.059-.277-.086s-.185-.06-.28-.078a3.054 3.054 0 00-.357-.036c-.076-.005-.151-.018-.227-.018a2.978 2.978 0 00-.422.043c-.056.008-.113.008-.169.019a3.211 3.211 0 00-.564.178c-.052.022-.097.055-.147.08A2.901 2.901 0 0023.5 8.5v5.762l4.72-3.304a2.888 2.888 0 001.236-2.892z" fill="#ffba00"/><path d="M5.5 5.5a3 3 0 013 3v18h-4a2 2 0 01-2-2v-16a3 3 0 013-3z" fill="#4285f4"/><path d="M2.544 8.066c.009-.06.008-.122.02-.182.02-.092.055-.177.083-.265.028-.102.057-.203.096-.3.02-.047.05-.089.073-.135.06-.134.13-.262.216-.384.04-.058.09-.108.134-.163.074-.101.156-.196.245-.284.067-.065.143-.119.215-.177.076-.067.156-.129.24-.186.08-.052.166-.092.25-.136.088-.046.175-.096.267-.133.089-.036.184-.059.277-.086s.185-.06.28-.078c.118-.02.238-.032.357-.036.076-.005.151-.018.227-.018.141.003.282.017.422.043.056.008.113.008.169.019.097.023.192.053.286.089.095.025.188.055.279.089.051.022.096.055.146.08.13.059.255.129.374.21A2.994 2.994 0 018.5 8.5v5.762l-4.72-3.304a2.889 2.889 0 01-1.236-2.892z" fill="#c52528"/></svg>
+                            </span>
+                            <span class="quick-link-name">Gmail</span>
+                        </a>
+
+                        <a href="https://chatgpt.com/" class="quick-link-card" target="_blank" rel="noopener noreferrer" aria-label="打开 ChatGPT">
+                            <span class="quick-link-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>
+                            </span>
+                            <span class="quick-link-name">ChatGPT</span>
+                        </a>
+
+                        <a href="https://gemini.google.com/" class="quick-link-card" target="_blank" rel="noopener noreferrer" aria-label="打开 Gemini">
+                            <span class="quick-link-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" focusable="false"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="#3186FF"/><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="url(#quick-gemini-green)"/><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="url(#quick-gemini-red)"/><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="url(#quick-gemini-yellow)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="quick-gemini-green" x1="7" x2="11" y1="15.5" y2="12"><stop stop-color="#08B962"/><stop offset="1" stop-color="#08B962" stop-opacity="0"/></linearGradient><linearGradient gradientUnits="userSpaceOnUse" id="quick-gemini-red" x1="8" x2="11.5" y1="5.5" y2="11"><stop stop-color="#F94543"/><stop offset="1" stop-color="#F94543" stop-opacity="0"/></linearGradient><linearGradient gradientUnits="userSpaceOnUse" id="quick-gemini-yellow" x1="3.5" x2="17.5" y1="13.5" y2="12"><stop stop-color="#FABC12"/><stop offset=".46" stop-color="#FABC12" stop-opacity="0"/></linearGradient></defs></svg>
+                            </span>
+                            <span class="quick-link-name">Gemini</span>
+                        </a>
+
+                    </div>
+                    </div>
+                </div>
             </div>
 
             <footer class="dashboard-footer">
-                <p>HomeLab · Private service gateway</p>
+                <p class="dashboard-footer-brand">HomeLab · Private service gateway</p>
                 <button class="background-picker-button" id="background-picker-button" type="button" aria-haspopup="dialog" aria-controls="background-dialog">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <rect x="3" y="4" width="18" height="16" rx="2"/>
@@ -2204,11 +2613,29 @@
         (function () {
             const root = document.documentElement;
             let introStarted = false;
+            let introCleanupTimer = null;
+
+            function finishIntro() {
+                if (introCleanupTimer !== null) {
+                    window.clearTimeout(introCleanupTimer);
+                    introCleanupTimer = null;
+                }
+                root.classList.remove('intro-first', 'intro-play');
+            }
 
             function playIntro() {
                 if (introStarted || !root.classList.contains('intro-first')) return;
                 introStarted = true;
+                const dashboardFooter = document.querySelector('.dashboard-footer');
+                if (dashboardFooter) {
+                    dashboardFooter.addEventListener('animationend', (event) => {
+                        if (event.target === dashboardFooter && event.animationName === 'copy-reveal') {
+                            finishIntro();
+                        }
+                    }, { once: true });
+                }
                 root.classList.add('intro-play');
+                introCleanupTimer = window.setTimeout(finishIntro, 1500);
                 try {
                     sessionStorage.setItem('homelab-intro-seen', '1');
                 } catch (error) {
@@ -4632,10 +5059,648 @@
             }
 
             const cards = Array.from(document.querySelectorAll('.service-card'));
+            const quickLinks = Array.from(document.querySelectorAll('.quick-link-card'));
             const serviceCountLabel = document.getElementById('service-count-label');
             const refreshButton = document.getElementById('refresh-status');
             const lastChecked = document.getElementById('last-checked');
             const statusSummary = document.getElementById('status-summary');
+            const dashboard = document.getElementById('dashboard');
+            const channelSwitchAnchor = document.getElementById('channel-switch-anchor');
+            const channelSwitch = document.getElementById('channel-switch');
+            const channelSwitchLabel = document.getElementById('channel-switch-label');
+            const channelSwitchFaceFront = document.getElementById('channel-switch-face-front');
+            const channelSwitchFaceBack = document.getElementById('channel-switch-face-back');
+            const channelSwitchMeasureServices = document.getElementById('channel-switch-measure-services');
+            const channelSwitchMeasureQuickLinks = document.getElementById('channel-switch-measure-quick-links');
+            const serviceChannelNote = document.getElementById('service-channel-note');
+            const channelPanelStage = document.getElementById('channel-panel-stage');
+            const channelPanelRotor = document.getElementById('channel-panel-rotor');
+            const servicesPanel = document.getElementById('services-panel');
+            const quickLinksPanel = document.getElementById('quick-links-panel');
+            const serviceGrid = document.getElementById('service-grid');
+            const quickLinksGrid = document.getElementById('quick-links-grid');
+            const dashboardFooterBrand = document.querySelector('.dashboard-footer-brand');
+            const channelMotionMedia = window.matchMedia('(min-width: 768px) and (prefers-reduced-motion: no-preference)');
+            const channelMobileMotionMedia = window.matchMedia('(max-width: 767px) and (prefers-reduced-motion: no-preference)');
+            const serviceChannelDescription = '状态表示入口节点经 Zoraxy 到上游的服务端链路，不代表应用内部健康。';
+            const quickLinkChannelNotes = [
+                {
+                    prefix: '大家一起KIRAKIRA',
+                    linkText: ' ☆ ',
+                    suffix: 'DOKIDOKI ！',
+                    href: 'https://www.bilibili.com/video/BV14z42167Uj'
+                },
+                { text: 'モカちゃんやっちゃうよ～' },
+                {
+                    prefix: 'まんまるお山に彩りを!',
+                    linkText: '丸山彩',
+                    suffix: 'でーす!',
+                    href: 'https://www.bilibili.com/video/BV1mHb8zDESv'
+                },
+                { text: 'POPIPA! PIPOPA! POPIPAPAPIPOPA!' },
+                { text: 'Happy! Lucky! Smile! Yeah!!' },
+                {
+                    prefix: 'あなた達、',
+                    linkText: 'Roselia',
+                    suffix: 'にすべてを賭ける覚悟はある?',
+                    href: 'https://www.bilibili.com/video/BV1Km42157kE'
+                },
+                { text: '🤜😯👆と✋😃👌が🖐️😉🖐️わ😃👐グループ♡' },
+                {
+                    prefix: 'なんで「',
+                    linkText: '春日影',
+                    suffix: '」やったの？！！',
+                    href: 'https://www.bilibili.com/video/BV14z42167Uj'
+                },
+                { text: '夢は、限りなく大きく！' }
+            ];
+            const channelStateCommitDelayMs = 200;
+            const channelNoteExitMs = 180;
+            const channelNoteEnterMs = 240;
+            const channelSwitchFallbackMs = 1200;
+            const channelMobileButtonExitMs = 160;
+            const channelMobilePanelDelayMs = 120;
+            const channelMobilePanelExitMs = 180;
+            const channelMobileCardEnterMs = 280;
+            const channelMobileCardStaggerMs = 25;
+            let activeChannel = 'services';
+            let quickLinkChannelNoteIndex = 0;
+            let channelSwitchLocked = false;
+            let pendingChannel = null;
+            let pendingChannelNote = null;
+            let channelStateCommitTimer = null;
+            let channelNoteSwapTimer = null;
+            let channelNoteEnterTimer = null;
+            let channelFooterEnterTimer = null;
+            let channelFooterEnterFrame = null;
+            let channelSwitchFallbackTimer = null;
+            let channelResetFrame = null;
+            let channelMobileButtonTimer = null;
+            let channelMobilePanelExitTimer = null;
+            let channelMobilePanelSwapTimer = null;
+            let channelMobileCompleteTimer = null;
+
+            function syncQuickLinkDimensions() {
+                const firstServiceCard = cards[0];
+                if (!firstServiceCard || !serviceGrid || !quickLinksGrid || !channelPanelStage) return;
+                const servicesWereHidden = servicesPanel.hidden;
+                servicesPanel.hidden = false;
+                try {
+                    const cardWidth = firstServiceCard.getBoundingClientRect().width;
+                    const serviceGridHeight = serviceGrid.getBoundingClientRect().height;
+                    const computedStyle = window.getComputedStyle(serviceGrid);
+                    const columnGap = Number.parseFloat(computedStyle.columnGap);
+                    if (!Number.isFinite(cardWidth) || cardWidth <= 0
+                        || !Number.isFinite(serviceGridHeight) || serviceGridHeight <= 0
+                        || !Number.isFinite(columnGap) || columnGap < 0) return;
+                    const quickLinkColumns = Math.min(5, quickLinks.length);
+                    const quickLinksWidth = cardWidth * quickLinkColumns + columnGap * Math.max(0, quickLinkColumns - 1);
+                    quickLinksGrid.style.setProperty('--quick-card-width', `${cardWidth}px`);
+                    quickLinksGrid.style.setProperty('--quick-links-width', `${quickLinksWidth}px`);
+                    channelPanelStage.style.setProperty('--services-panel-height', `${serviceGridHeight}px`);
+                } finally {
+                    servicesPanel.hidden = servicesWereHidden;
+                }
+            }
+
+            function syncChannelSwitchDimensions() {
+                if (!channelSwitchAnchor || !channelSwitchMeasureServices || !channelSwitchMeasureQuickLinks) return;
+                const servicesWidth = channelSwitchMeasureServices.getBoundingClientRect().width;
+                const quickLinksWidth = channelSwitchMeasureQuickLinks.getBoundingClientRect().width;
+                if (!Number.isFinite(servicesWidth) || servicesWidth <= 0
+                    || !Number.isFinite(quickLinksWidth) || quickLinksWidth <= 0) return;
+                channelSwitchAnchor.style.setProperty('--channel-switch-services-width', `${servicesWidth}px`);
+                channelSwitchAnchor.style.setProperty('--channel-switch-quick-links-width', `${quickLinksWidth}px`);
+            }
+
+            function channelMotionEnabled() {
+                return dashboard.classList.contains('channel-motion-ready');
+            }
+
+            function channelMobileMotionEnabled() {
+                return dashboard.classList.contains('channel-mobile-motion-ready');
+            }
+
+            function syncChannelPanelHeight() {
+                if (!channelMotionEnabled()) return;
+                const servicesWereHidden = servicesPanel.hidden;
+                servicesPanel.hidden = false;
+                try {
+                    const servicesHeight = serviceGrid.getBoundingClientRect().height;
+                    if (!Number.isFinite(servicesHeight) || servicesHeight <= 0) return;
+                    channelPanelStage.style.setProperty('--channel-panel-height', `${servicesHeight}px`);
+                } finally {
+                    servicesPanel.hidden = servicesWereHidden;
+                }
+            }
+
+            function configureChannelMotion() {
+                if (channelSwitchLocked) finishChannelSwitch();
+                syncChannelSwitchDimensions();
+                syncQuickLinkDimensions();
+                const motionEnabled = channelMotionMedia.matches;
+                const mobileMotionEnabled = channelMobileMotionMedia.matches;
+                dashboard.classList.toggle('channel-motion-ready', motionEnabled);
+                dashboard.classList.toggle('channel-mobile-motion-ready', mobileMotionEnabled);
+                if (motionEnabled) {
+                    syncChannelPanelHeight();
+                } else {
+                    channelPanelStage.style.removeProperty('--channel-panel-height');
+                }
+                settleChannelPanels(activeChannel);
+            }
+
+            function channelLabel(channel) {
+                return channel === 'quick-links' ? 'Quick Links' : 'Services';
+            }
+
+            function channelPanel(channel) {
+                return channel === 'quick-links' ? quickLinksPanel : servicesPanel;
+            }
+
+            function nextQuickLinkChannelNote() {
+                const note = quickLinkChannelNotes[quickLinkChannelNoteIndex];
+                quickLinkChannelNoteIndex = (quickLinkChannelNoteIndex + 1) % quickLinkChannelNotes.length;
+                return note;
+            }
+
+            function renderChannelNote(note) {
+                if (typeof note === 'string' || note.text) {
+                    serviceChannelNote.textContent = typeof note === 'string' ? note : note.text;
+                    return;
+                }
+                const link = document.createElement('a');
+                link.href = note.href;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = note.linkText;
+                serviceChannelNote.replaceChildren(note.prefix, link, note.suffix);
+            }
+
+            function channelCountText(channel) {
+                return channel === 'quick-links'
+                    ? `${quickLinks.length} 个快捷入口`
+                    : `${cards.length} 个家庭服务入口`;
+            }
+
+            function clearChannelCopyClasses(elements) {
+                elements.forEach((element) => {
+                    element.classList.remove('is-channel-copy-exiting', 'is-channel-copy-entering');
+                });
+            }
+
+            function beginChannelCopyEntry(elements) {
+                elements.forEach((element) => {
+                    element.classList.add('is-channel-copy-entering');
+                    element.classList.remove('is-channel-copy-exiting');
+                });
+            }
+
+            function transitionChannelCopy(note, channel) {
+                serviceChannelNote.classList.remove('is-note-entering');
+                serviceChannelNote.classList.add('is-note-exiting');
+                serviceCountLabel.classList.remove('is-channel-copy-entering');
+                serviceCountLabel.classList.add('is-channel-copy-exiting');
+                [dashboardFooterBrand, lastChecked].forEach((element) => {
+                    element.classList.remove('is-channel-copy-entering');
+                    element.classList.add('is-channel-copy-exiting');
+                });
+                channelNoteSwapTimer = window.setTimeout(() => {
+                    channelNoteSwapTimer = null;
+                    renderChannelNote(note);
+                    serviceCountLabel.textContent = channelCountText(channel);
+                    serviceChannelNote.classList.add('is-note-entering');
+                    serviceChannelNote.classList.remove('is-note-exiting');
+                    beginChannelCopyEntry([serviceCountLabel]);
+                    channelNoteEnterTimer = window.setTimeout(() => {
+                        channelNoteEnterTimer = null;
+                        serviceChannelNote.classList.remove('is-note-entering');
+                        clearChannelCopyClasses([serviceCountLabel]);
+                    }, channelNoteEnterMs);
+                }, channelNoteExitMs);
+            }
+
+            function revealServicesFooterCopy() {
+                channelFooterEnterFrame = window.requestAnimationFrame(() => {
+                    channelFooterEnterFrame = null;
+                    beginChannelCopyEntry([dashboardFooterBrand, lastChecked]);
+                    channelFooterEnterTimer = window.setTimeout(() => {
+                        channelFooterEnterTimer = null;
+                        clearChannelCopyClasses([dashboardFooterBrand, lastChecked]);
+                    }, channelNoteEnterMs);
+                });
+            }
+
+            function syncChannelButtonFaces(channel) {
+                channelSwitchFaceFront.textContent = channelLabel(channel);
+                channelSwitchFaceBack.textContent = channelLabel(channel === 'services' ? 'quick-links' : 'services');
+            }
+
+            function commitChannelChrome(channel, animateCopy = false) {
+                const showQuickLinks = channel === 'quick-links';
+                activeChannel = showQuickLinks ? 'quick-links' : 'services';
+                dashboard.dataset.activeChannel = activeChannel;
+                channelSwitchLabel.textContent = showQuickLinks ? 'Quick Links' : 'Services';
+                channelSwitch.setAttribute('aria-pressed', showQuickLinks ? 'true' : 'false');
+                channelSwitch.setAttribute('aria-label', showQuickLinks ? '切换到 Services' : '切换到 Quick Links');
+                if (!animateCopy) serviceCountLabel.textContent = channelCountText(activeChannel);
+                serviceChannelNote.hidden = false;
+                refreshButton.hidden = showQuickLinks;
+                dashboardFooterBrand.hidden = showQuickLinks;
+                lastChecked.hidden = showQuickLinks;
+                if (animateCopy) {
+                    if (showQuickLinks) {
+                        clearChannelCopyClasses([dashboardFooterBrand, lastChecked]);
+                    } else {
+                        revealServicesFooterCopy();
+                    }
+                }
+                if (!showQuickLinks) {
+                    window.requestAnimationFrame(syncQuickLinkDimensions);
+                }
+            }
+
+            function setChannelPanelInteractive(panel, interactive) {
+                panel.setAttribute('aria-hidden', String(!interactive));
+                panel.toggleAttribute('inert', !interactive);
+            }
+
+            function retainChannelSwitchFocus() {
+                if (typeof channelSwitch.focus === 'function') {
+                    channelSwitch.focus({ preventScroll: true });
+                }
+            }
+
+            function settleChannelPanels(channel) {
+                const activePanel = channelPanel(channel);
+                const inactivePanel = channelPanel(channel === 'services' ? 'quick-links' : 'services');
+                [servicesPanel, quickLinksPanel].forEach((panel) => {
+                    panel.classList.remove(
+                        'is-channel-outgoing',
+                        'is-channel-incoming',
+                        'is-channel-active',
+                        'is-mobile-channel-outgoing',
+                        'is-mobile-channel-incoming'
+                    );
+                });
+                activePanel.hidden = false;
+                activePanel.classList.add('is-channel-active');
+                setChannelPanelInteractive(activePanel, true);
+                inactivePanel.hidden = true;
+                setChannelPanelInteractive(inactivePanel, false);
+            }
+
+            function clearChannelSwitchTimers() {
+                [
+                    channelStateCommitTimer,
+                    channelNoteSwapTimer,
+                    channelNoteEnterTimer,
+                    channelFooterEnterTimer,
+                    channelMobileButtonTimer,
+                    channelMobilePanelExitTimer,
+                    channelMobilePanelSwapTimer,
+                    channelMobileCompleteTimer,
+                    channelSwitchFallbackTimer
+                ].forEach((timer) => {
+                    if (timer !== null) window.clearTimeout(timer);
+                });
+                channelStateCommitTimer = null;
+                channelNoteSwapTimer = null;
+                channelNoteEnterTimer = null;
+                channelFooterEnterTimer = null;
+                channelMobileButtonTimer = null;
+                channelMobilePanelExitTimer = null;
+                channelMobilePanelSwapTimer = null;
+                channelMobileCompleteTimer = null;
+                if (channelFooterEnterFrame !== null) {
+                    window.cancelAnimationFrame(channelFooterEnterFrame);
+                    channelFooterEnterFrame = null;
+                }
+                channelSwitchFallbackTimer = null;
+            }
+
+            function finishDesktopChannelSwitch() {
+                if (!channelSwitchLocked || !pendingChannel) return;
+                const completedChannel = pendingChannel;
+                const completedNote = pendingChannelNote;
+                const noteWasPending = channelNoteSwapTimer !== null;
+                clearChannelSwitchTimers();
+                dashboard.classList.add('is-channel-resetting');
+                commitChannelChrome(completedChannel);
+                if (noteWasPending && completedNote) renderChannelNote(completedNote);
+                serviceChannelNote.classList.remove('is-note-exiting', 'is-note-entering');
+                serviceCountLabel.textContent = channelCountText(completedChannel);
+                clearChannelCopyClasses([
+                    serviceCountLabel,
+                    dashboardFooterBrand,
+                    lastChecked
+                ]);
+                settleChannelPanels(completedChannel);
+                syncChannelButtonFaces(completedChannel);
+                channelSwitch.classList.remove(
+                    'is-channel-flipping',
+                    'is-switching-to-services',
+                    'is-switching-to-quick-links'
+                );
+                channelPanelRotor.classList.remove('is-channel-flipping');
+                dashboard.classList.remove('is-channel-switching');
+                pendingChannel = null;
+                pendingChannelNote = null;
+                channelResetFrame = window.requestAnimationFrame(() => {
+                    channelResetFrame = null;
+                    dashboard.classList.remove('is-channel-resetting');
+                    channelSwitchLocked = false;
+                    channelSwitch.removeAttribute('aria-disabled');
+                    retainChannelSwitchFocus();
+                });
+            }
+
+            function finishMobileChannelSwitch() {
+                if (!channelSwitchLocked || !pendingChannel) return;
+                const completedChannel = pendingChannel;
+                const completedNote = pendingChannelNote;
+                const noteWasPending = channelNoteSwapTimer !== null;
+                clearChannelSwitchTimers();
+                commitChannelChrome(completedChannel);
+                if (noteWasPending && completedNote) renderChannelNote(completedNote);
+                serviceChannelNote.classList.remove('is-note-exiting', 'is-note-entering');
+                serviceCountLabel.textContent = channelCountText(completedChannel);
+                clearChannelCopyClasses([
+                    serviceCountLabel,
+                    dashboardFooterBrand,
+                    lastChecked
+                ]);
+                settleChannelPanels(completedChannel);
+                syncChannelButtonFaces(completedChannel);
+                channelSwitch.classList.remove(
+                    'is-mobile-channel-fading-out',
+                    'is-mobile-channel-fading-in',
+                    'is-mobile-target-services',
+                    'is-mobile-target-quick-links'
+                );
+                dashboard.classList.remove('is-mobile-channel-switching');
+                pendingChannel = null;
+                pendingChannelNote = null;
+                channelSwitchLocked = false;
+                channelSwitch.removeAttribute('aria-disabled');
+                retainChannelSwitchFocus();
+            }
+
+            function finishChannelSwitch() {
+                if (dashboard.classList.contains('is-mobile-channel-switching')) {
+                    finishMobileChannelSwitch();
+                    return;
+                }
+                finishDesktopChannelSwitch();
+            }
+
+            function setActiveChannel(channel) {
+                const nextChannel = channel === 'quick-links' ? 'quick-links' : 'services';
+                const note = nextChannel === 'quick-links'
+                    ? nextQuickLinkChannelNote()
+                    : serviceChannelDescription;
+                commitChannelChrome(nextChannel);
+                settleChannelPanels(nextChannel);
+                syncChannelButtonFaces(nextChannel);
+                renderChannelNote(note);
+            }
+
+            function beginAnimatedChannelSwitch(channel) {
+                const nextChannel = channel === 'quick-links' ? 'quick-links' : 'services';
+                const previousChannel = activeChannel;
+                const outgoingPanel = channelPanel(previousChannel);
+                const incomingPanel = channelPanel(nextChannel);
+                pendingChannel = nextChannel;
+                pendingChannelNote = nextChannel === 'quick-links'
+                    ? nextQuickLinkChannelNote()
+                    : serviceChannelDescription;
+                channelSwitchLocked = true;
+                channelSwitch.setAttribute('aria-disabled', 'true');
+                retainChannelSwitchFocus();
+                dashboard.classList.add('is-channel-switching');
+                channelSwitchFaceFront.textContent = channelLabel(previousChannel);
+                channelSwitchFaceBack.textContent = channelLabel(nextChannel);
+                channelSwitch.classList.add(
+                    'is-channel-flipping',
+                    nextChannel === 'quick-links'
+                        ? 'is-switching-to-quick-links'
+                        : 'is-switching-to-services'
+                );
+                outgoingPanel.hidden = false;
+                incomingPanel.hidden = false;
+                setChannelPanelInteractive(outgoingPanel, false);
+                setChannelPanelInteractive(incomingPanel, false);
+                outgoingPanel.classList.add('is-channel-outgoing');
+                outgoingPanel.classList.remove('is-channel-incoming');
+                incomingPanel.classList.add('is-channel-incoming');
+                incomingPanel.classList.remove('is-channel-active', 'is-channel-outgoing');
+                channelPanelRotor.classList.add('is-channel-flipping');
+                transitionChannelCopy(pendingChannelNote, nextChannel);
+                channelStateCommitTimer = window.setTimeout(() => {
+                    channelStateCommitTimer = null;
+                    commitChannelChrome(nextChannel, true);
+                }, channelStateCommitDelayMs);
+                channelSwitchFallbackTimer = window.setTimeout(
+                    finishChannelSwitch,
+                    channelSwitchFallbackMs
+                );
+            }
+
+            function channelMobileSwitchDuration(channel) {
+                const incomingCardCount = channel === 'quick-links'
+                    ? quickLinks.length
+                    : cards.length;
+                return channelMobilePanelDelayMs
+                    + channelMobilePanelExitMs
+                    + channelMobileCardEnterMs
+                    + Math.max(0, incomingCardCount - 1) * channelMobileCardStaggerMs;
+            }
+
+            function beginMobileChannelSwitch(channel) {
+                const nextChannel = channel === 'quick-links' ? 'quick-links' : 'services';
+                const previousChannel = activeChannel;
+                const outgoingPanel = channelPanel(previousChannel);
+                const incomingPanel = channelPanel(nextChannel);
+                pendingChannel = nextChannel;
+                pendingChannelNote = nextChannel === 'quick-links'
+                    ? nextQuickLinkChannelNote()
+                    : serviceChannelDescription;
+                channelSwitchLocked = true;
+                channelSwitch.setAttribute('aria-disabled', 'true');
+                retainChannelSwitchFocus();
+                dashboard.classList.add('is-mobile-channel-switching');
+                setChannelPanelInteractive(outgoingPanel, false);
+                setChannelPanelInteractive(incomingPanel, false);
+                channelSwitch.classList.add('is-mobile-channel-fading-out');
+                transitionChannelCopy(pendingChannelNote, nextChannel);
+
+                channelMobilePanelExitTimer = window.setTimeout(() => {
+                    channelMobilePanelExitTimer = null;
+                    outgoingPanel.classList.add('is-mobile-channel-outgoing');
+                }, channelMobilePanelDelayMs);
+
+                channelMobileButtonTimer = window.setTimeout(() => {
+                    channelMobileButtonTimer = null;
+                    syncChannelButtonFaces(nextChannel);
+                    channelSwitch.classList.remove('is-mobile-channel-fading-out');
+                    channelSwitch.classList.add(
+                        'is-mobile-channel-fading-in',
+                        nextChannel === 'quick-links'
+                            ? 'is-mobile-target-quick-links'
+                            : 'is-mobile-target-services'
+                    );
+                }, channelMobileButtonExitMs);
+
+                channelStateCommitTimer = window.setTimeout(() => {
+                    channelStateCommitTimer = null;
+                    commitChannelChrome(nextChannel, true);
+                }, channelStateCommitDelayMs);
+
+                channelMobilePanelSwapTimer = window.setTimeout(() => {
+                    channelMobilePanelSwapTimer = null;
+                    outgoingPanel.hidden = true;
+                    outgoingPanel.classList.remove('is-channel-active', 'is-mobile-channel-outgoing');
+                    incomingPanel.classList.add('is-mobile-channel-incoming');
+                    incomingPanel.hidden = false;
+                }, channelMobilePanelDelayMs + channelMobilePanelExitMs);
+
+                channelMobileCompleteTimer = window.setTimeout(() => {
+                    channelMobileCompleteTimer = null;
+                    finishMobileChannelSwitch();
+                }, channelMobileSwitchDuration(nextChannel));
+
+                channelSwitchFallbackTimer = window.setTimeout(
+                    finishChannelSwitch,
+                    channelSwitchFallbackMs
+                );
+            }
+
+            function restoreStaticServicesChannel() {
+                clearChannelSwitchTimers();
+                if (channelResetFrame !== null) {
+                    window.cancelAnimationFrame(channelResetFrame);
+                    channelResetFrame = null;
+                }
+                quickLinkChannelNoteIndex = 0;
+                channelSwitchLocked = false;
+                pendingChannel = null;
+                pendingChannelNote = null;
+                activeChannel = 'services';
+                if (dashboard) {
+                    dashboard.dataset.activeChannel = 'services';
+                    dashboard.classList.remove(
+                        'channel-motion-ready',
+                        'channel-mobile-motion-ready',
+                        'is-channel-switching',
+                        'is-mobile-channel-switching',
+                        'is-channel-resetting'
+                    );
+                }
+                if (channelPanelStage) channelPanelStage.style.removeProperty('--channel-panel-height');
+                if (channelPanelRotor) channelPanelRotor.classList.remove('is-channel-flipping');
+                if (servicesPanel && quickLinksPanel) settleChannelPanels('services');
+                if (channelSwitchLabel) channelSwitchLabel.textContent = 'Services';
+                if (channelSwitchFaceFront && channelSwitchFaceBack) syncChannelButtonFaces('services');
+                if (channelSwitch) {
+                    channelSwitch.disabled = true;
+                    channelSwitch.classList.remove(
+                        'is-channel-flipping',
+                        'is-switching-to-services',
+                        'is-switching-to-quick-links',
+                        'is-mobile-channel-fading-out',
+                        'is-mobile-channel-fading-in',
+                        'is-mobile-target-services',
+                        'is-mobile-target-quick-links'
+                    );
+                    channelSwitch.removeAttribute('aria-disabled');
+                    channelSwitch.setAttribute('aria-pressed', 'false');
+                    channelSwitch.setAttribute('aria-label', 'Quick Links 切换不可用');
+                }
+                if (serviceCountLabel) serviceCountLabel.textContent = `${cards.length} 个家庭服务入口`;
+                if (serviceCountLabel && dashboardFooterBrand && lastChecked) {
+                    clearChannelCopyClasses([
+                        serviceCountLabel,
+                        dashboardFooterBrand,
+                        lastChecked
+                    ]);
+                }
+                if (serviceChannelNote) {
+                    serviceChannelNote.hidden = false;
+                    serviceChannelNote.classList.remove('is-note-exiting', 'is-note-entering');
+                    serviceChannelNote.textContent = serviceChannelDescription;
+                }
+                if (refreshButton) refreshButton.hidden = false;
+                if (dashboardFooterBrand) dashboardFooterBrand.hidden = false;
+                if (lastChecked) lastChecked.hidden = false;
+            }
+
+            function initializeChannelSwitch() {
+                const requiredElements = [
+                    dashboard,
+                    channelSwitchAnchor,
+                    channelSwitch,
+                    channelSwitchLabel,
+                    channelSwitchFaceFront,
+                    channelSwitchFaceBack,
+                    channelSwitchMeasureServices,
+                    channelSwitchMeasureQuickLinks,
+                    serviceChannelNote,
+                    channelPanelStage,
+                    channelPanelRotor,
+                    servicesPanel,
+                    quickLinksPanel,
+                    serviceGrid,
+                    quickLinksGrid,
+                    dashboardFooterBrand,
+                    lastChecked
+                ];
+                if (requiredElements.some((element) => !element) || quickLinks.length !== 5) {
+                    throw new Error('双频道静态结构不完整');
+                }
+                cards.forEach((card, index) => {
+                    card.style.setProperty('--channel-card-index', String(index));
+                });
+                quickLinks.forEach((card, index) => {
+                    card.style.setProperty('--channel-card-index', String(index));
+                });
+                setActiveChannel('services');
+                configureChannelMotion();
+                channelSwitch.disabled = false;
+                channelSwitch.addEventListener('click', () => {
+                    if (channelSwitchLocked) return;
+                    if (channelMotionEnabled()) {
+                        beginAnimatedChannelSwitch(
+                            activeChannel === 'services' ? 'quick-links' : 'services'
+                        );
+                        return;
+                    }
+                    if (channelMobileMotionEnabled()) {
+                        beginMobileChannelSwitch(
+                            activeChannel === 'services' ? 'quick-links' : 'services'
+                        );
+                        return;
+                    }
+                    setActiveChannel(activeChannel === 'services' ? 'quick-links' : 'services');
+                });
+                channelPanelRotor.addEventListener('animationend', (event) => {
+                    if (event.animationName === 'channel-flip-left') {
+                        finishChannelSwitch();
+                    }
+                });
+                window.addEventListener('resize', () => {
+                    configureChannelMotion();
+                });
+                if (typeof channelMotionMedia.addEventListener === 'function') {
+                    channelMotionMedia.addEventListener('change', configureChannelMotion);
+                } else if (typeof channelMotionMedia.addListener === 'function') {
+                    channelMotionMedia.addListener(configureChannelMotion);
+                }
+                if (typeof channelMobileMotionMedia.addEventListener === 'function') {
+                    channelMobileMotionMedia.addEventListener('change', configureChannelMotion);
+                } else if (typeof channelMobileMotionMedia.addListener === 'function') {
+                    channelMobileMotionMedia.addListener(configureChannelMotion);
+                }
+            }
 
             function setCardState(card, state, label) {
                 const stateElement = card.querySelector('.service-state');
@@ -4738,6 +5803,12 @@
             }
 
             initializeServiceCards();
+            try {
+                initializeChannelSwitch();
+            } catch (error) {
+                console.warn('双频道预览初始化失败，已保留 Services 默认面。', error);
+                restoreStaticServicesChannel();
+            }
             refreshButton.addEventListener('click', refreshStatuses);
             refreshStatuses();
         }());
