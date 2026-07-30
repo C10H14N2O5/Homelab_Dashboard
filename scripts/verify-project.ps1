@@ -111,6 +111,7 @@ $requiredFiles = @(
     'state-service\main.py',
     'state-service\test_main.py',
     'scripts\build-state-service.ps1',
+    'scripts\process-utils.ps1',
     'scripts\uninstall-state-service.ps1',
     'scripts\verify-project.ps1'
 )
@@ -122,6 +123,7 @@ foreach ($relativePath in $requiredFiles) {
 }
 
 $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-service.ps1'))
+$processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
 if ($readmeSource.Contains('index.txt')) {
@@ -130,6 +132,10 @@ if ($readmeSource.Contains('index.txt')) {
 $maintenanceContracts = @(
     @{ Name = 'PyInstaller one-file build'; Source = $buildSource; Marker = '--onefile' },
     @{ Name = 'packaged executable health check'; Source = $buildSource; Marker = '/healthz' },
+    @{ Name = 'bounded redirected-process helper'; Source = $buildSource; Marker = 'Invoke-BuildRedirectedProcess' },
+    @{ Name = 'asynchronous stdout drain'; Source = $processUtilsSource; Marker = 'ReadToEndAsync' },
+    @{ Name = 'complete process-tree termination'; Source = $processUtilsSource; Marker = 'taskkill.exe' },
+    @{ Name = 'process timeout exception'; Source = $processUtilsSource; Marker = '[TimeoutException]' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },

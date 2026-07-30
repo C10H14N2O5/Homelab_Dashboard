@@ -20,6 +20,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot 'process-utils.ps1')
+
 $expectedServiceVersion = 5
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
@@ -149,50 +151,29 @@ try {
         [Text.UTF8Encoding]::new($false)
     )
     $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
-    $consoleStartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $consoleStartInfo.FileName = $temporaryArtifactPath
-    $consoleStartInfo.Arguments = 'configure --config "' + $consoleConfig + '"'
-    $consoleStartInfo.WorkingDirectory = $consoleRoot
-    $consoleStartInfo.UseShellExecute = $false
-    $consoleStartInfo.CreateNoWindow = $true
-    $consoleStartInfo.RedirectStandardInput = $true
-    $consoleStartInfo.RedirectStandardOutput = $true
-    $consoleStartInfo.RedirectStandardError = $true
-    $consoleStartInfo.StandardOutputEncoding = $strictUtf8
-    $consoleStartInfo.StandardErrorEncoding = $strictUtf8
-    $consoleProcess = [Diagnostics.Process]::new()
-    $consoleProcess.StartInfo = $consoleStartInfo
-    try {
-        if (-not $consoleProcess.Start()) {
-            throw 'Packaged console encoding smoke test did not start.'
+    $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
+    $consoleResult = Invoke-BuildRedirectedProcess `
+        -FilePath $temporaryArtifactPath `
+        -Arguments ('configure --config "' + $consoleConfig + '"') `
+        -WorkingDirectory $consoleRoot `
+        -StandardInputBytes $consoleInputBytes `
+        -OutputEncoding $strictUtf8 `
+        -TimeoutSeconds 30 `
+        -TerminationTimeoutSeconds 5
+    $consoleOutput = $consoleResult.StandardOutput
+    $consoleError = $consoleResult.StandardError
+    if ($consoleResult.ExitCode -ne 0) {
+        throw "Packaged console encoding smoke test exited with code $($consoleResult.ExitCode). Output: $consoleOutput Error: $consoleError"
+    }
+    foreach ($encodedText in @(
+        'SG9tZUxhYiBXYWxscGFwZXIgU3RhdGUg6aaW5qyh6YWN572u',
+        '6YWN572u44CB54q25oCB5ZKM5pel5b+X5LiN5Lya5pS+5YWl5YWs5byA55qEIHdlYlxodG1sIOebruW9leOAgg==',
+        '6IOM5pmv55uu5b2VIFtEOlxab3JheHlcd3d3XGh0bWxcYmFja2dyb3VuZHNd77ya'
+    )) {
+        $expectedText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedText))
+        if (-not $consoleOutput.Contains($expectedText)) {
+            throw "Packaged executable did not emit expected UTF-8 console text: $expectedText"
         }
-        $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
-        $consoleInputStream = $consoleProcess.StandardInput.BaseStream
-        $consoleInputStream.Write($consoleInputBytes, 0, $consoleInputBytes.Length)
-        $consoleInputStream.Flush()
-        $consoleInputStream.Close()
-        $consoleOutput = $consoleProcess.StandardOutput.ReadToEnd()
-        $consoleError = $consoleProcess.StandardError.ReadToEnd()
-        $consoleProcess.WaitForExit()
-        if ($consoleProcess.ExitCode -ne 0) {
-            throw "Packaged console encoding smoke test exited with code $($consoleProcess.ExitCode). Output: $consoleOutput Error: $consoleError"
-        }
-        foreach ($encodedText in @(
-            'SG9tZUxhYiBXYWxscGFwZXIgU3RhdGUg6aaW5qyh6YWN572u',
-            '6YWN572u44CB54q25oCB5ZKM5pel5b+X5LiN5Lya5pS+5YWl5YWs5byA55qEIHdlYlxodG1sIOebruW9leOAgg==',
-            '6IOM5pmv55uu5b2VIFtEOlxab3JheHlcd3d3XGh0bWxcYmFja2dyb3VuZHNd77ya'
-        )) {
-            $expectedText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedText))
-            if (-not $consoleOutput.Contains($expectedText)) {
-                throw "Packaged executable did not emit expected UTF-8 console text: $expectedText"
-            }
-        }
-    } finally {
-        if (-not $consoleProcess.HasExited) {
-            $consoleProcess.Kill()
-            $consoleProcess.WaitForExit()
-        }
-        $consoleProcess.Dispose()
     }
 
     $smokeProcess = Start-Process `
