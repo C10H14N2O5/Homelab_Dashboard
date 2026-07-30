@@ -98,7 +98,7 @@ CLIProxy 点击根地址，但使用 `data-probe-url` 指向 `/management.html/`
 
 ### 背景选择和同步
 
-页面打开背景选择器时优先请求 `GET /api/background-files`。后端扫描 `backgrounds/` 第一层的 `.jpg`、`.jpeg`、`.png`、`.webp` 和 `.avif` 原图，为每张图片生成或复用 480×270、质量 75 的 WebP 缩略图；选择器只加载这些缩略图，用户选中某张图片时才预加载并应用对应原图。目录必须包含 `bg.jpg`，原图继续平铺在第一层；后端管理的 `backgrounds/thumbnails/` 只保存可再生缓存。为保留旧后端降级能力，`backgrounds/` 仍不能包含会阻止目录列表的 index 文件。
+页面打开背景选择器时优先请求 `GET /api/background-files`。后端扫描 `backgrounds/` 第一层的 `.jpg`、`.jpeg`、`.png`、`.webp` 和 `.avif` 原图，为图片生成或复用 480×270、质量 75 的 WebP 缩略图；选择器只加载这些缩略图，用户选中某张图片时才预加载并应用对应原图。清单最多返回 512 项、最多检查 2048 个目录项，每次请求最多新生成或修复 16 张缩略图；默认背景、当前背景和横竖屏已选背景优先保留在结果中。目录必须包含 `bg.jpg`，原图继续平铺在第一层；后端管理的 `backgrounds/thumbnails/` 只保存可再生缓存。为保留旧后端降级能力，`backgrounds/` 仍不能包含会阻止目录列表的 index 文件。
 
 清单响应只包含文件名、同源缩略图相对路径和本次缓存统计，不直接传输图片：
 
@@ -114,12 +114,15 @@ CLIProxy 点击根地址，但使用 `data-probe-url` 指向 `/management.html/`
   "thumbnails": {
     "generated": 1,
     "reused": 20,
-    "failed": 0
-  }
+    "failed": 0,
+    "deferred": 0
+  },
+  "total": 21,
+  "truncated": false
 }
 ```
 
-首次升级后打开选择器会同步迁移已有图片，图片较多或磁盘较慢时可能等待约 120 秒；之后通常直接复用缓存。清单接口不可用、超时或响应非法时，页面会显示“已进入原图加载降级模式”，再回退到 `/backgrounds/` directory listing，因此旧后端仍可继续使用，但会恢复全量原图传输。单张缩略图生成或加载失败只让对应卡片回退到原图，不影响其它壁纸。
+`total` 在完整扫描时是合法原图总数；目录超过扫描上限时为 `null`。`truncated` 表示当前只展示前 512 项或扫描未完成；`deferred` 表示本次因生成预算而延后的缩略图，下次打开会继续处理。前端对 API JSON 和目录列表降级响应都设置 512 KiB 硬上限。清单接口不可用、超时、超限或响应非法时，页面会显示“已进入原图加载降级模式”，再尝试 `/backgrounds/` directory listing；该降级响应同样受 512 KiB 和 512 项上限约束。单张缩略图生成或加载失败只让对应卡片回退到原图，不影响其它壁纸。
 
 右键背景卡片时浏览器打开或保存的是 WebP 缩略图；需要原文件时，使用操作栏中的“查看原图”，页面会在新标签页打开当前横屏或竖屏标签已保存的同源原图，再通过浏览器右键保存。该入口不依赖壁纸 API 在线状态，也不会改变当前设置或发送偏好更新请求；如果原图已被外部删除，新标签页会显示静态资源的正常 404。
 
@@ -151,7 +154,7 @@ Content-Type: application/json
 
 本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好与清单 API 不传输图片，只同步文件名和缓存地址；缩略图及选中的原图由 Zoraxy 静态服务传输。其它设备刷新后读取共享设置，没有实时推送；新原图只在用户主动使用上传或抽卡 API 时写入。
 
-弹窗中的“上传图片”将 JPEG、PNG、WebP 或 AVIF 原始字节发送到状态服务。单个文件最多 50 MiB、解码后最多 100MP；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`。上传成功后服务端同步尝试生成缩略图，生成失败不撤销已经保存的原图；页面只把图片加入列表并聚焦缩略图，不会自动切换当前横屏或竖屏背景。
+弹窗中的“上传图片”将 JPEG、PNG、WebP 或 AVIF 原始字节发送到状态服务。单个文件最多 50 MiB、解码后最多 100MP，背景目录最多保存 512 张合法原图；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`；配额已满或目录扫描不完整时返回 409。上传成功后服务端同步尝试生成缩略图，生成失败不撤销已经保存的原图；页面只把图片加入列表并聚焦缩略图，不会自动切换当前横屏或竖屏背景。
 
 ```http
 POST /api/background-files/upload?name=wallpaper.png
@@ -223,6 +226,8 @@ Content-Type: application/json
 安全约束：
 
 - 强制监听 `127.0.0.1`；
+- HTTP/1.1 请求在路由前拒绝任何 `Transfer-Encoding`、重复/歧义 `Content-Length` 和不应携带的正文；正文必须按唯一长度完整读取后才允许复用连接；
+- 每条连接读取空闲时间最多 30 秒，请求行、请求头和正文的总读取时间最多 300 秒；最多同时处理 16 条持久连接，满载时返回 503；
 - 所有写入 API 校验精确 Origin 和请求标记；JSON 与上传接口分别校验 Content-Type、Content-Length 和正文上限；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
 - 缩略图执行 EXIF 方向修正、居中裁切和 WebP 编码，经同目录临时文件、磁盘刷新和原子替换写入；缓存目录必须是真实目录而非符号链接；
@@ -345,8 +350,8 @@ py_compile
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
 2. 停止旧后端，将新版 EXE 复制到非公开的 Zoraxy 程序目录。本次配置版本、背景状态版本和 Bestdori 抽卡历史版本均不变，不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
-3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `5`；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署 V2.3.0 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得缩略图流量优化。
+3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识正确且接口版本为 `6`；接口版本不匹配时启动器会拒绝复用旧进程。
+4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署 V2.5.2 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
 5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
 6. 最后删除 11 个子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
@@ -361,7 +366,7 @@ MatchingPath： /api/
 Domain：       127.0.0.1:8787/api/
 ```
 
-代理仍只需保留 GET/PATCH/POST、请求体、`Content-Type`、`Content-Length`、`Origin` 和 `X-Requested-With`，禁止缓存，并复用首页 Basic Auth。不要代理 `/_control/`，不要把 8787 暴露到局域网、Tailscale 或公网。
+代理仍只需保留 GET/PATCH/POST、请求体、`Content-Type`、唯一且明确的 `Content-Length`、`Origin` 和 `X-Requested-With`，禁止缓存，并复用首页 Basic Auth。后端不接受 `Transfer-Encoding`；若前端连接使用分块传输或 HTTP/2，Zoraxy 必须先缓冲正文并转成一个正确的 `Content-Length`。Zoraxy 的请求行/请求头/正文空闲超时不应超过 30 秒，完整请求读取期限不应超过 300 秒，上传正文上限应设为 50 MiB；后端满载返回的 503 不应自动无限重试。不要代理 `/_control/`，不要把 8787 暴露到局域网、Tailscale 或公网。
 
 服务端探测不依赖本机 DNS，可在部署机上用等价命令诊断 Zoraxy 回环链路：
 
@@ -386,7 +391,7 @@ curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-tim
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、单次批量请求、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试。
+验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、单次批量请求、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
 
 人工部署后还应检查：
 

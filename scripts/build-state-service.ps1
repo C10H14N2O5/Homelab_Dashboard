@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 5
+$expectedServiceVersion = 6
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {

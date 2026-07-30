@@ -3874,7 +3874,7 @@
                     const index = sorted.findIndex((background) => background.url.href === priorityUrl.href);
                     if (index >= 0) prioritized.push(sorted.splice(index, 1)[0]);
                 });
-                return prioritized.concat(sorted);
+                return prioritized.concat(sorted).slice(0, maximumBackgroundInventoryItems);
             }
 
             async function requestBackgroundInventory(controller) {
@@ -3913,6 +3913,7 @@
                 const listing = new DOMParser().parseFromString(result.listingText, 'text/html');
                 const discovered = new Map();
                 listing.querySelectorAll('a[href]').forEach((anchor) => {
+                    if (discovered.size >= maximumBackgroundInventoryItems) return;
                     try {
                         const url = normalizeBackgroundUrl(
                             new URL(anchor.getAttribute('href'), result.response.url)
