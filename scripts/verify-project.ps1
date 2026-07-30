@@ -38,6 +38,69 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Test-BlockedRepositoryPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $normalized = $Path.Replace('\', '/').TrimStart('/')
+    $lower = $normalized.ToLowerInvariant()
+    $segments = @($lower.Split('/'))
+    $leafName = [IO.Path]::GetFileName($lower)
+    $extension = [IO.Path]::GetExtension($lower)
+    $blockedRootPrefixes = @(
+        'dist/',
+        '.venv/',
+        'build/',
+        'temp/',
+        'homelabwallpaperstate-data/'
+    )
+    foreach ($prefix in $blockedRootPrefixes) {
+        if ($lower.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            return $true
+        }
+    }
+    if ($segments -contains '__pycache__') {
+        return $true
+    }
+    if ($lower.StartsWith('backgrounds/', [StringComparison]::Ordinal) -and
+        $lower -notin @('backgrounds/.gitignore', 'backgrounds/bg.jpg')) {
+        return $true
+    }
+    if ($extension -in @('.exe', '.pyc', '.pyo', '.pyd', '.spec')) {
+        return $true
+    }
+    if ($extension -in @('.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif', '.svg') -and
+        $lower -ne 'backgrounds/bg.jpg') {
+        return $true
+    }
+    if ($leafName -in @('state.json', 'state.json.bak', 'homelabwallpaperstate.json') -or
+        $leafName -like 'state.json.corrupt-*' -or
+        $leafName -like '.state-*.tmp' -or
+        $leafName -match '\.log(?:\..+)?$') {
+        return $true
+    }
+    return $false
+}
+
+function Assert-RepositorySourceControlPolicy {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Paths,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Source
+    )
+
+    foreach ($candidatePath in $Paths) {
+        if (Test-BlockedRepositoryPath -Path $candidatePath) {
+            throw "Blocked private, runtime, generated, or multimedia path found in $Source files: $candidatePath"
+        }
+    }
+}
+
 $requiredFiles = @(
     'index.html',
     'README.md',
@@ -1717,32 +1780,24 @@ if ($null -eq $git) {
 
 Push-Location -LiteralPath $projectRoot
 try {
-    Invoke-CheckedCommand -Name 'git diff whitespace' -Command {
+    Invoke-CheckedCommand -Name 'unstaged git diff whitespace' -Command {
         & $git.Source diff --check
+    }
+    Invoke-CheckedCommand -Name 'staged git diff whitespace' -Command {
+        & $git.Source diff --cached --check
     }
 
     Write-Host 'Checking source-control exclusions...'
-    $candidateFiles = @(& $git.Source ls-files --cached --others --exclude-standard)
+    $trackedFiles = @(& $git.Source ls-files --cached)
     if ($LASTEXITCODE -ne 0) {
-        throw 'git ls-files failed.'
+        throw 'git ls-files --cached failed.'
     }
-    $blockedMediaExtensions = @('.exe', '.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif', '.svg')
-    foreach ($candidateFile in $candidateFiles) {
-        $normalized = $candidateFile.Replace('\', '/')
-        $extension = [IO.Path]::GetExtension($normalized).ToLowerInvariant()
-        $leafName = [IO.Path]::GetFileName($normalized).ToLowerInvariant()
-        if ($normalized.StartsWith('dist/', [StringComparison]::OrdinalIgnoreCase) -or
-            ($blockedMediaExtensions -contains $extension -and $normalized -ne 'backgrounds/bg.jpg') -or
-            $leafName -in @('state.json', 'state.json.bak', 'service.log', 'service.log.1', 'homelabwallpaperstate.json') -or
-            $leafName -like 'state.json.corrupt-*' -or
-            $leafName -like '.state-*.tmp') {
-            throw "Runtime or multimedia file would enter source control: $candidateFile"
-        }
-        if ($normalized.StartsWith('backgrounds/', [StringComparison]::OrdinalIgnoreCase) -and
-            $normalized -notin @('backgrounds/.gitignore', 'backgrounds/bg.jpg')) {
-            throw "Unexpected source-controlled background file: $candidateFile"
-        }
+    $untrackedFiles = @(& $git.Source ls-files --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'git ls-files --others --exclude-standard failed.'
     }
+    Assert-RepositorySourceControlPolicy -Paths $trackedFiles -Source 'tracked'
+    Assert-RepositorySourceControlPolicy -Paths $untrackedFiles -Source 'untracked'
 
     $ignoreProbes = @(
         'backgrounds/verify-probe.jpg',
@@ -1761,6 +1816,72 @@ try {
         & $git.Source check-ignore --no-index --quiet -- $probe
         if ($LASTEXITCODE -ne 0) {
             throw "Git ignore rule is missing for: $probe"
+        }
+    }
+
+    Write-Host 'Checking forced-tracking and staged-only regression behavior...'
+    $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $gitPolicyProbe = Join-Path $temporaryBase "Zoraxy-verify-git-policy-$PID-$([Guid]::NewGuid().ToString('N'))"
+    $resolvedProbe = [IO.Path]::GetFullPath($gitPolicyProbe)
+    if (-not $resolvedProbe.StartsWith($temporaryBase, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Temporary Git policy probe escaped the temporary directory: $resolvedProbe"
+    }
+    $null = New-Item -ItemType Directory -Path $resolvedProbe
+    try {
+        Push-Location -LiteralPath $resolvedProbe
+        try {
+            & $git.Source init --quiet
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Unable to initialize temporary Git policy repository.'
+            }
+            [IO.File]::WriteAllText(
+                (Join-Path $resolvedProbe '.gitignore'),
+                "/.venv/`n",
+                [Text.UTF8Encoding]::new($false)
+            )
+            $forcedDirectory = Join-Path $resolvedProbe '.venv'
+            $null = New-Item -ItemType Directory -Path $forcedDirectory
+            [IO.File]::WriteAllBytes((Join-Path $forcedDirectory 'forced.pyc'), [byte[]](1, 2, 3))
+            [IO.File]::WriteAllText(
+                (Join-Path $resolvedProbe 'staged-only.txt'),
+                "trailing whitespace `n",
+                [Text.UTF8Encoding]::new($false)
+            )
+            & $git.Source add -f -- '.venv/forced.pyc' 'staged-only.txt'
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Unable to stage temporary Git policy probes.'
+            }
+
+            $forcedTrackedFiles = @(& $git.Source ls-files --cached)
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Unable to inspect temporary forced-tracked files.'
+            }
+            $policyRejected = $false
+            try {
+                Assert-RepositorySourceControlPolicy -Paths $forcedTrackedFiles -Source 'temporary tracked'
+            } catch {
+                $policyRejected = $true
+            }
+            if (-not $policyRejected) {
+                throw 'Forced-tracked private or generated files bypassed the repository policy.'
+            }
+
+            & $git.Source diff --check
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Unstaged whitespace check unexpectedly inspected staged-only content.'
+            }
+            & $git.Source diff --cached --check *> $null
+            if ($LASTEXITCODE -eq 0) {
+                throw 'Staged whitespace check did not reject staged-only trailing whitespace.'
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $resolvedProbe) {
+            Remove-Item -LiteralPath $resolvedProbe -Recurse -Force
         }
     }
 }
