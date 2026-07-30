@@ -88,7 +88,15 @@ THUMBNAIL_FILE_PATTERN = re.compile(
 )
 REMOVAL_TOKEN_TTL_SECONDS = 60
 MAX_REMOVAL_TOKENS = 32
-MAX_REJECTED_BODY_DRAIN = 64 * 1024
+HTTP_IDLE_TIMEOUT_SECONDS = 30.0
+HTTP_REQUEST_READ_DEADLINE_SECONDS = 300.0
+HTTP_ERROR_WRITE_TIMEOUT_SECONDS = 1.0
+HTTP_BODY_READ_CHUNK_SIZE = 64 * 1024
+HTTP_REJECTED_BODY_DRAIN_TIMEOUT_SECONDS = 0.01
+HTTP_REJECTED_BODY_DRAIN_LIMIT = 64 * 1024
+HTTP_BUSY_DRAIN_TIMEOUT_SECONDS = 0.05
+HTTP_BUSY_DRAIN_LIMIT = 8 * 1024
+MAX_HTTP_CONNECTIONS = 16
 MAX_PROBE_TARGETS = 32
 MAX_PROBE_WORKERS = 8
 MAX_PROBE_REDIRECTS = 5
@@ -133,6 +141,10 @@ class UploadTooLarge(ValueError):
 
 
 class BackgroundQuotaExceeded(ValueError):
+    pass
+
+
+class RequestBodyReadError(ConnectionError):
     pass
 
 
@@ -1704,6 +1716,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.config = config
         self.store = store
         self.logger = logger
+        self._connection_slots = threading.BoundedSemaphore(MAX_HTTP_CONNECTIONS)
         self.bestdori_manager = bestdori_manager or BestdoriDrawManager(
             store,
             config.state_dir / "BestdoriCardDraws.json",
@@ -1717,10 +1730,200 @@ class StateHTTPServer(ThreadingHTTPServer):
                 self.probe_client.close()
             raise
 
+    def get_request(self):
+        request, client_address = super().get_request()
+        request.settimeout(HTTP_IDLE_TIMEOUT_SECONDS)
+        return request, client_address
+
+    @staticmethod
+    def _reject_busy_connection(request: socket.socket) -> None:
+        body = b'{"error":"server_busy"}\n'
+        response = (
+            b"HTTP/1.1 503 Service Unavailable\r\n"
+            b"Cache-Control: no-store, max-age=0\r\n"
+            b"Pragma: no-cache\r\n"
+            b"X-Content-Type-Options: nosniff\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode("ascii")
+            + b"Retry-After: 1\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+            + body
+        )
+        try:
+            request.settimeout(HTTP_ERROR_WRITE_TIMEOUT_SECONDS)
+            request.sendall(response)
+            request.shutdown(socket.SHUT_WR)
+            request.settimeout(HTTP_BUSY_DRAIN_TIMEOUT_SECONDS)
+            drained = 0
+            while drained < HTTP_BUSY_DRAIN_LIMIT:
+                chunk = request.recv(min(1024, HTTP_BUSY_DRAIN_LIMIT - drained))
+                if not chunk:
+                    break
+                drained += len(chunk)
+        except OSError:
+            pass
+
+    def process_request(self, request, client_address) -> None:
+        if not self._connection_slots.acquire(blocking=False):
+            self._reject_busy_connection(request)
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_slots.release()
+
 
 class StateRequestHandler(BaseHTTPRequestHandler):
     server: StateHTTPServer
     protocol_version = "HTTP/1.1"
+
+    def _shutdown_request_socket(self) -> None:
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def handle_one_request(self) -> None:
+        self._request_read_deadline = time.monotonic() + HTTP_REQUEST_READ_DEADLINE_SECONDS
+        self._parsed_content_length: int | None = None
+        self._request_keep_alive = False
+        self._expect_continue_pending = False
+        self._rejected_request = False
+        self._rejected_body_finalized = False
+        self.connection.settimeout(
+            min(HTTP_IDLE_TIMEOUT_SECONDS, HTTP_REQUEST_READ_DEADLINE_SECONDS)
+        )
+        header_timer = threading.Timer(
+            HTTP_REQUEST_READ_DEADLINE_SECONDS,
+            self._shutdown_request_socket,
+        )
+        header_timer.daemon = True
+        header_timer.start()
+        try:
+            self.raw_requestline = self.rfile.readline(65537)
+            if len(self.raw_requestline) > 65536:
+                self.requestline = ""
+                self.request_version = ""
+                self.command = ""
+                self.send_error(HTTPStatus.REQUEST_URI_TOO_LONG)
+                return
+            if not self.raw_requestline:
+                self.close_connection = True
+                return
+            if not self.parse_request():
+                return
+            header_timer.cancel()
+            method_name = "do_" + self.command
+            if not hasattr(self, method_name):
+                self.send_error(
+                    HTTPStatus.NOT_IMPLEMENTED,
+                    "Unsupported method (%r)" % self.command,
+                )
+                return
+            method = getattr(self, method_name)
+            method()
+            self.wfile.flush()
+        except (TimeoutError, OSError) as error:
+            self.log_error("request handling failed: %r", error)
+            self.close_connection = True
+        finally:
+            header_timer.cancel()
+            self._finalize_rejected_response()
+
+    def handle_expect_100(self) -> bool:
+        # BaseHTTPRequestHandler calls this while parsing headers. Delay the
+        # interim response until framing, origin, type and size checks pass.
+        self._expect_continue_pending = True
+        return True
+
+    def _route_accepts_body(self) -> bool:
+        if self.command == "PATCH":
+            return self.path == API_PATH
+        if self.command != "POST":
+            return False
+        if urlsplit(self.path).path == BACKGROUND_UPLOAD_PATH:
+            return True
+        return self.path in {
+            BACKGROUND_REMOVE_PATH,
+            SERVICE_STATUS_PATH,
+            BESTDORI_DRAW_PATH,
+            BESTDORI_RECONCILE_PATH,
+            BESTDORI_RESET_PATH,
+        }
+
+    def _reject_request_framing(self, status: int, message: str) -> bool:
+        self._close_rejected_request()
+        self._error(status, message)
+        return False
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        self._request_keep_alive = not self.close_connection
+
+        transfer_encodings = self.headers.get_all("Transfer-Encoding", failobj=[])
+        if transfer_encodings:
+            return self._reject_request_framing(
+                HTTPStatus.BAD_REQUEST,
+                "Transfer-Encoding is not supported",
+            )
+
+        content_lengths = self.headers.get_all("Content-Length", failobj=[])
+        if len(content_lengths) > 1:
+            return self._reject_request_framing(
+                HTTPStatus.BAD_REQUEST,
+                "ambiguous Content-Length",
+            )
+        if content_lengths:
+            raw_length = content_lengths[0]
+            if len(raw_length) > 20 or not re.fullmatch(r"[0-9]+", raw_length):
+                return self._reject_request_framing(
+                    HTTPStatus.BAD_REQUEST,
+                    "invalid Content-Length",
+                )
+            content_length = int(raw_length)
+        else:
+            content_length = None
+        self._parsed_content_length = content_length
+
+        expect_values = self.headers.get_all("Expect", failobj=[])
+        if expect_values and (
+            len(expect_values) != 1
+            or expect_values[0].strip().lower() != "100-continue"
+            or self.request_version < "HTTP/1.1"
+        ):
+            return self._reject_request_framing(
+                HTTPStatus.EXPECTATION_FAILED,
+                "unsupported Expect header",
+            )
+
+        accepts_body = self._route_accepts_body()
+        if accepts_body and content_length is None:
+            return self._reject_request_framing(
+                HTTPStatus.BAD_REQUEST,
+                "Content-Length is required",
+            )
+        if not accepts_body and content_length not in {None, 0}:
+            return self._reject_request_framing(
+                HTTPStatus.BAD_REQUEST,
+                "request body is not allowed for this route",
+            )
+        if self._expect_continue_pending and not accepts_body:
+            return self._reject_request_framing(
+                HTTPStatus.EXPECTATION_FAILED,
+                "request body is not accepted for this route",
+            )
+
+        return True
 
     def log_message(self, format_string: str, *args: Any) -> None:
         self.server.logger.debug("%s - %s", self.address_string(), format_string % args)
@@ -1749,16 +1952,77 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._common_headers()
         self.send_header("Allow", methods)
         self.send_header("Content-Length", "0")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
 
-    def _discard_rejected_body(self) -> None:
-        try:
-            content_length = int(self.headers.get("Content-Length", ""))
-        except ValueError:
+    def _close_rejected_request(self) -> None:
+        self.close_connection = True
+        self._rejected_request = True
+
+    def _finalize_rejected_response(self) -> None:
+        if not self._rejected_request or self._rejected_body_finalized:
             return
-        if 0 <= content_length <= MAX_REJECTED_BODY_DRAIN:
-            self.rfile.read(content_length)
-            self.close_connection = False
+        self._rejected_body_finalized = True
+        try:
+            self.wfile.flush()
+        except OSError:
+            return
+        try:
+            self.connection.settimeout(HTTP_REJECTED_BODY_DRAIN_TIMEOUT_SECONDS)
+            drained = 0
+            read = getattr(self.rfile, "read1", self.rfile.read)
+            while drained < HTTP_REJECTED_BODY_DRAIN_LIMIT:
+                chunk = read(
+                    min(
+                        HTTP_BODY_READ_CHUNK_SIZE,
+                        HTTP_REJECTED_BODY_DRAIN_LIMIT - drained,
+                    )
+                )
+                if not chunk:
+                    break
+                drained += len(chunk)
+        except (TimeoutError, OSError):
+            pass
+
+    def _send_continue_if_pending(self) -> None:
+        if not self._expect_continue_pending:
+            return
+        self.send_response_only(HTTPStatus.CONTINUE)
+        self.end_headers()
+        self._expect_continue_pending = False
+
+    def _remaining_read_seconds(self) -> float:
+        remaining = self._request_read_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RequestBodyReadError("request body read deadline exceeded")
+        return remaining
+
+    def _read_body_chunk(self, maximum: int) -> bytes:
+        try:
+            self.connection.settimeout(
+                min(HTTP_IDLE_TIMEOUT_SECONDS, self._remaining_read_seconds())
+            )
+            read = getattr(self.rfile, "read1", self.rfile.read)
+            chunk = read(min(maximum, HTTP_BODY_READ_CHUNK_SIZE))
+        except (TimeoutError, OSError):
+            raise RequestBodyReadError("request body timed out") from None
+        if not chunk:
+            raise RequestBodyReadError("request body ended before Content-Length")
+        if time.monotonic() > self._request_read_deadline:
+            raise RequestBodyReadError("request body read deadline exceeded")
+        return chunk
+
+    def _restore_request_connection(self) -> None:
+        self.close_connection = not self._request_keep_alive
+
+    def _request_body_timeout(self) -> None:
+        self._close_rejected_request()
+        try:
+            self.connection.settimeout(HTTP_ERROR_WRITE_TIMEOUT_SECONDS)
+            self._error(HTTPStatus.REQUEST_TIMEOUT, "request body timed out")
+        except OSError:
+            pass
 
     def _validate_dashboard_headers(self, expected_content_type: str) -> bool:
         origin_values = self.headers.get_all("Origin", failobj=[])
@@ -1767,16 +2031,16 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         except ConfigurationError:
             normalized_origin = ""
         if normalized_origin not in self.server.config.allowed_origins:
-            self._discard_rejected_body()
+            self._close_rejected_request()
             self._error(HTTPStatus.FORBIDDEN, "origin is not allowed")
             return False
         if self.headers.get("X-Requested-With") != "homelab-dashboard":
-            self._discard_rejected_body()
+            self._close_rejected_request()
             self._error(HTTPStatus.FORBIDDEN, "missing dashboard request header")
             return False
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         if content_type != expected_content_type:
-            self._discard_rejected_body()
+            self._close_rejected_request()
             self._error(
                 HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
                 f"Content-Type must be {expected_content_type}",
@@ -1785,19 +2049,46 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _read_content_length(self, maximum_body: int) -> int | None:
-        try:
-            content_length = int(self.headers.get("Content-Length", ""))
-        except ValueError:
-            self._error(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
-            return None
-        if content_length < 0:
+        content_length = self._parsed_content_length
+        if content_length is None:
+            self._close_rejected_request()
             self._error(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
             return None
         if content_length > maximum_body:
-            self._discard_rejected_body()
+            self._close_rejected_request()
             self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body is too large")
             return None
+        self._send_continue_if_pending()
         return content_length
+
+    def _read_exact_body(self, content_length: int) -> bytes | None:
+        self.close_connection = True
+        body = bytearray()
+        try:
+            while len(body) < content_length:
+                body.extend(self._read_body_chunk(content_length - len(body)))
+        except RequestBodyReadError:
+            self._request_body_timeout()
+            return None
+        self._restore_request_connection()
+        return bytes(body)
+
+    class _DeadlineLimitedReader:
+        def __init__(self, handler: "StateRequestHandler", content_length: int) -> None:
+            self.handler = handler
+            self.remaining = content_length
+            if self.remaining == 0:
+                self.handler._restore_request_connection()
+
+        def read(self, size: int = -1) -> bytes:
+            if self.remaining == 0:
+                return b""
+            requested = self.remaining if size < 0 else min(size, self.remaining)
+            chunk = self.handler._read_body_chunk(requested)
+            self.remaining -= len(chunk)
+            if self.remaining == 0:
+                self.handler._restore_request_connection()
+            return chunk
 
     def _read_dashboard_json(self, maximum_body: int) -> Any | None:
         # Close rejected requests whose unread body would otherwise be parsed as a second HTTP request.
@@ -1816,8 +2107,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
                 value[key] = item
             return value
 
-        body = self.rfile.read(content_length)
-        self.close_connection = False
+        body = self._read_exact_body(content_length)
+        if body is None:
+            return None
         try:
             value = json.loads(body, object_pairs_hook=reject_duplicate_fields)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
@@ -1832,16 +2124,26 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         if not self._validate_dashboard_headers("application/octet-stream"):
             return
-        content_length = self._read_content_length(MAX_BACKGROUND_UPLOAD_BODY)
-        if content_length is None:
-            return
         query = parse_qsl(parsed_path.query, keep_blank_values=True)
         if len(query) != 1 or query[0][0] != "name":
-            self._discard_rejected_body()
+            self._close_rejected_request()
             self._error(HTTPStatus.BAD_REQUEST, "query must contain exactly one name")
             return
         try:
-            result = self.server.store.upload_background(query[0][1], self.rfile, content_length)
+            validate_background_name(query[0][1])
+        except InvalidBackground:
+            self._close_rejected_request()
+            self._error(HTTPStatus.BAD_REQUEST, "invalid background filename")
+            return
+        content_length = self._read_content_length(MAX_BACKGROUND_UPLOAD_BODY)
+        if content_length is None:
+            return
+        body_reader = self._DeadlineLimitedReader(self, content_length)
+        try:
+            result = self.server.store.upload_background(query[0][1], body_reader, content_length)
+        except RequestBodyReadError:
+            self._request_body_timeout()
+            return
         except InvalidBackground:
             self._error(HTTPStatus.BAD_REQUEST, "invalid background filename")
             return
@@ -1858,7 +2160,6 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self.server.logger.exception("POST %s failed", parsed_path.path)
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
             return
-        self.close_connection = False
         self._write_json(HTTPStatus.CREATED, result)
 
     def _handle_background_remove(self) -> None:

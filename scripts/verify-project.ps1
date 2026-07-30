@@ -124,6 +124,8 @@ foreach ($relativePath in $requiredFiles) {
 
 $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-service.ps1'))
 $processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
+$stateServiceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\main.py'))
+$stateServiceTestSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\test_main.py'))
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
 if ($readmeSource.Contains('index.txt')) {
@@ -136,6 +138,13 @@ $maintenanceContracts = @(
     @{ Name = 'asynchronous stdout drain'; Source = $processUtilsSource; Marker = 'ReadToEndAsync' },
     @{ Name = 'complete process-tree termination'; Source = $processUtilsSource; Marker = 'taskkill.exe' },
     @{ Name = 'process timeout exception'; Source = $processUtilsSource; Marker = '[TimeoutException]' },
+    @{ Name = 'HTTP connection limit'; Source = $stateServiceSource; Marker = 'MAX_HTTP_CONNECTIONS = 16' },
+    @{ Name = 'HTTP request read deadline'; Source = $stateServiceSource; Marker = 'HTTP_REQUEST_READ_DEADLINE_SECONDS = 300.0' },
+    @{ Name = 'strict transfer framing'; Source = $stateServiceSource; Marker = 'Transfer-Encoding is not supported' },
+    @{ Name = 'request smuggling regression'; Source = $stateServiceTestSource; Marker = 'test_bodyless_routes_reject_unread_bytes_and_request_smuggling' },
+    @{ Name = 'slow request regression'; Source = $stateServiceTestSource; Marker = 'test_request_read_deadline_cannot_be_extended_by_trickle_input' },
+    @{ Name = 'background file quota'; Source = $stateServiceSource; Marker = 'MAX_BACKGROUND_FILES = 512' },
+    @{ Name = 'thumbnail generation budget'; Source = $stateServiceSource; Marker = 'MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },

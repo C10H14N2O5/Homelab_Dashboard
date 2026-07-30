@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from http.client import HTTPConnection
 from pathlib import Path
 from unittest import mock
@@ -1326,18 +1327,21 @@ class FakeBestdoriManager:
 class APITests(unittest.TestCase):
     def setUp(self) -> None:
         self.project = TemporaryProject()
-        self.config = self.project.write_config(listen="127.0.0.1:1")
+        self.config = replace(
+            self.project.write_config(listen="127.0.0.1:1"),
+            listen_port=0,
+        )
         self.store = main.StateStore(self.config.background_dir, self.config.state_file, lambda: FIXED_TIME)
         logger = main.logging.getLogger(f"test-{id(self)}")
         logger.handlers.clear()
         logger.addHandler(main.logging.NullHandler())
-        self.server = main.StateHTTPServer.__new__(main.StateHTTPServer)
-        self.server.config = self.config
-        self.server.store = self.store
-        self.server.logger = logger
-        self.server.probe_client = FakeProbeClient()
-        self.server.bestdori_manager = FakeBestdoriManager()
-        main.ThreadingHTTPServer.__init__(self.server, ("127.0.0.1", 0), main.StateRequestHandler)
+        self.server = main.StateHTTPServer(
+            self.config,
+            self.store,
+            logger,
+            FakeProbeClient(),
+            FakeBestdoriManager(),
+        )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.host, self.port = self.server.server_address
@@ -1362,6 +1366,32 @@ class APITests(unittest.TestCase):
         status = response.status
         connection.close()
         return status, payload
+
+    def raw_exchange(
+        self,
+        request: bytes,
+        *,
+        shutdown_write: bool = False,
+        timeout: float = 2.0,
+    ) -> bytes:
+        client = socket.create_connection((self.host, self.port), timeout=timeout)
+        client.settimeout(timeout)
+        try:
+            client.sendall(request)
+            if shutdown_write:
+                client.shutdown(socket.SHUT_WR)
+            response = bytearray()
+            while True:
+                try:
+                    chunk = client.recv(65536)
+                except (socket.timeout, OSError):
+                    break
+                if not chunk:
+                    break
+                response.extend(chunk)
+            return bytes(response)
+        finally:
+            client.close()
 
     def patch(self, value: dict[str, object], headers: dict[str, str] | None = None) -> tuple[int, dict[str, object]]:
         request_headers = {
@@ -1436,6 +1466,284 @@ class APITests(unittest.TestCase):
         status, preferences = self.request("GET", main.API_PATH)
         self.assertEqual(status, 200)
         self.assertEqual(preferences["landscape"], "bg.jpg")
+
+    def test_bodyless_routes_reject_unread_bytes_and_request_smuggling(self) -> None:
+        embedded = (
+            b"GET /healthz HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"\r\n"
+        )
+        response = self.raw_exchange(
+            b"GET /healthz HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            + f"Content-Length: {len(embedded)}\r\n".encode("ascii")
+            + b"\r\n"
+            + embedded
+        )
+        self.assertIn(b"HTTP/1.1 400 Bad Request", response)
+        self.assertEqual(response.count(b"HTTP/1.1 "), 1)
+        self.assertIn(b"Connection: close", response)
+
+        for request in (
+            (
+                b"GET /missing HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 1\r\n\r\nx"
+            ),
+            (
+                f"POST {main.CONTROL_PATH} HTTP/1.1\r\n".encode("ascii")
+                + b"Host: localhost\r\n"
+                b"Content-Length: 1\r\n\r\nx"
+            ),
+            (
+                f"PUT {main.API_PATH} HTTP/1.1\r\n".encode("ascii")
+                + b"Host: localhost\r\n"
+                b"Content-Length: 1\r\n\r\nx"
+            ),
+        ):
+            with self.subTest(request=request.split(b"\r\n", 1)[0]):
+                response = self.raw_exchange(request)
+                self.assertIn(b"HTTP/1.1 400 Bad Request", response)
+                self.assertEqual(response.count(b"HTTP/1.1 "), 1)
+
+    def test_ambiguous_http_framing_is_rejected_before_routing(self) -> None:
+        requests = (
+            (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 0\r\n"
+                b"Content-Length: 0\r\n\r\n"
+            ),
+            (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 0\r\n"
+                b"Content-Length: 1\r\n\r\nx"
+            ),
+            (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 1, 1\r\n\r\nx"
+            ),
+            (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+            ),
+            (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Transfer-Encoding: chunked\r\n"
+                b"Content-Length: 0\r\n\r\n0\r\n\r\n"
+            ),
+        )
+        for request in requests:
+            with self.subTest(request=request):
+                response = self.raw_exchange(request)
+                self.assertIn(b"HTTP/1.1 400 Bad Request", response)
+                self.assertIn(b"Connection: close", response)
+                self.assertEqual(response.count(b"HTTP/1.1 "), 1)
+
+    def test_complete_requests_can_reuse_connections(self) -> None:
+        connection = HTTPConnection(self.host, self.port, timeout=2)
+        try:
+            connection.request("GET", main.HEALTH_PATH)
+            first = connection.getresponse()
+            self.assertEqual(first.status, 200)
+            first.read()
+
+            connection.request("GET", main.API_PATH)
+            second = connection.getresponse()
+            self.assertEqual(second.status, 200)
+            second.read()
+
+            body = json.dumps({"mode": "landscape", "background": "test.jpg"}).encode()
+            connection.request(
+                "PATCH",
+                main.API_PATH,
+                body=body,
+                headers={
+                    "Origin": TEST_ORIGIN,
+                    "X-Requested-With": "homelab-dashboard",
+                    "Content-Type": "application/json",
+                },
+            )
+            patched = connection.getresponse()
+            self.assertEqual(patched.status, 200)
+            patched.read()
+
+            connection.request("GET", main.API_PATH)
+            after_patch = connection.getresponse()
+            self.assertEqual(after_patch.status, 200)
+            after_patch.read()
+        finally:
+            connection.close()
+
+        response = self.raw_exchange(
+            b"GET /healthz HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        self.assertIn(b"HTTP/1.1 200 OK", response)
+        self.assertIn(b"Connection: close", response)
+
+    def test_incomplete_and_slow_request_bodies_time_out(self) -> None:
+        body = b'{"mode":"landscape","background":"test.jpg"}'
+        headers = (
+            f"PATCH {main.API_PATH} HTTP/1.1\r\n".encode("ascii")
+            + b"Host: localhost\r\n"
+            + f"Origin: {TEST_ORIGIN}\r\n".encode("ascii")
+            + b"X-Requested-With: homelab-dashboard\r\n"
+            b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+        )
+        response = self.raw_exchange(
+            headers + body[:5],
+            shutdown_write=True,
+        )
+        self.assertIn(b"HTTP/1.1 408 Request Timeout", response)
+        self.assertIn(b"Connection: close", response)
+
+        with mock.patch.object(main, "HTTP_IDLE_TIMEOUT_SECONDS", 0.1):
+            client = socket.create_connection((self.host, self.port), timeout=2)
+            client.settimeout(2)
+            try:
+                client.sendall(headers + body[:1])
+                response = client.recv(65536)
+            finally:
+                client.close()
+        self.assertIn(b"HTTP/1.1 408 Request Timeout", response)
+
+    def test_request_read_deadline_cannot_be_extended_by_trickle_input(self) -> None:
+        body = b'{"mode":"landscape","background":"test.jpg"}'
+        headers = (
+            f"PATCH {main.API_PATH} HTTP/1.1\r\n".encode("ascii")
+            + b"Host: localhost\r\n"
+            + f"Origin: {TEST_ORIGIN}\r\n".encode("ascii")
+            + b"X-Requested-With: homelab-dashboard\r\n"
+            b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+        )
+        with mock.patch.object(main, "HTTP_IDLE_TIMEOUT_SECONDS", 0.2), mock.patch.object(
+            main,
+            "HTTP_REQUEST_READ_DEADLINE_SECONDS",
+            0.35,
+        ):
+            client = socket.create_connection((self.host, self.port), timeout=2)
+            client.settimeout(2)
+            response = bytearray()
+            sent = 0
+            started = main.time.monotonic()
+            try:
+                client.sendall(headers)
+                for byte in body:
+                    try:
+                        client.sendall(bytes([byte]))
+                        sent += 1
+                    except OSError:
+                        break
+                    threading.Event().wait(0.05)
+                while True:
+                    chunk = client.recv(65536)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+            except OSError:
+                pass
+            finally:
+                client.close()
+        elapsed = main.time.monotonic() - started
+        self.assertLess(sent, len(body))
+        self.assertLess(elapsed, 1.5)
+        if response:
+            self.assertIn(b"HTTP/1.1 408 Request Timeout", response)
+
+    def test_slow_headers_and_connection_limit_are_bounded(self) -> None:
+        with mock.patch.object(main, "HTTP_IDLE_TIMEOUT_SECONDS", 0.1):
+            started = main.time.monotonic()
+            response = self.raw_exchange(
+                b"GET /healthz HTTP/1.1\r\nHost: local",
+                timeout=1,
+            )
+            elapsed = main.time.monotonic() - started
+        self.assertEqual(response, b"")
+        self.assertLess(elapsed, 0.8)
+
+        held_connections = []
+        try:
+            for _ in range(main.MAX_HTTP_CONNECTIONS):
+                client = socket.create_connection((self.host, self.port), timeout=2)
+                client.settimeout(2)
+                client.sendall(b"GET /healthz HTTP/1.1\r\nHost: local")
+                held_connections.append(client)
+            threading.Event().wait(0.1)
+            deadline = main.time.monotonic() + 2
+            response = b""
+            while main.time.monotonic() < deadline:
+                response = self.raw_exchange(
+                    b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                    timeout=0.2,
+                )
+                if b"HTTP/1.1 503 Service Unavailable" in response:
+                    break
+            self.assertIn(b"HTTP/1.1 503 Service Unavailable", response)
+            self.assertIn(b"Connection: close", response)
+        finally:
+            for client in held_connections:
+                client.close()
+
+        deadline = main.time.monotonic() + 2
+        while True:
+            response = self.raw_exchange(
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            if b"HTTP/1.1 200 OK" in response or main.time.monotonic() >= deadline:
+                break
+            threading.Event().wait(0.02)
+        self.assertIn(b"HTTP/1.1 200 OK", response)
+
+    def test_expect_continue_is_sent_only_after_validation(self) -> None:
+        body = b'{"mode":"landscape","background":"test.jpg"}'
+        invalid = self.raw_exchange(
+            f"PATCH {main.API_PATH} HTTP/1.1\r\n".encode("ascii")
+            + b"Host: localhost\r\n"
+            b"Origin: https://evil.test\r\n"
+            b"X-Requested-With: homelab-dashboard\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Expect: 100-continue\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+        )
+        self.assertIn(b"HTTP/1.1 403 Forbidden", invalid)
+        self.assertNotIn(b"100 Continue", invalid)
+
+        client = socket.create_connection((self.host, self.port), timeout=2)
+        client.settimeout(2)
+        try:
+            client.sendall(
+                f"PATCH {main.API_PATH} HTTP/1.1\r\n".encode("ascii")
+                + b"Host: localhost\r\n"
+                + f"Origin: {TEST_ORIGIN}\r\n".encode("ascii")
+                + b"X-Requested-With: homelab-dashboard\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Expect: 100-continue\r\n"
+                b"Connection: close\r\n"
+                + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+            )
+            interim = client.recv(65536)
+            self.assertIn(b"HTTP/1.1 100 Continue", interim)
+            self.assertNotIn(b"HTTP/1.1 200 OK", interim)
+            client.sendall(body)
+            final = bytearray()
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                final.extend(chunk)
+        finally:
+            client.close()
+        self.assertIn(b"HTTP/1.1 200 OK", final)
 
     def test_background_manifest_contract_partial_failure_and_methods(self) -> None:
         (self.project.backgrounds / "bg.jpg").write_bytes(image_bytes("JPEG"))
