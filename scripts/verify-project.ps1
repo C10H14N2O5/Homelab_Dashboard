@@ -257,6 +257,13 @@ if (!/\.search-form\s*\{[^}]*--search-collapsed-width:\s*7rem;[^}]*--search-moti
     throw new Error('The persistent engine pill is missing its 300ms continuous size transition or unclipped text contract.');
 }
 
+if (!/\.background-library-section\s*\{[^}]*--background-section-motion-duration:\s*300ms;/.test(html)
+    || !/\.background-library-toggle\s*\{[^}]*transition:\s*padding-bottom\s+var\(--background-section-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)
+    || !/\.background-library-chevron\s*\{[^}]*transition:\s*transform\s+var\(--background-section-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)
+    || !/\.background-section-collapse\s*\{[^}]*grid-template-rows\s+var\(--background-section-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)[^}]*opacity\s+var\(--background-section-motion-duration\)\s+ease[^}]*transform\s+var\(--background-section-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)) {
+    throw new Error('The background-library section motion must use one shared 300ms duration.');
+}
+
 const requiredMarkers = [
     '/api/background-preferences',
     'const backgroundInventoryEndpoint',
@@ -297,6 +304,7 @@ const requiredMarkers = [
     'requestLegacyBackgroundListing',
     'isBestdoriBackgroundName',
     "const backgroundLibrarySources = ['ordinary', 'bestdori']",
+    'const backgroundSectionTransitionFallbackMs = 400',
     'section.dataset.backgroundSection = source',
     'option.dataset.backgroundSource = source',
     "className = 'background-section-collapse'",
@@ -305,6 +313,7 @@ const requiredMarkers = [
     'transform: translateY(-4px)',
     "sectionContent.toggleAttribute('inert'",
     'runAfterBackgroundSectionTransition',
+    'window.setTimeout(finish, backgroundSectionTransitionFallbackMs)',
     'afterTransition: focusOption',
     "className = 'background-section-empty'",
     'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {',
@@ -625,6 +634,7 @@ if (transitionHelperStart < 0 || transitionHelperEnd < 0) {
 
 const transitionListeners = new Map();
 const transitionTimers = new Map();
+const transitionTimerDelays = new Map();
 let transitionTimerId = 0;
 let reduceBackgroundMotion = false;
 const transitionContentAttributes = new Map();
@@ -662,6 +672,7 @@ const transitionSection = {
 const transitionContext = vm.createContext({
     backgroundLibrarySources: ['ordinary', 'bestdori'],
     backgroundLibraryExpanded: { ordinary: true, bestdori: true },
+    backgroundSectionTransitionFallbackMs: 400,
     backgroundSectionTransitionCleanups: new Map(),
     backgroundGrid: {
         querySelectorAll() {
@@ -672,13 +683,15 @@ const transitionContext = vm.createContext({
         matchMedia() {
             return { matches: reduceBackgroundMotion };
         },
-        setTimeout(callback) {
+        setTimeout(callback, delay) {
             const timerId = ++transitionTimerId;
             transitionTimers.set(timerId, callback);
+            transitionTimerDelays.set(timerId, delay);
             return timerId;
         },
         clearTimeout(timerId) {
             transitionTimers.delete(timerId);
+            transitionTimerDelays.delete(timerId);
         }
     }
 });
@@ -701,7 +714,9 @@ if (!transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpande
     afterTransition() {
         completedBackgroundFocus += 1;
     }
-}) || completedBackgroundFocus !== 0 || !transitionListeners.has('transitionend')) {
+}) || completedBackgroundFocus !== 0
+    || !transitionListeners.has('transitionend')
+    || Array.from(transitionTimerDelays.values())[0] !== 400) {
     throw new Error('Animated background expansion did not defer its completion callback.');
 }
 transitionListeners.get('transitionend')({
@@ -710,6 +725,7 @@ transitionListeners.get('transitionend')({
 });
 if (completedBackgroundFocus !== 1
     || transitionTimers.size !== 0
+    || transitionTimerDelays.size !== 0
     || transitionContentAttributes.has('inert')
     || transitionContentAttributes.get('aria-hidden') !== 'false') {
     throw new Error('Background expansion did not complete once or restore accessible content.');
@@ -721,7 +737,10 @@ transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('or
         immediateBackgroundFocus += 1;
     }
 });
-if (immediateBackgroundFocus !== 1 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+if (immediateBackgroundFocus !== 1
+    || transitionTimers.size !== 0
+    || transitionTimerDelays.size !== 0
+    || transitionListeners.size !== 0) {
     throw new Error('An already expanded background section did not complete focus immediately.');
 }
 
@@ -734,7 +753,10 @@ transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('or
 });
 const fallbackTransitionTimer = Array.from(transitionTimers.values())[0];
 fallbackTransitionTimer();
-if (fallbackBackgroundFocus !== 1 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+if (fallbackBackgroundFocus !== 1
+    || transitionTimers.size !== 0
+    || transitionTimerDelays.size !== 0
+    || transitionListeners.size !== 0) {
     throw new Error('Background transition timeout fallback did not complete and clean up.');
 }
 
@@ -747,7 +769,9 @@ transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('or
 const staleTransitionListener = transitionListeners.get('transitionend');
 transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('ordinary', false);
 staleTransitionListener({ target: transitionContent, propertyName: 'grid-template-rows' });
-if (completedBackgroundFocus !== 1 || transitionTimers.size !== 0) {
+if (completedBackgroundFocus !== 1
+    || transitionTimers.size !== 0
+    || transitionTimerDelays.size !== 0) {
     throw new Error('Reversing a background transition did not cancel its stale completion callback.');
 }
 
@@ -757,7 +781,10 @@ transitionContext.__backgroundTransitionHelpers.setBackgroundSectionExpanded('or
         completedBackgroundFocus += 1;
     }
 });
-if (completedBackgroundFocus !== 2 || transitionTimers.size !== 0 || transitionListeners.size !== 0) {
+if (completedBackgroundFocus !== 2
+    || transitionTimers.size !== 0
+    || transitionTimerDelays.size !== 0
+    || transitionListeners.size !== 0) {
     throw new Error('Reduced-motion background expansion did not complete immediately.');
 }
 
