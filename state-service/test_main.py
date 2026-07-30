@@ -146,6 +146,55 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(configured.background_dir, existing.background_dir)
         validate_location.assert_called_once_with(configured)
 
+    def test_wizard_validates_paths_before_writing_control_token(self) -> None:
+        class AbortWizard(BaseException):
+            pass
+
+        public_config = self.project.backgrounds.parent / "unsafe-config.json"
+        unused_state_dir = self.project.root / "unused-state"
+        answers: list[object] = [
+            str(self.project.backgrounds),
+            TEST_ORIGIN,
+            "127.0.0.1:8787",
+            str(unused_state_dir),
+            "127.0.0.1:443",
+            "home.example.test",
+            "5",
+            AbortWizard(),
+        ]
+
+        with mock.patch.object(main, "prompt_value", side_effect=answers), mock.patch.object(
+            main,
+            "atomic_write_json",
+        ) as write_config, mock.patch("builtins.print"):
+            with self.assertRaises(AbortWizard):
+                main.run_configuration_wizard(public_config)
+
+        write_config.assert_not_called()
+        self.assertFalse(public_config.exists())
+        self.assertFalse(unused_state_dir.exists())
+
+    def test_wizard_validation_failure_preserves_existing_config(self) -> None:
+        class AbortWizard(BaseException):
+            pass
+
+        self.project.write_config()
+        original = self.project.config_path.read_bytes()
+
+        def accept_default(_label: str, default: str) -> str:
+            return default
+
+        with mock.patch.object(main, "prompt_value", side_effect=accept_default), mock.patch.object(
+            main,
+            "validate_application_location",
+            side_effect=AbortWizard(),
+        ), mock.patch.object(main, "atomic_write_json") as write_config, mock.patch("builtins.print"):
+            with self.assertRaises(AbortWizard):
+                main.run_configuration_wizard(self.project.config_path)
+
+        write_config.assert_not_called()
+        self.assertEqual(self.project.config_path.read_bytes(), original)
+
     def test_load_config_resolves_relative_paths(self) -> None:
         config = self.project.write_config()
         self.assertEqual(config.background_dir, self.project.backgrounds.resolve())

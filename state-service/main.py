@@ -322,14 +322,13 @@ def validate_application_location(config: AppConfig) -> None:
         raise ConfigurationError("application directory must be outside the public Web root")
 
 
-def load_config(path: Path) -> AppConfig:
-    config_path = path.resolve()
-    try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise ConfigurationError(f"configuration file does not exist: {config_path}") from None
-    except (OSError, json.JSONDecodeError) as error:
-        raise ConfigurationError(f"unable to read configuration: {error}") from error
+def _parse_config_value(
+    config_path: Path,
+    raw: Any,
+    *,
+    create_state_directory: bool,
+) -> AppConfig:
+    config_path = config_path.resolve()
     if not isinstance(raw, dict):
         raise ConfigurationError("configuration must be a JSON object")
     expected = {
@@ -384,7 +383,8 @@ def load_config(path: Path) -> AppConfig:
         raise ConfigurationError("configuration file must be outside the public Web root")
     if path_is_within(state_dir, public_root):
         raise ConfigurationError("stateDir must be outside the public Web root")
-    state_dir.mkdir(parents=True, exist_ok=True)
+    if create_state_directory:
+        state_dir.mkdir(parents=True, exist_ok=True)
     return AppConfig(
         config_path=config_path,
         background_dir=background_dir,
@@ -398,6 +398,17 @@ def load_config(path: Path) -> AppConfig:
         probe_domain_suffix=probe_domain_suffix,
         probe_timeout_seconds=probe_timeout_seconds,
     )
+
+
+def load_config(path: Path) -> AppConfig:
+    config_path = path.resolve()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ConfigurationError(f"configuration file does not exist: {config_path}") from None
+    except (OSError, json.JSONDecodeError) as error:
+        raise ConfigurationError(f"unable to read configuration: {error}") from error
+    return _parse_config_value(config_path, raw, create_state_directory=True)
 
 
 def atomic_write_json(path: Path, value: Any) -> None:
@@ -2432,9 +2443,14 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
                 "probeDomainSuffix": probe_domain_text,
                 "probeTimeoutSeconds": float(probe_timeout_text),
             }
-            atomic_write_json(config_path, raw)
-            config = load_config(config_path)
+            config = _parse_config_value(
+                config_path,
+                raw,
+                create_state_directory=False,
+            )
             validate_application_location(config)
+            config.state_dir.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(config.config_path, raw)
             break
         except Exception as error:
             print(f"\n配置无效：{error}")
