@@ -333,7 +333,9 @@ const expectedQuickLinkNotes = [
     '\u307e\u3093\u307e\u308b\u304a\u5c71\u306b\u5f69\u308a\u3092!',
     '\u4e38\u5c71\u5f69',
     '\u3067\u30fc\u3059!',
-    'POPIPA! PIPOPA! POPIPAPAPIPOPA!',
+    'POPIPA! ',
+    'PIPOPA!',
+    ' POPIPAPAPIPOPA!',
     'Happy! Lucky! Smile! Yeah!!',
     '\u3042\u306a\u305f\u9054\u3001',
     'Roselia',
@@ -347,7 +349,8 @@ const expectedQuickLinkNotes = [
 expectedQuickLinkNotes.forEach((note) => {
     if (!html.includes(note)) throw new Error(`Missing Stage 2R Quick Links note fragment: ${note}`);
 });
-if (!/href:\s*'https:\/\/www\.bilibili\.com\/video\/BV14z42167Uj'/.test(html)
+if (!/href:\s*'https:\/\/www\.bilibili\.com\/video\/BV1H29SBCEvF'/.test(html)
+    || !/href:\s*'https:\/\/www\.bilibili\.com\/video\/BV14z42167Uj'/.test(html)
     || !/link\.target = '_blank';/.test(html)
     || !/link\.rel = 'noopener noreferrer';/.test(html)
     || !/const channelNoteExitMs = 180;/.test(html)
