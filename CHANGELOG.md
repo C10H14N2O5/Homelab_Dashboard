@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 更新 Quick Links 彩蛋验证契约，使其检查拆分后的 POPIPA 文案、目标链接和新标签页安全属性。
+
 ### Added
 
 - 新增了QuickLink模式下彩蛋文本的一个跳转超链接

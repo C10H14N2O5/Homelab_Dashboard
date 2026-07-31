@@ -49,7 +49,7 @@ Zoraxy_StaticWebSite/
 
 ## 运行架构
 
-浏览器只访问 Homepage 同源 API；目标服务不再需要向 Homepage 开放 CORS：
+浏览器只访问 Homepage 同源 API：
 
 ```text
 浏览器
