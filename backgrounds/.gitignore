@@ -1,4 +1,4 @@
-# Keep the fallback background in Git; all other assets remain deployment-local.
+# Track only the exported project fallback; all other backgrounds stay deployment-local.
 *
 !.gitignore
 !bg.jpg

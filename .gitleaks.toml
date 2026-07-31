@@ -1,0 +1,11 @@
+title = "zoraxy-homelab-dashboard gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic service.home.example.test TLS fixture; it protects no real service."
+condition = "AND"
+regexTarget = "line"
+paths = ['''^state-service/test_main\.py$''']
+regexes = ['''^TEST_PRIVATE_KEY_DER = "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSl''']

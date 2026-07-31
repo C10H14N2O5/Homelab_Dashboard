@@ -2,12 +2,15 @@
 
 这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步和管理壁纸，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
 
+> [!IMPORTANT]
+> 本仓库是维护者基于真实 Zoraxy + Windows HomeLab 环境开发的参考实现，不是面向任意环境的一键安装产品。仓库保留的 `*.home.c10h14n2o5.com`、`D:\Zoraxy\...` 和服务卡片地址均为维护者部署示例；使用前必须按“公开仓库定制清单”替换为自己的域名、路径、入口和认证策略。
+
 ## 项目概览
 
 | 项目 | 当前实现 |
 | --- | --- |
 | 页面入口 | `index.html` |
-| 背景图片 | `backgrounds/bg.jpg` 随仓库提供兜底，其余原图由部署机器本地保存；缩略图由后端生成 |
+| 背景图片 | `assets/default-background.svg` 导出为 `backgrounds/bg.jpg` 随仓库提供兜底；其余原图由部署机器本地保存，缩略图由后端生成 |
 | 服务入口 | 由 `index.html` 中的服务卡片定义，并由页面自动统计 |
 | 快捷入口 | Services / Quick Links 双频道；Quick Links 固定维护 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini |
 | 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度搜索；默认 Bing，无 JavaScript 时仍可提交 |
@@ -21,16 +24,19 @@
 ## 文件结构
 
 ```text
-Zoraxy_StaticWebSite/
+zoraxy-homelab-dashboard/
+├── assets/
+│   └── default-background.svg   # 项目自有兜底壁纸源文件
 ├── backgrounds/
-│   ├── .gitignore               # 仅放行兜底 bg.jpg
-│   ├── bg.jpg                   # 拉取后即可使用的默认壁纸
+│   ├── .gitignore               # 仅放行项目兜底导出图
+│   ├── bg.jpg                   # SVG 导出的默认占位壁纸
 │   └── thumbnails/              # 运行时生成的 WebP 缩略图缓存，不进入 Git
 ├── state-service/
 │   ├── main.py                  # API、入口探测、状态存储、启动器、监视器和首次引导
 │   └── test_main.py             # Python 单元测试
 ├── scripts/
 │   ├── build-state-service.ps1  # 测试、PyInstaller 构建和 EXE 冒烟测试
+│   ├── package-release.ps1      # 组装 Windows Release 包和 SHA-256
 │   ├── uninstall-state-service.ps1 # 卸载EXE自启动注册
 │   └── verify-project.ps1       # 全仓库验证入口
 ├── audits/
@@ -38,6 +44,10 @@ Zoraxy_StaticWebSite/
 │   └── YYYY-MM-DD-*-audit.md    # 按日期归档的历次审计报告
 ├── requirements.txt             # Python 构建依赖及固定版本
 ├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
+├── licenses/                    # EXE 捆绑组件的完整许可证
+├── LICENSE                      # 项目 MIT License
+├── ASSETS.md                    # 自有、品牌和运行时资产边界
+├── THIRD_PARTY_NOTICES.md       # EXE 第三方组件说明
 ├── CHANGELOG.md
 ├── TODO.md
 └── README.md
@@ -46,6 +56,10 @@ Zoraxy_StaticWebSite/
 历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
 仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
+
+项目代码、文档和项目自有占位资产按 [MIT License](LICENSE) 发布。品牌标识、用户壁纸以及运行时获取的第三方卡面不属于本项目许可范围，详见 [ASSETS.md](ASSETS.md)；二进制依赖及完整许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `licenses/`。
+
+GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、日期、说明和版本标签，但首次公开前替换了不分发的旧背景 Blob，并将历史邮箱映射为 GitHub noreply 地址，因此两边的 Commit SHA 不同。功能开发仍以私人 Gitea 为权威来源，公共镜像通过人工审核同步。
 
 ## 运行架构
 
@@ -217,6 +231,8 @@ Content-Type: application/json
 
 永久去重记录独立保存在非公开状态目录的 `HomeLabWallpaperState-data/BestdoriCardDraws.json`，记录卡面 ID、实际文件名、SHA-256、抽取时间和卡面元数据，不与浏览器缓存或其它抽卡工具共享。“清理失效记录”只删除背景文件已缺失或 SHA-256 不匹配的记录；“清空全部记录”需要二次确认。两项操作都只维护 JSON 记录，不会删除任何背景图片。记录文件损坏时，抽卡与历史维护 API 会安全失败，壁纸偏好、上传、删除、入口探测和健康检查仍可继续使用。
 
+Bestdori 是独立第三方服务，本项目与 Bestdori、Bushiroad 或 BanG Dream 权利方不存在隶属或背书关系。MIT 许可证仅覆盖本仓库中的集成代码，不覆盖 Bestdori API、目录数据、元数据或下载的卡面图片；服务可用性、接口和使用条件可能由第三方变更，使用者应自行确认用途符合相关条款。仓库不内置任何 Bestdori 卡面。
+
 ## Python 状态服务
 
 `state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
@@ -252,6 +268,17 @@ Content-Type: application/json
 - 状态更新使用进程内互斥、`fsync` 和同目录 `os.replace`；
 - EXE、配置和数据目录必须位于公开 Web 根之外；
 - Zoraxy 继续负责 HTTPS 和首页 Basic Auth。
+
+### 公开仓库定制清单
+
+克隆后至少完成以下修改和检查，再部署到自己的环境：
+
+1. 修改 `index.html` 中全部 Services 与 Quick Links 地址、名称和探测目标；卡片数量和动画序号会自动生成。
+2. 使用首次引导或严格 v2 配置设置自己的 `backgroundDir`、`allowedOrigins`、`probeDomainSuffix`、回环监听地址和探测超时。
+3. 在 Zoraxy 中为自己的首页域配置同源 `/api/...` 转发，并只把 `index.html` 与 `backgrounds/` 放入公开 Web 根。
+4. 按实际暴露范围配置 Basic Auth 或等价访问控制；Origin、请求头和 CORS 不是身份认证。
+5. 确认 EXE、JSON 配置、状态、日志、去重记录、源代码和 `.git/` 均无法通过站点下载。
+6. 替换或新增壁纸时自行核对授权；不要把私人、来源不明或仅允许个人使用的素材提交到公开仓库。
 
 ### 严格 v2 配置
 
@@ -356,6 +383,14 @@ py_compile
 ```
 
 构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。上传和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理，不会请求 Bestdori 公网，也不会向系统回收站写入测试文件。
+
+公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
+
+```powershell
+.\scripts\package-release.ps1 -Version V2.6.2
+```
+
+脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.6.2-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含静态网页、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
 
 ## 部署和迁移
 

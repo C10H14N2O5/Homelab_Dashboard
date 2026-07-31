@@ -72,7 +72,7 @@ function Test-BlockedRepositoryPath {
         return $true
     }
     if ($extension -in @('.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif', '.svg') -and
-        $lower -ne 'backgrounds/bg.jpg') {
+        $lower -notin @('backgrounds/bg.jpg', 'assets/default-background.svg')) {
         return $true
     }
     if ($leafName -in @('state.json', 'state.json.bak', 'homelabwallpaperstate.json') -or
@@ -105,12 +105,23 @@ $requiredFiles = @(
     'index.html',
     'README.md',
     'CHANGELOG.md',
+    'LICENSE',
+    'ASSETS.md',
+    'THIRD_PARTY_NOTICES.md',
+    '.gitleaks.toml',
     '.gitignore',
+    'assets\default-background.svg',
     'backgrounds\.gitignore',
+    'backgrounds\bg.jpg',
+    'licenses\Python-3.14.6.txt',
+    'licenses\PyInstaller-6.21.0.txt',
+    'licenses\Pillow-12.3.0.txt',
+    'licenses\Send2Trash-2.1.0.txt',
     'requirements.txt',
     'state-service\main.py',
     'state-service\test_main.py',
     'scripts\build-state-service.ps1',
+    'scripts\package-release.ps1',
     'scripts\process-utils.ps1',
     'scripts\uninstall-state-service.ps1',
     'scripts\verify-project.ps1'
@@ -123,6 +134,7 @@ foreach ($relativePath in $requiredFiles) {
 }
 
 $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-service.ps1'))
+$packageSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package-release.ps1'))
 $processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
 $stateServiceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\main.py'))
 $stateServiceTestSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\test_main.py'))
@@ -151,6 +163,9 @@ $maintenanceContracts = @(
     @{ Name = 'packaged thumbnail inventory check'; Source = $buildSource; Marker = '$backgroundInventory' },
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
+    @{ Name = 'release file manifest'; Source = $packageSource; Marker = 'SHA256SUMS.txt' },
+    @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
+    @{ Name = 'release license notices'; Source = $packageSource; Marker = 'THIRD_PARTY_NOTICES.md' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
@@ -163,7 +178,9 @@ foreach ($contract in $maintenanceContracts) {
 }
 foreach ($document in @(
     @{ Name = 'README.md'; Source = $readmeSource },
-    @{ Name = 'CHANGELOG.md'; Source = $changelogSource }
+    @{ Name = 'CHANGELOG.md'; Source = $changelogSource },
+    @{ Name = 'ASSETS.md'; Source = [IO.File]::ReadAllText((Join-Path $projectRoot 'ASSETS.md')) },
+    @{ Name = 'THIRD_PARTY_NOTICES.md'; Source = [IO.File]::ReadAllText((Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md')) }
 )) {
     $fenceCount = [regex]::Matches($document.Source, '(?m)^```').Count
     if ($fenceCount % 2 -ne 0) {
