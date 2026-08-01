@@ -698,6 +698,8 @@
         }
 
         .refresh-button {
+            --refresh-button-rest-opacity: 1;
+            --refresh-button-opacity-duration: 180ms;
             min-height: 2.35rem;
             flex: 0 0 auto;
             display: inline-flex;
@@ -711,7 +713,8 @@
             background: rgba(8, 20, 36, 0.54);
             box-shadow: 0 8px 24px rgba(2, 8, 23, 0.16);
             cursor: pointer;
-            transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+            opacity: var(--refresh-button-rest-opacity);
+            transition: opacity var(--refresh-button-opacity-duration) ease, color 180ms ease, background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
             -webkit-backdrop-filter: blur(14px);
             backdrop-filter: blur(14px);
         }
@@ -727,8 +730,21 @@
         }
 
         .refresh-button:disabled {
+            --refresh-button-rest-opacity: 0.72;
             cursor: wait;
-            opacity: 0.72;
+        }
+
+        .refresh-button.is-channel-copy-exiting,
+        .refresh-button.is-channel-copy-entering {
+            pointer-events: none;
+        }
+
+        .refresh-button.is-channel-copy-exiting {
+            opacity: 0;
+        }
+
+        .refresh-button.is-channel-copy-entering {
+            --refresh-button-opacity-duration: 240ms;
         }
 
         .refresh-button[hidden] {
@@ -4274,34 +4290,38 @@
                 backgrounds.forEach((background) => {
                     merged.set(background.url.href, background);
                 });
-                backgroundModes.forEach((mode) => {
-                    const configuredUrl = backgroundUrlForMode(mode);
-                    if (!merged.has(configuredUrl.href)) {
-                        merged.set(configuredUrl.href, {
-                            url: configuredUrl,
+                const requiredBackgroundUrls = [
+                    defaultBackground,
+                    currentBackground,
+                    ...backgroundModes.map((mode) => backgroundUrlForMode(mode))
+                ];
+                requiredBackgroundUrls.forEach((requiredUrl) => {
+                    if (!merged.has(requiredUrl.href)) {
+                        merged.set(requiredUrl.href, {
+                            url: requiredUrl,
                             thumbnailUrl: null
                         });
                     }
                 });
 
                 const sorted = Array.from(merged.values()).sort((left, right) => {
+                    if (left.url.href === defaultBackground.href) return -1;
+                    if (right.url.href === defaultBackground.href) return 1;
                     return backgroundFileName(left.url).localeCompare(
                         backgroundFileName(right.url),
                         'zh-CN',
                         { numeric: true }
                     );
                 });
-                const prioritized = [];
-                const priorityUrls = [
-                    defaultBackground,
-                    currentBackground,
-                    ...backgroundModes.map((mode) => backgroundUrlForMode(mode))
-                ];
-                priorityUrls.forEach((priorityUrl) => {
-                    const index = sorted.findIndex((background) => background.url.href === priorityUrl.href);
-                    if (index >= 0) prioritized.push(sorted.splice(index, 1)[0]);
+                const requiredHrefs = new Set(requiredBackgroundUrls.map((url) => url.href));
+                const requiredCount = sorted.filter((background) => requiredHrefs.has(background.url.href)).length;
+                let remainingUnselectedSlots = Math.max(0, maximumBackgroundInventoryItems - requiredCount);
+                return sorted.filter((background) => {
+                    if (requiredHrefs.has(background.url.href)) return true;
+                    if (remainingUnselectedSlots === 0) return false;
+                    remainingUnselectedSlots -= 1;
+                    return true;
                 });
-                return prioritized.concat(sorted).slice(0, maximumBackgroundInventoryItems);
             }
 
             async function requestBackgroundInventory(controller) {
@@ -5266,7 +5286,8 @@
                 serviceChannelNote.classList.add('is-note-exiting');
                 serviceCountLabel.classList.remove('is-channel-copy-entering');
                 serviceCountLabel.classList.add('is-channel-copy-exiting');
-                [dashboardFooterBrand, lastChecked].forEach((element) => {
+                refreshButton.toggleAttribute('inert', true);
+                [refreshButton, dashboardFooterBrand, lastChecked].forEach((element) => {
                     element.classList.remove('is-channel-copy-entering');
                     element.classList.add('is-channel-copy-exiting');
                 });
@@ -5286,12 +5307,17 @@
             }
 
             function revealServicesFooterCopy() {
+                const elements = [refreshButton, dashboardFooterBrand, lastChecked];
+                elements.forEach((element) => {
+                    window.getComputedStyle(element).opacity;
+                });
                 channelFooterEnterFrame = window.requestAnimationFrame(() => {
                     channelFooterEnterFrame = null;
-                    beginChannelCopyEntry([dashboardFooterBrand, lastChecked]);
+                    beginChannelCopyEntry(elements);
                     channelFooterEnterTimer = window.setTimeout(() => {
                         channelFooterEnterTimer = null;
-                        clearChannelCopyClasses([dashboardFooterBrand, lastChecked]);
+                        clearChannelCopyClasses(elements);
+                        refreshButton.removeAttribute('inert');
                     }, channelNoteEnterMs);
                 });
             }
@@ -5315,10 +5341,12 @@
                 lastChecked.hidden = showQuickLinks;
                 if (animateCopy) {
                     if (showQuickLinks) {
-                        clearChannelCopyClasses([dashboardFooterBrand, lastChecked]);
+                        clearChannelCopyClasses([refreshButton, dashboardFooterBrand, lastChecked]);
                     } else {
                         revealServicesFooterCopy();
                     }
+                } else {
+                    refreshButton.toggleAttribute('inert', showQuickLinks);
                 }
                 if (!showQuickLinks) {
                     window.requestAnimationFrame(syncQuickLinkDimensions);
@@ -5397,6 +5425,7 @@
                 serviceCountLabel.textContent = channelCountText(completedChannel);
                 clearChannelCopyClasses([
                     serviceCountLabel,
+                    refreshButton,
                     dashboardFooterBrand,
                     lastChecked
                 ]);
@@ -5432,6 +5461,7 @@
                 serviceCountLabel.textContent = channelCountText(completedChannel);
                 clearChannelCopyClasses([
                     serviceCountLabel,
+                    refreshButton,
                     dashboardFooterBrand,
                     lastChecked
                 ]);
@@ -5625,6 +5655,7 @@
                 if (serviceCountLabel && dashboardFooterBrand && lastChecked) {
                     clearChannelCopyClasses([
                         serviceCountLabel,
+                        refreshButton,
                         dashboardFooterBrand,
                         lastChecked
                     ]);
@@ -5634,7 +5665,10 @@
                     serviceChannelNote.classList.remove('is-note-exiting', 'is-note-entering');
                     serviceChannelNote.textContent = serviceChannelDescription;
                 }
-                if (refreshButton) refreshButton.hidden = false;
+                if (refreshButton) {
+                    refreshButton.hidden = false;
+                    refreshButton.removeAttribute('inert');
+                }
                 if (dashboardFooterBrand) dashboardFooterBrand.hidden = false;
                 if (lastChecked) lastChecked.hidden = false;
             }

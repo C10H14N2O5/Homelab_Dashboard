@@ -334,6 +334,16 @@ if (!/#service-count-label,[\s\S]*?\.dashboard-footer-brand,[\s\S]*?#last-checke
     || !/function revealServicesFooterCopy\(\)/.test(html)) {
     throw new Error('Stage 2R.2 must cross-fade the Hero count and both footer side labels at 180ms/240ms.');
 }
+if (!/\.refresh-button\s*\{[^}]*--refresh-button-rest-opacity:\s*1;[^}]*--refresh-button-opacity-duration:\s*180ms;[^}]*opacity:\s*var\(--refresh-button-rest-opacity\);[^}]*transition:\s*opacity var\(--refresh-button-opacity-duration\) ease,/.test(html)
+    || !/\.refresh-button:disabled\s*\{[^}]*--refresh-button-rest-opacity:\s*0\.72;/.test(html)
+    || !/\.refresh-button\.is-channel-copy-exiting,[\s\S]*?\.refresh-button\.is-channel-copy-entering\s*\{[^}]*pointer-events:\s*none;/.test(html)
+    || !/\.refresh-button\.is-channel-copy-exiting\s*\{[^}]*opacity:\s*0;/.test(html)
+    || !/\.refresh-button\.is-channel-copy-entering\s*\{[^}]*--refresh-button-opacity-duration:\s*240ms;/.test(html)
+    || !/refreshButton\.toggleAttribute\('inert', true\);/.test(html)
+    || !/refreshButton\.toggleAttribute\('inert', showQuickLinks\);/.test(html)
+    || !/function revealServicesFooterCopy\(\)\s*\{[\s\S]*?window\.getComputedStyle\(element\)\.opacity;[\s\S]*?window\.requestAnimationFrame/.test(html)) {
+    throw new Error('The refresh button must share the 180ms/240ms channel fade while preserving its disabled opacity and interaction isolation.');
+}
 if (!/\.refresh-button\[hidden\]\s*\{[^}]*display:\s*none;/.test(html)) {
     throw new Error('Quick Links must visibly hide the refresh button even when its component display rule is active.');
 }
@@ -555,7 +565,8 @@ const requiredMarkers = [
     'normalizeBackgroundThumbnailUrl',
     'normalizeBackgroundInventory',
     'readBoundedResponseText',
-    'prioritized.concat(sorted).slice(0, maximumBackgroundInventoryItems)',
+    'const requiredBackgroundUrls = [',
+    'let remainingUnselectedSlots = Math.max(0, maximumBackgroundInventoryItems - requiredCount)',
     'discovered.size >= maximumBackgroundInventoryItems',
     'requestBackgroundInventory',
     'requestLegacyBackgroundListing',
@@ -849,6 +860,85 @@ ordinaryBackgroundNames.forEach((fileName) => {
         throw new Error(`Ordinary background name was misclassified as Bestdori: ${fileName}`);
     }
 });
+
+const backgroundSortStart = runtimeScript.indexOf('function mergeAndSortBackgrounds(');
+const backgroundSortEnd = runtimeScript.indexOf('async function requestBackgroundInventory(', backgroundSortStart);
+if (backgroundSortStart < 0 || backgroundSortEnd < 0) {
+    throw new Error('Unable to extract the background natural-order helper.');
+}
+context.backgroundModes = ['landscape', 'portrait'];
+context.defaultBackground = context.backgroundUrlFromName('bg.jpg');
+context.currentBackground = context.backgroundUrlFromName('selected-10.jpg');
+context.backgroundPreferences = {
+    landscape: 'selected-10.jpg',
+    portrait: 'selected-2.jpg'
+};
+context.backgroundUrlForMode = (mode) => context.backgroundUrlFromName(
+    context.backgroundPreferences[mode]
+);
+context.backgroundFileName = (url) => decodeURIComponent(url.pathname.split('/').pop());
+vm.runInContext(
+    runtimeScript.slice(backgroundSortStart, backgroundSortEnd)
+        + '\nglobalThis.__mergeAndSortBackgrounds = mergeAndSortBackgrounds;',
+    context
+);
+const makeBackgroundRecord = (name) => ({
+    url: context.backgroundUrlFromName(name),
+    thumbnailUrl: null
+});
+const naturallyOrderedInput = [
+    'wallpaper-10.jpg',
+    'selected-10.jpg',
+    'alpha.jpg',
+    'bg.jpg',
+    'selected-2.jpg',
+    'wallpaper-2.jpg'
+].map(makeBackgroundRecord);
+const expectedNaturalOrder = [
+    'bg.jpg',
+    'alpha.jpg',
+    'selected-2.jpg',
+    'selected-10.jpg',
+    'wallpaper-2.jpg',
+    'wallpaper-10.jpg'
+];
+const naturalOrder = Array.from(
+    context.__mergeAndSortBackgrounds(naturallyOrderedInput),
+    (background) => context.backgroundFileName(background.url)
+);
+if (JSON.stringify(naturalOrder) !== JSON.stringify(expectedNaturalOrder)) {
+    throw new Error(`Selected backgrounds changed the natural wallpaper order: ${naturalOrder.join(', ')}`);
+}
+context.currentBackground = context.backgroundUrlFromName('wallpaper-10.jpg');
+context.backgroundPreferences.landscape = 'wallpaper-10.jpg';
+const orderAfterSelectionChange = Array.from(
+    context.__mergeAndSortBackgrounds(naturallyOrderedInput),
+    (background) => context.backgroundFileName(background.url)
+);
+if (JSON.stringify(orderAfterSelectionChange) !== JSON.stringify(expectedNaturalOrder)) {
+    throw new Error('Changing the selected wallpaper reordered the visible background library.');
+}
+
+context.currentBackground = context.backgroundUrlFromName('wallpaper-0512.jpg');
+context.backgroundPreferences = {
+    landscape: 'wallpaper-0512.jpg',
+    portrait: 'wallpaper-0511.jpg'
+};
+const overflowInput = Array.from({ length: 513 }, (_, index) => (
+    makeBackgroundRecord(`wallpaper-${String(index).padStart(4, '0')}.jpg`)
+));
+const overflowOrder = Array.from(
+    context.__mergeAndSortBackgrounds(overflowInput),
+    (background) => context.backgroundFileName(background.url)
+);
+if (overflowOrder.length !== context.maximumBackgroundInventoryItems
+    || overflowOrder[0] !== 'bg.jpg'
+    || overflowOrder[overflowOrder.length - 2] !== 'wallpaper-0511.jpg'
+    || overflowOrder[overflowOrder.length - 1] !== 'wallpaper-0512.jpg'
+    || overflowOrder.includes('wallpaper-0509.jpg')
+    || overflowOrder.includes('wallpaper-0510.jpg')) {
+    throw new Error('The capped wallpaper list did not retain selected backgrounds in natural order.');
+}
 
 const renderFunctionStart = runtimeScript.indexOf('function renderBackgroundOptions(');
 const renderFunctionEnd = runtimeScript.indexOf('function focusBackgroundOption(', renderFunctionStart);
@@ -2000,6 +2090,7 @@ function runChannelTimer(delay) {
     channelTimers.delete(entry[0]);
     entry[1].callback();
 }
+const channelComputedStyleReads = [];
 const channelContext = vm.createContext({
     Error,
     Number,
@@ -2008,7 +2099,10 @@ const channelContext = vm.createContext({
         createElement() { return makeStageOneElement(); }
     },
     window: {
-        getComputedStyle() { return { columnGap: '12px' }; },
+        getComputedStyle(element) {
+            channelComputedStyleReads.push(element);
+            return { columnGap: '12px', opacity: '0' };
+        },
         requestAnimationFrame(callback) {
             callback();
             return null;
@@ -2029,7 +2123,10 @@ channelContext.cards = [
 ];
 channelContext.quickLinks = Array.from({ length: 5 }, () => makeStageOneElement());
 channelContext.serviceCountLabel = makeStageOneElement();
-channelContext.refreshButton = makeStageOneElement();
+channelContext.refreshButton = makeStageOneElement({
+    disabled: true,
+    attributes: { 'aria-busy': 'true' }
+});
 channelContext.lastChecked = makeStageOneElement({ textContent: 'service status' });
 channelContext.dashboard = makeStageOneElement();
 channelContext.channelSwitchAnchor = makeStageOneElement();
@@ -2086,6 +2183,10 @@ if (channelContext.channelSwitch.disabled
     || Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
     || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'true'
     || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.refreshButton.hidden
+    || Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || !channelContext.refreshButton.disabled
+    || channelContext.refreshButton.attributes['aria-busy'] !== 'true'
     || channelContext.cards[1].style.properties['--channel-card-index'] !== '1'
     || channelContext.quickLinks[4].style.properties['--channel-card-index'] !== '4') {
     throw new Error('Stage 2R channel switch did not initialize its settled Services state.');
@@ -2101,6 +2202,8 @@ if (channelContext.dashboard.dataset.activeChannel !== 'services'
     || !channelContext.quickLinksPanel.classList.contains('is-channel-incoming')
     || !channelContext.serviceChannelNote.classList.contains('is-note-exiting')
     || !channelContext.serviceCountLabel.classList.contains('is-channel-copy-exiting')
+    || !channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
     || !channelContext.lastChecked.classList.contains('is-channel-copy-exiting')
     || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
@@ -2135,6 +2238,8 @@ if (channelContext.dashboard.dataset.activeChannel !== 'quick-links'
     || channelContext.channelSwitch.attributes['aria-pressed'] !== 'true'
     || channelContext.serviceCountLabel.textContent !== '\u0035 \u4e2a\u5feb\u6377\u5165\u53e3'
     || !channelContext.refreshButton.hidden
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
     || !channelContext.dashboardFooterBrand.hidden
     || !channelContext.lastChecked.hidden
     || channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
@@ -2152,6 +2257,9 @@ if (!channelContext.servicesPanel.hidden
     || Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
     || channelContext.servicesPanel.attributes['aria-hidden'] !== 'true'
     || !Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || !channelContext.refreshButton.disabled
+    || channelContext.refreshButton.attributes['aria-busy'] !== 'true'
     || channelContext.channelSwitch.focusCalls !== 2
     || channelTimers.size !== 0) {
     throw new Error('Stage 2R did not normalize the completed Quick Links flip without residual state.');
@@ -2159,6 +2267,8 @@ if (!channelContext.servicesPanel.hidden
 channelContext.channelSwitch.clickHandler();
 if (!channelContext.channelSwitch.classList.contains('is-switching-to-services')
     || !channelContext.channelPanelRotor.classList.contains('is-channel-flipping')
+    || !channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-exiting')
     || !channelContext.lastChecked.classList.contains('is-channel-copy-exiting')) {
     throw new Error('Stage 2R Services return did not reuse the same left-flip animation.');
@@ -2173,14 +2283,29 @@ if (channelContext.serviceChannelNote.textContent
 runChannelTimer(200);
 if (channelContext.dashboardFooterBrand.hidden
     || channelContext.lastChecked.hidden
+    || channelContext.refreshButton.hidden
+    || !channelContext.refreshButton.classList.contains('is-channel-copy-entering')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || !channelComputedStyleReads.includes(channelContext.refreshButton)
+    || !channelComputedStyleReads.includes(channelContext.dashboardFooterBrand)
+    || !channelComputedStyleReads.includes(channelContext.lastChecked)
     || !channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-entering')
     || !channelContext.lastChecked.classList.contains('is-channel-copy-entering')
     || channelContext.dashboardFooterBrand.textContent !== 'HomeLab \u00b7 Private service gateway'
     || channelContext.lastChecked.textContent !== 'service status') {
     throw new Error('Stage 2R.2 did not restore both footer side labels through a 240ms fade without overwriting status text.');
 }
+runChannelTimer(240);
+runChannelTimer(240);
+if (channelContext.refreshButton.classList.contains('is-channel-copy-entering')
+    || Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || !channelContext.refreshButton.disabled
+    || channelContext.refreshButton.attributes['aria-busy'] !== 'true') {
+    throw new Error('The refresh button did not complete its 240ms Services fade without altering the active refresh state.');
+}
 channelContext.channelPanelRotor.animationendHandler({ animationName: 'channel-flip-left' });
 if (channelContext.serviceCountLabel.classList.contains('is-channel-copy-entering')
+    || channelContext.refreshButton.classList.contains('is-channel-copy-entering')
     || channelContext.dashboardFooterBrand.classList.contains('is-channel-copy-entering')
     || channelContext.lastChecked.classList.contains('is-channel-copy-entering')) {
     throw new Error('Stage 2R.2 left auxiliary copy fade classes behind after the Services flip.');
@@ -2211,6 +2336,8 @@ if (channelContext.dashboard.classList.contains('channel-motion-ready')
 channelContext.channelSwitch.clickHandler();
 if (!channelContext.dashboard.classList.contains('is-mobile-channel-switching')
     || !channelContext.channelSwitch.classList.contains('is-mobile-channel-fading-out')
+    || !channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || channelContext.quickLinksPanel.hidden
     || !channelContext.servicesPanel.hidden
     || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
@@ -2233,6 +2360,13 @@ if (!channelContext.channelSwitch.classList.contains('is-mobile-channel-fading-i
 }
 runChannelTimer(180);
 runChannelTimer(200);
+if (channelContext.refreshButton.hidden
+    || !channelContext.refreshButton.classList.contains('is-channel-copy-entering')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')) {
+    throw new Error('The mobile Services return did not reveal the refresh button through its 240ms fade.');
+}
+runChannelTimer(240);
+runChannelTimer(240);
 runChannelTimer(300);
 if (!channelContext.quickLinksPanel.hidden
     || channelContext.servicesPanel.hidden
@@ -2248,6 +2382,8 @@ if (channelContext.dashboard.dataset.activeChannel !== 'services'
     || channelContext.servicesPanel.attributes['aria-hidden'] !== 'false'
     || Object.prototype.hasOwnProperty.call(channelContext.servicesPanel.attributes, 'inert')
     || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')
+    || channelContext.refreshButton.hidden
+    || Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || channelContext.channelSwitch.attributes['aria-disabled']
     || channelContext.dashboard.classList.contains('is-mobile-channel-switching')
     || channelContext.channelSwitch.focusCalls !== 8
@@ -2255,12 +2391,18 @@ if (channelContext.dashboard.dataset.activeChannel !== 'services'
     throw new Error('Stage 3 mobile Services entrance did not settle into one interactive active panel.');
 }
 channelContext.channelSwitch.clickHandler();
+if (!channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')) {
+    throw new Error('The mobile Quick Links switch did not start the refresh-button fade immediately.');
+}
 runChannelTimer(120);
 runChannelTimer(160);
 runChannelTimer(180);
 runChannelTimer(200);
 runChannelTimer(300);
 if (!channelContext.quickLinksPanel.classList.contains('is-mobile-channel-incoming')
+    || !channelContext.refreshButton.hidden
+    || !Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || channelContext.quickLinksPanel.attributes['aria-hidden'] !== 'true'
     || !Object.prototype.hasOwnProperty.call(channelContext.quickLinksPanel.attributes, 'inert')) {
     throw new Error('Stage 3 mobile Quick Links cards were focusable during their staggered entrance.');
@@ -2278,6 +2420,8 @@ channelContext.__channelHelpers.configureChannelMotion();
 channelContext.channelSwitch.clickHandler();
 if (channelContext.servicesPanel.hidden
     || !channelContext.quickLinksPanel.hidden
+    || channelContext.refreshButton.hidden
+    || Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
     || channelContext.dashboard.classList.contains('channel-motion-ready')
     || channelContext.dashboard.classList.contains('channel-mobile-motion-ready')
     || channelContext.servicesPanel.attributes['aria-hidden'] !== 'false'
@@ -2289,6 +2433,10 @@ channelContext.__channelHelpers.restoreStaticServicesChannel();
 if (!channelContext.channelSwitch.disabled
     || channelContext.dashboard.dataset.activeChannel !== 'services'
     || channelContext.quickLinksPanel.hidden !== true
+    || channelContext.refreshButton.hidden
+    || Object.prototype.hasOwnProperty.call(channelContext.refreshButton.attributes, 'inert')
+    || channelContext.refreshButton.classList.contains('is-channel-copy-exiting')
+    || channelContext.refreshButton.classList.contains('is-channel-copy-entering')
     || channelContext.serviceChannelNote.textContent
         !== '\u72b6\u6001\u8868\u793a\u5165\u53e3\u8282\u70b9\u7ecf Zoraxy \u5230\u4e0a\u6e38\u7684\u670d\u52a1\u7aef\u94fe\u8def\uff0c\u4e0d\u4ee3\u8868\u5e94\u7528\u5185\u90e8\u5065\u5eb7\u3002') {
     throw new Error('Stage 2R JavaScript failure fallback did not preserve static Services.');
