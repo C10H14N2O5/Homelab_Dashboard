@@ -183,7 +183,9 @@
         }
 
         .search-form {
-            --search-collapsed-width: 7rem;
+            --search-engine-width: 7rem;
+            --search-shortcut-width: 4.15rem;
+            --search-collapsed-width: calc(var(--search-engine-width) + var(--search-shortcut-width));
             --search-motion-duration: 300ms;
             position: relative;
             width: min(26rem, 100%);
@@ -291,11 +293,11 @@
         }
 
         .search-form[data-search-enhanced="true"][data-current-engine="google"] {
-            --search-collapsed-width: 7.5rem;
+            --search-engine-width: 7.5rem;
         }
 
         .search-form[data-search-enhanced="true"][data-current-engine="duckduckgo"] {
-            --search-collapsed-width: 10rem;
+            --search-engine-width: 10rem;
         }
 
         .search-form[data-search-enhanced="true"] .search-engine-button {
@@ -308,7 +310,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
+            gap: 0.45rem;
             border: 1px solid transparent;
             border-radius: 999px;
             background: transparent;
@@ -336,6 +338,54 @@
             justify-content: center;
         }
 
+        .search-engine-identity {
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            opacity: 1;
+            transform: translateX(0);
+            transition:
+                opacity 90ms ease,
+                transform 90ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .search-engine-identity-viewport {
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .search-form[data-engine-switch-phase="out"][data-engine-switch-direction="previous"] .search-engine-identity {
+            opacity: 0;
+            transform: translateX(0.7rem);
+        }
+
+        .search-form[data-engine-switch-phase="out"][data-engine-switch-direction="next"] .search-engine-identity {
+            opacity: 0;
+            transform: translateX(-0.7rem);
+        }
+
+        .search-form[data-engine-switch-phase="position"] .search-engine-identity {
+            opacity: 0;
+            transition: none;
+        }
+
+        .search-form[data-engine-switch-phase="position"][data-engine-switch-direction="previous"] .search-engine-identity {
+            transform: translateX(-0.7rem);
+        }
+
+        .search-form[data-engine-switch-phase="position"][data-engine-switch-direction="next"] .search-engine-identity {
+            transform: translateX(0.7rem);
+        }
+
+        .search-form[data-engine-switch-phase] .search-engine-identity {
+            will-change: opacity, transform;
+        }
+
         .search-engine-icon svg {
             width: 100%;
             height: 100%;
@@ -360,6 +410,34 @@
             transition: font-size var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
+        .search-shortcut-keycap {
+            width: 3.6rem;
+            max-width: 3.6rem;
+            height: 1.45rem;
+            padding: 0;
+            flex: 0 0 3.6rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid rgba(186, 230, 253, 0.28);
+            border-radius: 0.4rem;
+            color: rgba(224, 242, 254, 0.88);
+            background: rgba(125, 211, 252, 0.1);
+            box-shadow: inset 0 -1px 0 rgba(2, 8, 23, 0.24);
+            font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+            font-size: 0.66rem;
+            font-weight: 650;
+            line-height: 1;
+            transition:
+                width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                max-width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                flex-basis var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                border-width var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+                opacity 160ms ease,
+                transform var(--search-motion-duration) cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
         .search-form[data-search-enhanced="true"] .search-input,
         .search-form[data-search-enhanced="true"] .search-submit-button {
             width: 0;
@@ -380,11 +458,11 @@
         }
 
         .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-button {
-            width: calc(var(--search-collapsed-width) - 1.25rem);
+            width: calc(var(--search-engine-width) - 1.25rem);
             height: 2.5rem;
             margin-left: 0.34rem;
             padding: 0 0.62rem;
-            gap: 0.42rem;
+            gap: 0;
             border-color: rgba(125, 211, 252, 0.22);
             background: rgba(125, 211, 252, 0.08);
         }
@@ -399,8 +477,22 @@
             height: 1.35rem;
         }
 
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-identity {
+            gap: 0.42rem;
+        }
+
         .search-form[data-search-enhanced="true"][data-expanded="true"] .search-engine-name {
             font-size: 0.82rem;
+        }
+
+        .search-form[data-search-enhanced="true"][data-expanded="true"] .search-shortcut-keycap {
+            width: 0;
+            max-width: 0;
+            padding: 0;
+            flex-basis: 0;
+            border-width: 0;
+            opacity: 0;
+            transform: translateX(-0.25rem) scale(0.82);
         }
 
         .search-form[data-search-enhanced="true"][data-expanded="true"] .search-input {
@@ -2250,13 +2342,18 @@
                 <p class="hero-subtitle">Service Dashboard · <span id="service-count-label">家庭服务入口</span></p>
                 <form class="search-form" id="homepage-search-form" action="https://www.bing.com/search" method="get" target="_blank" rel="noopener noreferrer" role="search" data-expanded="false" data-menu-open="false">
                     <div class="search-shell">
-                        <button class="search-engine-button" id="search-engine-button" type="button" aria-label="使用 Bing 搜索，点击展开搜索框" aria-controls="homepage-search-input" aria-expanded="false">
-                            <span class="search-engine-icon search-engine-current-icon">
-                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-                                    <use class="search-current-engine-use" href="#search-logo-bing"/>
-                                </svg>
+                        <button class="search-engine-button" id="search-engine-button" type="button" aria-label="使用 Bing 搜索，点击或按 Alt 加波浪号键展开搜索框" aria-keyshortcuts="Alt+&#96;" aria-controls="homepage-search-input" aria-expanded="false">
+                            <span class="search-engine-identity-viewport">
+                                <span class="search-engine-identity">
+                                    <span class="search-engine-icon search-engine-current-icon">
+                                        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                                            <use class="search-current-engine-use" href="#search-logo-bing"/>
+                                        </svg>
+                                    </span>
+                                    <span class="search-engine-name" id="search-engine-name">Bing</span>
+                                </span>
                             </span>
-                            <span class="search-engine-name" id="search-engine-name">Bing</span>
+                            <kbd class="search-shortcut-keycap" aria-hidden="true">Alt + ~</kbd>
                         </button>
                         <label class="sr-only" for="homepage-search-input">搜索关键词</label>
                         <input class="search-input" id="homepage-search-input" type="search" name="q" placeholder="把问题丢给互联网" autocomplete="off" enterkeyhint="search" pattern=".*\S.*" required>
@@ -4704,6 +4801,8 @@
 
             const SEARCH_ENGINE_STORAGE_KEY = 'homelab-search-engine-v1';
             const SEARCH_DEFAULT_PLACEHOLDER = '把问题丢给互联网';
+            const SEARCH_ENGINE_SWITCH_DEBOUNCE_MS = 90;
+            const SEARCH_ENGINE_TRACK_PHASE_MS = 90;
             const SEARCH_EMPTY_PLACEHOLDERS = Object.freeze([
                 'Null 也算问题吗？',
                 '关键词不会自己长出来哦',
@@ -4749,31 +4848,45 @@
                 return SEARCH_ENGINES.find((engine) => engine.id === engineId) || SEARCH_ENGINES[0];
             }
 
-            function readStoredSearchEngineId(storage) {
+            function clearLegacySearchEnginePreference() {
                 try {
-                    return resolveSearchEngine(storage.getItem(SEARCH_ENGINE_STORAGE_KEY)).id;
+                    window.localStorage.removeItem(SEARCH_ENGINE_STORAGE_KEY);
                 } catch (error) {
-                    return SEARCH_ENGINES[0].id;
+                    // Storage cleanup failure must not prevent an in-memory Bing-first search session.
                 }
             }
 
-            function storeSearchEngineId(storage, engineId) {
-                try {
-                    storage.setItem(SEARCH_ENGINE_STORAGE_KEY, resolveSearchEngine(engineId).id);
-                } catch (error) {
-                    // A storage failure must not prevent the current in-memory selection from working.
-                }
+            function isSearchShortcutEditableTarget(target) {
+                if (!target || typeof target.closest !== 'function') return false;
+                return Boolean(target.closest(
+                    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]'
+                ));
             }
 
-            function availableSearchStorage() {
-                try {
-                    return window.localStorage;
-                } catch (error) {
-                    return {
-                        getItem() { return null; },
-                        setItem() {}
-                    };
+            function shouldHandleSearchFocusShortcut(event, dialogOpen = false) {
+                if (!event
+                    || event.code !== 'Backquote'
+                    || !event.altKey
+                    || event.ctrlKey
+                    || event.shiftKey
+                    || event.metaKey
+                    || event.isComposing
+                    || event.repeat
+                    || dialogOpen) {
+                    return false;
                 }
+                if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) {
+                    return false;
+                }
+                return !isSearchShortcutEditableTarget(event.target);
+            }
+
+            function handleHomepageSearchFocusShortcut(event, controller, dialogOpen = false) {
+                if (!shouldHandleSearchFocusShortcut(event, dialogOpen)) return false;
+                event.preventDefault();
+                controller.setSearchMenuOpen(false, false);
+                controller.setSearchExpanded(true, true, false);
+                return true;
             }
 
             function createHomepageSearchController(elements, environment = {}) {
@@ -4781,6 +4894,7 @@
                     form,
                     input,
                     engineButton,
+                    engineIdentity,
                     engineName,
                     submitButton,
                     menu,
@@ -4788,18 +4902,66 @@
                     status,
                     currentEngineUses
                 } = elements;
-                const storage = environment.storage || {
-                    getItem() { return null; },
-                    setItem() {}
-                };
                 const schedule = environment.schedule || ((callback, delay) => window.setTimeout(callback, delay));
                 const cancelSchedule = environment.cancelSchedule || ((timer) => window.clearTimeout(timer));
                 const activeElement = environment.activeElement || (() => document.activeElement);
+                const reduceMotion = environment.reduceMotion
+                    || (() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
                 let currentEngine = SEARCH_ENGINES[0];
                 let expanded = false;
                 let menuOpen = false;
                 let emptyFeedbackTimer = 0;
                 let emptyFeedbackIndex = 0;
+                let queuedEngineIndex = null;
+                let queuedEngineStepDelta = 0;
+                let queuedEngineDirection = 'next';
+                let engineSwitchDebounceTimer = 0;
+                let engineSwitchMidpointTimer = 0;
+                let engineSwitchFinishTimer = 0;
+                let engineSwitchRevision = 0;
+                let engineSwitchQueueRevision = 0;
+
+                function clearEngineSwitchTrackState() {
+                    delete form.dataset.engineSwitchPhase;
+                    delete form.dataset.engineSwitchDirection;
+                }
+
+                function cancelEngineSwitchAnimation() {
+                    engineSwitchRevision += 1;
+                    if (engineSwitchMidpointTimer) {
+                        cancelSchedule(engineSwitchMidpointTimer);
+                        engineSwitchMidpointTimer = 0;
+                    }
+                    if (engineSwitchFinishTimer) {
+                        cancelSchedule(engineSwitchFinishTimer);
+                        engineSwitchFinishTimer = 0;
+                    }
+                    clearEngineSwitchTrackState();
+                    return engineSwitchRevision;
+                }
+
+                function cancelQueuedSearchEngineSwitch() {
+                    engineSwitchQueueRevision += 1;
+                    if (engineSwitchDebounceTimer) {
+                        cancelSchedule(engineSwitchDebounceTimer);
+                        engineSwitchDebounceTimer = 0;
+                    }
+                    queuedEngineIndex = null;
+                    queuedEngineStepDelta = 0;
+                    queuedEngineDirection = 'next';
+                }
+
+                function isEngineSwitchAnimationActive() {
+                    return Boolean(engineSwitchMidpointTimer || engineSwitchFinishTimer);
+                }
+
+                function queuedEngineSwitchDirection() {
+                    return queuedEngineStepDelta < 0
+                        ? 'previous'
+                        : queuedEngineStepDelta > 0
+                            ? 'next'
+                            : queuedEngineDirection;
+                }
 
                 function syncSearchEngineButtonState() {
                     if (expanded) {
@@ -4813,7 +4975,7 @@
                     } else {
                         engineButton.setAttribute(
                             'aria-label',
-                            `使用 ${currentEngine.name} 搜索，点击展开搜索框`
+                            `使用 ${currentEngine.name} 搜索，点击或按 Alt 加波浪号键展开搜索框`
                         );
                         engineButton.removeAttribute('aria-haspopup');
                         engineButton.setAttribute('aria-controls', 'homepage-search-input');
@@ -4821,7 +4983,7 @@
                     }
                 }
 
-                function applySearchEngine(engineId, persist = false) {
+                function applySearchEngine(engineId) {
                     currentEngine = resolveSearchEngine(engineId);
                     form.setAttribute('action', currentEngine.action);
                     input.setAttribute('name', currentEngine.queryParameter);
@@ -4835,10 +4997,91 @@
                         option.tabIndex = selected ? 0 : -1;
                     });
                     syncSearchEngineButtonState();
-                    if (persist) {
-                        storeSearchEngineId(storage, currentEngine.id);
-                    }
                     return currentEngine;
+                }
+
+                function completeSearchEngineSwitch(engineId, direction) {
+                    const targetEngine = resolveSearchEngine(engineId);
+                    const revision = cancelEngineSwitchAnimation();
+                    if (targetEngine.id === currentEngine.id) return currentEngine;
+
+                    if (reduceMotion()) {
+                        const engine = applySearchEngine(targetEngine.id);
+                        status.textContent = `已切换到 ${engine.name}。`;
+                        cancelQueuedSearchEngineSwitch();
+                        return engine;
+                    }
+
+                    form.dataset.engineSwitchDirection = direction;
+                    form.dataset.engineSwitchPhase = 'out';
+                    engineSwitchMidpointTimer = schedule(() => {
+                        if (revision !== engineSwitchRevision) return;
+                        engineSwitchMidpointTimer = 0;
+                        const engine = applySearchEngine(targetEngine.id);
+                        status.textContent = `已切换到 ${engine.name}。`;
+                        form.dataset.engineSwitchPhase = 'position';
+                        void engineIdentity.offsetWidth;
+                        form.dataset.engineSwitchPhase = 'in';
+                        engineSwitchFinishTimer = schedule(() => {
+                            if (revision !== engineSwitchRevision) return;
+                            engineSwitchFinishTimer = 0;
+                            clearEngineSwitchTrackState();
+                            if (engineSwitchDebounceTimer) return;
+                            commitQueuedSearchEngineSwitch();
+                        }, SEARCH_ENGINE_TRACK_PHASE_MS);
+                    }, SEARCH_ENGINE_TRACK_PHASE_MS);
+                    return targetEngine;
+                }
+
+                function commitQueuedSearchEngineSwitch() {
+                    engineSwitchDebounceTimer = 0;
+                    if (queuedEngineIndex === null) return currentEngine;
+                    const targetEngine = SEARCH_ENGINES[queuedEngineIndex];
+                    if (isEngineSwitchAnimationActive()) return targetEngine;
+                    if (targetEngine.id === currentEngine.id) {
+                        cancelQueuedSearchEngineSwitch();
+                        return currentEngine;
+                    }
+                    return completeSearchEngineSwitch(
+                        targetEngine.id,
+                        queuedEngineSwitchDirection()
+                    );
+                }
+
+                function queueSearchEngineSwitch(step) {
+                    engineSwitchQueueRevision += 1;
+                    const queueRevision = engineSwitchQueueRevision;
+                    const currentIndex = SEARCH_ENGINES.findIndex((engine) => engine.id === currentEngine.id);
+                    const baseIndex = queuedEngineIndex === null ? currentIndex : queuedEngineIndex;
+                    queuedEngineIndex = (baseIndex + step + SEARCH_ENGINES.length) % SEARCH_ENGINES.length;
+                    queuedEngineStepDelta += step;
+                    queuedEngineDirection = step < 0 ? 'previous' : 'next';
+                    if (engineSwitchDebounceTimer) cancelSchedule(engineSwitchDebounceTimer);
+                    engineSwitchDebounceTimer = schedule(
+                        () => {
+                            if (queueRevision !== engineSwitchQueueRevision) return;
+                            commitQueuedSearchEngineSwitch();
+                        },
+                        SEARCH_ENGINE_SWITCH_DEBOUNCE_MS
+                    );
+                }
+
+                function handleSearchEngineShortcut(event) {
+                    const isPrevious = event && event.code === 'KeyJ';
+                    const isNext = event && event.code === 'KeyL';
+                    if ((!isPrevious && !isNext)
+                        || !event.altKey
+                        || event.ctrlKey
+                        || event.shiftKey
+                        || event.metaKey
+                        || event.isComposing
+                        || activeElement() !== input
+                        || (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph'))) {
+                        return false;
+                    }
+                    event.preventDefault();
+                    queueSearchEngineSwitch(isPrevious ? -1 : 1);
+                    return true;
                 }
 
                 function clearEmptySearchFeedback() {
@@ -4867,6 +5110,10 @@
 
                 function setSearchExpanded(nextExpanded, focusInput = false, restoreFocus = false) {
                     expanded = Boolean(nextExpanded);
+                    if (!expanded) {
+                        cancelQueuedSearchEngineSwitch();
+                        cancelEngineSwitchAnimation();
+                    }
                     form.dataset.expanded = String(expanded);
                     if (!expanded && menuOpen) {
                         setSearchMenuOpen(false, false);
@@ -4882,6 +5129,10 @@
                 }
 
                 function setSearchMenuOpen(nextOpen, restoreFocus = false) {
+                    if (nextOpen) {
+                        cancelQueuedSearchEngineSwitch();
+                        cancelEngineSwitchAnimation();
+                    }
                     menuOpen = expanded && Boolean(nextOpen);
                     form.dataset.menuOpen = String(menuOpen);
                     menu.hidden = !menuOpen;
@@ -4896,7 +5147,9 @@
                 }
 
                 function selectSearchEngine(engineId) {
-                    const engine = applySearchEngine(engineId, true);
+                    cancelQueuedSearchEngineSwitch();
+                    cancelEngineSwitchAnimation();
+                    const engine = applySearchEngine(engineId);
                     setSearchMenuOpen(false, false);
                     setSearchExpanded(true, true, false);
                     status.textContent = `已切换到 ${engine.name}。`;
@@ -4939,6 +5192,8 @@
                 }
 
                 function handleSearchSubmit(event) {
+                    cancelQueuedSearchEngineSwitch();
+                    cancelEngineSwitchAnimation();
                     if (!input.value.trim()) {
                         event.preventDefault();
                         input.value = '';
@@ -4971,6 +5226,7 @@
                     setSearchExpanded,
                     setSearchMenuOpen,
                     selectSearchEngine,
+                    handleSearchEngineShortcut,
                     handleSearchMenuKeydown,
                     handleSearchSubmit,
                     collapseSearchForWindowBlur,
@@ -4989,6 +5245,7 @@
                 form.setAttribute('action', SEARCH_ENGINES[0].action);
                 if (input) {
                     input.setAttribute('name', SEARCH_ENGINES[0].queryParameter);
+                    input.removeAttribute('aria-keyshortcuts');
                 }
                 if (menu) {
                     menu.hidden = true;
@@ -5000,11 +5257,12 @@
                 if (!form) return null;
                 const input = document.getElementById('homepage-search-input');
                 const engineButton = document.getElementById('search-engine-button');
+                const engineIdentity = form.querySelector('.search-engine-identity');
                 const engineName = document.getElementById('search-engine-name');
                 const submitButton = document.getElementById('search-submit-button');
                 const menu = document.getElementById('search-engine-list');
                 const status = document.getElementById('search-status');
-                if (!input || !engineButton || !engineName || !submitButton || !menu || !status) {
+                if (!input || !engineButton || !engineIdentity || !engineName || !submitButton || !menu || !status) {
                     throw new Error('搜索栏结构不完整');
                 }
                 const options = Array.from(menu.querySelectorAll('[data-search-engine]'));
@@ -5013,19 +5271,27 @@
                     throw new Error('搜索栏结构不完整');
                 }
 
-                const storage = availableSearchStorage();
+                clearLegacySearchEnginePreference();
                 const controller = createHomepageSearchController({
                     form,
                     input,
                     engineButton,
+                    engineIdentity,
                     engineName,
                     submitButton,
                     menu,
                     options,
                     status,
                     currentEngineUses
-                }, { storage });
-                controller.applySearchEngine(readStoredSearchEngineId(storage));
+                });
+                controller.applySearchEngine(SEARCH_ENGINES[0].id);
+                const handleGlobalSearchShortcut = (event) => {
+                    handleHomepageSearchFocusShortcut(
+                        event,
+                        controller,
+                        Boolean(document.querySelector('dialog[open]'))
+                    );
+                };
 
                 engineButton.addEventListener('click', () => {
                     if (!controller.isExpanded()) {
@@ -5038,6 +5304,7 @@
                     option.addEventListener('click', () => controller.selectSearchEngine(option.dataset.searchEngine));
                 });
                 menu.addEventListener('keydown', controller.handleSearchMenuKeydown);
+                input.addEventListener('keydown', controller.handleSearchEngineShortcut);
                 form.addEventListener('submit', controller.handleSearchSubmit);
                 form.addEventListener('keydown', (event) => {
                     if (event.key !== 'Escape' || controller.isMenuOpen()) return;
@@ -5061,6 +5328,8 @@
                 window.addEventListener('blur', controller.collapseSearchForWindowBlur);
                 form.noValidate = true;
                 form.dataset.searchEnhanced = 'true';
+                input.setAttribute('aria-keyshortcuts', 'Alt+J Alt+L');
+                document.addEventListener('keydown', handleGlobalSearchShortcut);
                 return controller;
             }
 

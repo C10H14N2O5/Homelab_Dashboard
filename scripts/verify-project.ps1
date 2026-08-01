@@ -465,14 +465,16 @@ if (!searchInputMatch
     || !searchInputMatch[0].includes('name="q"')
     || !searchInputMatch[0].includes(`placeholder="${defaultSearchPlaceholder}"`)
     || !searchInputMatch[0].includes('pattern=".*\\S.*"')
-    || !searchInputMatch[0].includes(' required')) {
+    || !searchInputMatch[0].includes(' required')
+    || searchInputMatch[0].includes('aria-keyshortcuts=')) {
     const inputTag = searchInputMatch ? searchInputMatch[0] : '';
     throw new Error(`The static Bing search input contract is incomplete: ${JSON.stringify([
         inputTag.includes('type="search"'),
         inputTag.includes('name="q"'),
         inputTag.includes(`placeholder="${defaultSearchPlaceholder}"`),
         inputTag.includes('pattern=".*\\S.*"'),
-        inputTag.includes(' required')
+        inputTag.includes(' required'),
+        !inputTag.includes('aria-keyshortcuts=')
     ])} ${inputTag || 'missing'}`);
 }
 for (const [id, expectedType] of [
@@ -483,6 +485,19 @@ for (const [id, expectedType] of [
     if (!button || !new RegExp(`\\btype="${expectedType}"`).test(button[0])) {
         throw new Error(`${id} has the wrong button type.`);
     }
+}
+const searchEngineButtonMatch = html.match(/<button\b[^>]*\bid="search-engine-button"[^>]*>/);
+const collapsedSearchAriaLabel = '\u4f7f\u7528 Bing \u641c\u7d22\uff0c\u70b9\u51fb\u6216\u6309 Alt \u52a0\u6ce2\u6d6a\u53f7\u952e\u5c55\u5f00\u641c\u7d22\u6846';
+if (!searchEngineButtonMatch
+    || !searchEngineButtonMatch[0].includes('aria-keyshortcuts="Alt+&#96;"')
+    || !searchEngineButtonMatch[0].includes(`aria-label="${collapsedSearchAriaLabel}"`)) {
+    throw new Error('The search engine pill is missing its Alt+Backquote shortcut accessibility contract.');
+}
+const searchShortcutKeycaps = [...html.matchAll(/<kbd\b[^>]*\bclass="search-shortcut-keycap"[^>]*>Alt \+ ~<\/kbd>/g)];
+if (searchShortcutKeycaps.length !== 1
+    || !/\baria-hidden="true"/.test(searchShortcutKeycaps[0][0])
+    || !/<span\b[^>]*\bclass="search-engine-identity"[^>]*>[\s\S]*?search-engine-current-icon[\s\S]*?id="search-engine-name"[\s\S]*?<\/span>\s*<kbd\b[^>]*\bclass="search-shortcut-keycap"/.test(html)) {
+    throw new Error('The collapsed search pill must center one decorative keycap beside its wrapped icon and name.');
 }
 const searchOptionIds = [...html.matchAll(/\bdata-search-engine="([^"]+)"/g)].map((match) => match[1]);
 if (JSON.stringify(searchOptionIds) !== JSON.stringify(['bing', 'google', 'duckduckgo', 'baidu'])) {
@@ -510,15 +525,25 @@ for (const symbolId of ['search-logo-bing', 'search-logo-google', 'search-logo-d
 if (!/<symbol\b[^>]*\bid="search-logo-baidu"[\s\S]*?<path\b[^>]*\bfill="currentColor"/.test(html)) {
     throw new Error('The Baidu search icon must use the high-contrast monochrome foreground color.');
 }
-if (!/\.search-form\s*\{[^}]*--search-collapsed-width:\s*7rem;[^}]*--search-motion-duration:\s*300ms;/.test(html)
-    || !/data-current-engine="duckduckgo"[\s\S]*?--search-collapsed-width:\s*10rem;/.test(html)
+if (!/\.search-form\s*\{[^}]*--search-engine-width:\s*7rem;[^}]*--search-shortcut-width:\s*4\.15rem;[^}]*--search-collapsed-width:\s*calc\(var\(--search-engine-width\) \+ var\(--search-shortcut-width\)\);[^}]*--search-motion-duration:\s*300ms;/.test(html)
+    || !/data-current-engine="google"[\s\S]*?--search-engine-width:\s*7\.5rem;/.test(html)
+    || !/data-current-engine="duckduckgo"[\s\S]*?--search-engine-width:\s*10rem;/.test(html)
     || !/\.search-shell\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)
     || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-collapsed-width\) - 2px\);[^}]*display:\s*inline-flex;/.test(html)
     || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)[^}]*height\s+var\(--search-motion-duration\)[^}]*margin-left\s+var\(--search-motion-duration\)[^}]*padding\s+var\(--search-motion-duration\)[^}]*gap\s+var\(--search-motion-duration\)/.test(html)
-    || !/data-expanded="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-collapsed-width\) - 1\.25rem\);/.test(html)
+    || !/data-expanded="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-engine-width\) - 1\.25rem\);/.test(html)
+    || !/\.search-engine-identity\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*0\.5rem;/.test(html)
+    || !/\.search-engine-identity\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateX\(0\);[^}]*opacity\s+90ms[^}]*transform\s+90ms/.test(html)
+    || !/\.search-engine-identity-viewport\s*\{[^}]*display:\s*inline-flex;[^}]*overflow:\s*hidden;/.test(html)
+    || !/data-engine-switch-phase="out"\]\[data-engine-switch-direction="previous"\][^}]*\.search-engine-identity\s*\{[^}]*opacity:\s*0;[^}]*translateX\(0\.7rem\)/.test(html)
+    || !/data-engine-switch-phase="out"\]\[data-engine-switch-direction="next"\][^}]*\.search-engine-identity\s*\{[^}]*opacity:\s*0;[^}]*translateX\(-0\.7rem\)/.test(html)
+    || !/data-engine-switch-phase="position"\]\[data-engine-switch-direction="previous"\][^}]*\.search-engine-identity\s*\{[^}]*translateX\(-0\.7rem\)/.test(html)
+    || !/data-engine-switch-phase="position"\]\[data-engine-switch-direction="next"\][^}]*\.search-engine-identity\s*\{[^}]*translateX\(0\.7rem\)/.test(html)
+    || !/\.search-shortcut-keycap\s*\{[^}]*width:\s*3\.6rem;[^}]*flex:\s*0\s+0\s+3\.6rem;[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)[^}]*max-width\s+var\(--search-motion-duration\)[^}]*flex-basis\s+var\(--search-motion-duration\)[^}]*opacity\s+160ms/.test(html)
+    || !/data-expanded="true"\]\s+\.search-shortcut-keycap\s*\{[^}]*width:\s*0;[^}]*max-width:\s*0;[^}]*flex-basis:\s*0;[^}]*opacity:\s*0;/.test(html)
     || !/\.search-engine-name\s*\{[^}]*overflow:\s*visible;[^}]*line-height:\s*1\.35;/.test(html)
     || !/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?transition-duration:\s*0\.01ms\s*!important;[\s\S]*?transition-delay:\s*0ms\s*!important;/.test(html)) {
-    throw new Error('The persistent engine pill is missing its 300ms continuous size transition or unclipped text contract.');
+    throw new Error('The persistent engine pill is missing its keycap-aware 300ms transition, adaptive engine width, or reduced-motion contract.');
 }
 
 if (!/\.background-library-section\s*\{[^}]*--background-section-motion-duration:\s*300ms;/.test(html)
@@ -1695,22 +1720,58 @@ const searchSource = runtimeScript.slice(searchSourceStart, searchSourceEnd);
 if (/\bfetch\s*\(|\bXMLHttpRequest\b|\bsendBeacon\b/.test(searchSource)) {
     throw new Error('Homepage search initialization, input, and engine switching must not send network requests.');
 }
+if (/localStorage\.(?:getItem|setItem)\s*\(|\bsessionStorage\b/.test(searchSource)
+    || !searchSource.includes("window.localStorage.removeItem(SEARCH_ENGINE_STORAGE_KEY)")) {
+    throw new Error('Search engine selection must be in-memory only and clear its legacy localStorage key.');
+}
 const submitBindingIndex = searchSource.indexOf("form.addEventListener('submit'");
 const enhancementFlagIndex = searchSource.indexOf("form.dataset.searchEnhanced = 'true'");
+const shortcutBindingIndex = searchSource.indexOf("document.addEventListener('keydown', handleGlobalSearchShortcut)");
+const engineShortcutBindingIndex = searchSource.indexOf("input.addEventListener('keydown', controller.handleSearchEngineShortcut)");
+const engineShortcutAriaIndex = searchSource.indexOf("input.setAttribute('aria-keyshortcuts', 'Alt+J Alt+L')");
 if (submitBindingIndex < 0
     || enhancementFlagIndex < 0
-    || enhancementFlagIndex < submitBindingIndex) {
+    || enhancementFlagIndex < submitBindingIndex
+    || shortcutBindingIndex < enhancementFlagIndex
+    || engineShortcutBindingIndex < 0
+    || engineShortcutBindingIndex > enhancementFlagIndex
+    || engineShortcutAriaIndex < enhancementFlagIndex) {
     throw new Error('The search form claims enhancement before its event bindings are installed.');
 }
+if (!searchSource.includes("event.code !== 'Backquote'")
+    || !searchSource.includes('|| !event.altKey')
+    || !searchSource.includes("event.getModifierState('AltGraph')")
+    || !searchSource.includes("document.querySelector('dialog[open]')")) {
+    throw new Error('The public Alt+Backquote shortcut guard is incomplete.');
+}
+if (!searchSource.includes('const SEARCH_ENGINE_SWITCH_DEBOUNCE_MS = 90;')
+    || !searchSource.includes('const SEARCH_ENGINE_TRACK_PHASE_MS = 90;')
+    || !searchSource.includes("event.code === 'KeyJ'")
+    || !searchSource.includes("event.code === 'KeyL'")
+    || !searchSource.includes('activeElement() !== input')
+    || !searchSource.includes('queuedEngineIndex === null ? currentIndex : queuedEngineIndex')
+    || !searchSource.includes('queuedEngineStepDelta += step')
+    || !searchSource.includes('revision !== engineSwitchRevision')
+    || !searchSource.includes('queueRevision !== engineSwitchQueueRevision')
+    || !searchSource.includes('if (isEngineSwitchAnimationActive()) return targetEngine')) {
+    throw new Error('The second-stage Alt+J/L debounce or directional switching contract is incomplete.');
+}
 
+const clearedLegacySearchKeys = [];
 const searchContext = vm.createContext({
     console: { warn() {} },
     document: { activeElement: null },
-    window: { setTimeout, clearTimeout }
+    window: {
+        setTimeout,
+        clearTimeout,
+        localStorage: {
+            removeItem(key) { clearedLegacySearchKeys.push(key); }
+        }
+    }
 });
 vm.runInContext(
     searchSource
-        + '\nglobalThis.__searchHelpers = { SEARCH_EMPTY_PLACEHOLDERS, SEARCH_ENGINES, resolveSearchEngine, readStoredSearchEngineId, storeSearchEngineId, createHomepageSearchController };',
+        + '\nglobalThis.__searchHelpers = { SEARCH_ENGINE_SWITCH_DEBOUNCE_MS, SEARCH_ENGINE_TRACK_PHASE_MS, SEARCH_EMPTY_PLACEHOLDERS, SEARCH_ENGINES, resolveSearchEngine, clearLegacySearchEnginePreference, isSearchShortcutEditableTarget, shouldHandleSearchFocusShortcut, handleHomepageSearchFocusShortcut, createHomepageSearchController };',
     searchContext
 );
 const expectedEmptySearchPlaceholders = [
@@ -1749,10 +1810,95 @@ for (const invalidEngineId of ['', '__proto__', 'constructor', 'toString', 'unkn
         throw new Error(`Unsafe or unknown search engine id did not fall back to Bing: ${invalidEngineId}`);
     }
 }
-if (searchContext.__searchHelpers.readStoredSearchEngineId({
-    getItem() { throw new Error('storage disabled'); }
-}) !== 'bing') {
-    throw new Error('A storage read failure did not fall back to Bing.');
+searchContext.__searchHelpers.clearLegacySearchEnginePreference();
+if (JSON.stringify(clearedLegacySearchKeys) !== JSON.stringify(['homelab-search-engine-v1'])) {
+    throw new Error('Search initialization did not remove the legacy persisted engine preference.');
+}
+searchContext.window.localStorage = {
+    removeItem() { throw new Error('storage disabled'); }
+};
+searchContext.__searchHelpers.clearLegacySearchEnginePreference();
+
+function makeSearchShortcutEvent(overrides = {}) {
+    let prevented = false;
+    const event = {
+        code: 'Backquote',
+        altKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        metaKey: false,
+        isComposing: false,
+        repeat: false,
+        target: { closest() { return null; } },
+        getModifierState() { return false; },
+        preventDefault() { prevented = true; },
+        wasPrevented() { return prevented; }
+    };
+    return Object.assign(event, overrides);
+}
+
+for (const targetName of ['body', 'link', 'button']) {
+    const shortcutCalls = [];
+    const event = makeSearchShortcutEvent({
+        target: { targetName, closest() { return null; } }
+    });
+    const handled = searchContext.__searchHelpers.handleHomepageSearchFocusShortcut(event, {
+        setSearchMenuOpen(...args) { shortcutCalls.push(['menu', ...args]); },
+        setSearchExpanded(...args) { shortcutCalls.push(['expanded', ...args]); }
+    });
+    if (!handled
+        || !event.wasPrevented()
+        || JSON.stringify(shortcutCalls) !== JSON.stringify([
+            ['menu', false, false],
+            ['expanded', true, true, false]
+        ])) {
+        throw new Error(`Alt+Backquote did not move search focus from ${targetName}.`);
+    }
+}
+
+for (const editableSelector of [
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable]',
+    '[role="textbox"]',
+    '[role="combobox"]'
+]) {
+    const target = {
+        closest(selector) {
+            if (!selector.includes(editableSelector)) {
+                throw new Error(`Editable selector is missing ${editableSelector}.`);
+            }
+            return {};
+        }
+    };
+    if (!searchContext.__searchHelpers.isSearchShortcutEditableTarget(target)) {
+        throw new Error(`Alt+Backquote did not exclude ${editableSelector}.`);
+    }
+}
+
+const blockedShortcutCases = [
+    ['non-Backquote key', { code: 'KeyK' }, false],
+    ['missing Alt', { altKey: false }, false],
+    ['Control', { ctrlKey: true }, false],
+    ['Shift', { shiftKey: true }, false],
+    ['Meta', { metaKey: true }, false],
+    ['IME composition', { isComposing: true }, false],
+    ['key repeat', { repeat: true }, false],
+    ['AltGraph', { getModifierState(name) { return name === 'AltGraph'; } }, false],
+    ['open dialog', {}, true],
+    ['search input', { target: { closest() { return {}; } } }, false]
+];
+for (const [caseName, overrides, dialogOpen] of blockedShortcutCases) {
+    const shortcutCalls = [];
+    const event = makeSearchShortcutEvent(overrides);
+    const handled = searchContext.__searchHelpers.handleHomepageSearchFocusShortcut(event, {
+        setSearchMenuOpen(...args) { shortcutCalls.push(['menu', ...args]); },
+        setSearchExpanded(...args) { shortcutCalls.push(['expanded', ...args]); }
+    }, dialogOpen);
+    if (handled || event.wasPrevented() || shortcutCalls.length) {
+        throw new Error(`Alt+Backquote was not ignored for ${caseName}.`);
+    }
 }
 
 function makeSearchClassList() {
@@ -1801,6 +1947,7 @@ const searchInput = makeSearchElement();
 searchInput.value = 'keep this query';
 searchInput.placeholder = '\u628a\u95ee\u9898\u4e22\u7ed9\u4e92\u8054\u7f51';
 const searchEngineButton = makeSearchElement();
+const searchEngineIdentity = makeSearchElement();
 const searchEngineName = makeSearchElement();
 const searchSubmitButton = makeSearchElement();
 const searchMenu = makeSearchElement();
@@ -1812,15 +1959,6 @@ const searchOptions = expectedSearchEngines.map(([id]) => {
     return option;
 });
 const searchCurrentUses = [makeSearchElement()];
-const searchStorageValues = new Map([[`homelab-search-engine-v1`, 'google']]);
-const searchStorageWrites = [];
-const searchStorage = {
-    getItem(key) { return searchStorageValues.has(key) ? searchStorageValues.get(key) : null; },
-    setItem(key, value) {
-        searchStorageWrites.push([key, value]);
-        searchStorageValues.set(key, value);
-    }
-};
 const searchTimers = [];
 const searchSchedule = (callback, delay) => {
     const timer = { callback, delay, cancelled: false };
@@ -1834,6 +1972,7 @@ const searchController = searchContext.__searchHelpers.createHomepageSearchContr
     form: searchForm,
     input: searchInput,
     engineButton: searchEngineButton,
+    engineIdentity: searchEngineIdentity,
     engineName: searchEngineName,
     submitButton: searchSubmitButton,
     menu: searchMenu,
@@ -1841,36 +1980,31 @@ const searchController = searchContext.__searchHelpers.createHomepageSearchContr
     status: searchStatus,
     currentEngineUses: searchCurrentUses
 }, {
-    storage: searchStorage,
     schedule: searchSchedule,
     cancelSchedule: searchCancelSchedule,
-    activeElement: () => activeSearchElement
+    activeElement: () => activeSearchElement,
+    reduceMotion: () => false
 });
 
-searchController.applySearchEngine(
-    searchContext.__searchHelpers.readStoredSearchEngineId(searchStorage)
-);
-if (searchController.currentEngine().id !== 'google'
-    || searchForm.action !== 'https://www.google.com/search'
+searchController.applySearchEngine('bing');
+if (searchController.currentEngine().id !== 'bing'
+    || searchForm.action !== 'https://www.bing.com/search'
     || searchInput.name !== 'q'
-    || searchForm.dataset.currentEngine !== 'google'
-    || searchEngineName.textContent !== 'Google'
+    || searchForm.dataset.currentEngine !== 'bing'
+    || searchEngineName.textContent !== 'Bing'
     || searchEngineButton.attributes['aria-controls'] !== 'homepage-search-input'
     || searchEngineButton.attributes['aria-expanded'] !== 'false'
+    || searchEngineButton.attributes['aria-label'] !== '\u4f7f\u7528 Bing \u641c\u7d22\uff0c\u70b9\u51fb\u6216\u6309 Alt \u52a0\u6ce2\u6d6a\u53f7\u952e\u5c55\u5f00\u641c\u7d22\u6846'
     || Object.prototype.hasOwnProperty.call(searchEngineButton.attributes, 'aria-haspopup')
     || searchInput.value !== 'keep this query') {
-    throw new Error('Stored search engine initialization changed the query or applied the wrong form contract.');
+    throw new Error('A new search controller did not start from the in-memory Bing default.');
 }
-searchController.applySearchEngine('baidu', true);
+searchController.applySearchEngine('baidu');
 if (searchForm.action !== 'https://www.baidu.com/s'
     || searchInput.name !== 'wd'
-    || searchInput.value !== 'keep this query'
-    || JSON.stringify(searchStorageWrites) !== JSON.stringify([['homelab-search-engine-v1', 'baidu']])) {
-    throw new Error('Search engine selection was not safely persisted as an id-only preference.');
+    || searchInput.value !== 'keep this query') {
+    throw new Error('In-memory search engine selection changed the query or form contract.');
 }
-searchContext.__searchHelpers.storeSearchEngineId({
-    setItem() { throw new Error('storage disabled'); }
-}, 'google');
 
 searchController.setSearchExpanded(true);
 if (searchEngineButton.attributes['aria-controls'] !== 'search-engine-list'
@@ -1889,6 +2023,30 @@ if (!searchController.isExpanded()
     || activeSearchElement !== searchInput
     || searchInput.value !== 'keep this query') {
     throw new Error('Selecting an engine from the expanded state did not preserve and refocus the query.');
+}
+
+searchController.setSearchMenuOpen(true);
+searchInput.value = 'preserve shortcut query';
+let globalShortcutPrevented = false;
+const globalShortcutHandled = searchContext.__searchHelpers.handleHomepageSearchFocusShortcut({
+    code: 'Backquote',
+    altKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    metaKey: false,
+    isComposing: false,
+    repeat: false,
+    target: { closest() { return null; } },
+    getModifierState() { return false; },
+    preventDefault() { globalShortcutPrevented = true; }
+}, searchController);
+if (!globalShortcutHandled
+    || !globalShortcutPrevented
+    || searchController.isMenuOpen()
+    || !searchController.isExpanded()
+    || activeSearchElement !== searchInput
+    || searchInput.value !== 'preserve shortcut query') {
+    throw new Error('Alt+Backquote did not close the engine menu, focus search, and preserve the current query.');
 }
 
 searchController.setSearchMenuOpen(true);
@@ -1912,6 +2070,345 @@ if (searchController.isExpanded()
     || searchEngineButton.attributes['aria-controls'] !== 'homepage-search-input'
     || Object.prototype.hasOwnProperty.call(searchEngineButton.attributes, 'aria-haspopup')) {
     throw new Error('The collapsed persistent pill exposed the engine menu instead of the search input.');
+}
+
+function createEngineShortcutHarness(reduceMotion = false, timing = null) {
+    const form = makeSearchElement();
+    const input = makeSearchElement();
+    input.value = 'shortcut query';
+    const engineButton = makeSearchElement();
+    const engineIdentity = makeSearchElement();
+    const engineName = makeSearchElement();
+    const submitButton = makeSearchElement();
+    const menu = makeSearchElement();
+    const status = makeSearchElement();
+    const options = expectedSearchEngines.map(([id]) => {
+        const option = makeSearchElement();
+        option.dataset.searchEngine = id;
+        return option;
+    });
+    const timers = [];
+    const controller = searchContext.__searchHelpers.createHomepageSearchController({
+        form,
+        input,
+        engineButton,
+        engineIdentity,
+        engineName,
+        submitButton,
+        menu,
+        options,
+        status,
+        currentEngineUses: [makeSearchElement()]
+    }, {
+        schedule(callback, delay) {
+            if (timing) return timing.schedule(callback, delay);
+            const timer = { callback, delay, cancelled: false };
+            timers.push(timer);
+            return timer;
+        },
+        cancelSchedule(timer) {
+            if (timing) {
+                timing.cancel(timer);
+            } else {
+                timer.cancelled = true;
+            }
+        },
+        activeElement: () => activeSearchElement,
+        reduceMotion: () => reduceMotion
+    });
+    controller.applySearchEngine('bing');
+    controller.setSearchExpanded(true, true, false);
+    return {
+        controller,
+        form,
+        input,
+        engineIdentity,
+        status,
+        timers
+    };
+}
+
+function createDeterministicSearchTiming() {
+    let now = 0;
+    let nextId = 1;
+    const scheduled = [];
+    function schedule(callback, delay) {
+        const timer = {
+            id: nextId++,
+            callback,
+            delay,
+            dueAt: now + delay,
+            cancelled: false
+        };
+        scheduled.push(timer);
+        return timer;
+    }
+    function cancel(timer) {
+        timer.cancelled = true;
+    }
+    function advance(duration) {
+        const targetTime = now + duration;
+        while (true) {
+            const nextTimer = scheduled
+                .filter((timer) => !timer.cancelled && timer.dueAt <= targetTime)
+                .sort((left, right) => left.dueAt - right.dueAt || left.id - right.id)[0];
+            if (!nextTimer) break;
+            nextTimer.cancelled = true;
+            now = nextTimer.dueAt;
+            nextTimer.callback();
+        }
+        now = targetTime;
+    }
+    return { schedule, cancel, advance, scheduled, now: () => now };
+}
+
+function makeEngineShortcutEvent(code, overrides = {}) {
+    let prevented = false;
+    const event = {
+        code,
+        altKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        metaKey: false,
+        isComposing: false,
+        repeat: false,
+        getModifierState() { return false; },
+        preventDefault() { prevented = true; },
+        wasPrevented() { return prevented; }
+    };
+    return Object.assign(event, overrides);
+}
+
+const engineShortcutHarness = createEngineShortcutHarness(false);
+const firstNextEvent = makeEngineShortcutEvent('KeyL');
+const repeatedNextEvent = makeEngineShortcutEvent('KeyL', { repeat: true });
+if (!engineShortcutHarness.controller.handleSearchEngineShortcut(firstNextEvent)
+    || !engineShortcutHarness.controller.handleSearchEngineShortcut(repeatedNextEvent)
+    || !firstNextEvent.wasPrevented()
+    || !repeatedNextEvent.wasPrevented()
+    || engineShortcutHarness.timers.length !== 2
+    || !engineShortcutHarness.timers[0].cancelled
+    || engineShortcutHarness.timers[1].delay !== 90
+    || engineShortcutHarness.controller.currentEngine().id !== 'bing') {
+    throw new Error('Rapid Alt+L input was not merged into one 90ms pending switch.');
+}
+
+engineShortcutHarness.timers[1].callback();
+if (engineShortcutHarness.form.dataset.engineSwitchDirection !== 'next'
+    || engineShortcutHarness.form.dataset.engineSwitchPhase !== 'out'
+    || engineShortcutHarness.controller.currentEngine().id !== 'bing'
+    || engineShortcutHarness.timers[2].delay !== 90) {
+    throw new Error('The merged engine switch did not begin one rightward 180ms track.');
+}
+engineShortcutHarness.timers[2].callback();
+if (engineShortcutHarness.controller.currentEngine().id !== 'duckduckgo'
+    || engineShortcutHarness.form.dataset.engineSwitchPhase !== 'in'
+    || engineShortcutHarness.input.value !== 'shortcut query'
+    || activeSearchElement !== engineShortcutHarness.input
+    || engineShortcutHarness.status.textContent !== '\u5df2\u5207\u6362\u5230 DuckDuckGo\u3002'
+    || engineShortcutHarness.timers[3].delay !== 90) {
+    throw new Error('The merged switch did not apply only its final engine at track midpoint.');
+}
+engineShortcutHarness.timers[3].callback();
+if (Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'engineSwitchPhase')
+    || Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'engineSwitchDirection')) {
+    throw new Error('The engine track did not clean up after its second 90ms phase.');
+}
+
+engineShortcutHarness.controller.applySearchEngine('baidu');
+const wrapNextEvent = makeEngineShortcutEvent('KeyL');
+engineShortcutHarness.controller.handleSearchEngineShortcut(wrapNextEvent);
+engineShortcutHarness.timers[4].callback();
+engineShortcutHarness.timers[5].callback();
+engineShortcutHarness.timers[6].callback();
+if (!wrapNextEvent.wasPrevented()
+    || engineShortcutHarness.controller.currentEngine().id !== 'bing'
+    || engineShortcutHarness.form.dataset.currentEngine !== 'bing') {
+    throw new Error('Alt+L did not wrap from Baidu to Bing.');
+}
+
+const wrapPreviousEvent = makeEngineShortcutEvent('KeyJ');
+engineShortcutHarness.controller.handleSearchEngineShortcut(wrapPreviousEvent);
+engineShortcutHarness.timers[7].callback();
+if (engineShortcutHarness.form.dataset.engineSwitchDirection !== 'previous') {
+    throw new Error('Alt+J did not begin a leftward engine track.');
+}
+engineShortcutHarness.timers[8].callback();
+engineShortcutHarness.timers[9].callback();
+if (!wrapPreviousEvent.wasPrevented()
+    || engineShortcutHarness.controller.currentEngine().id !== 'baidu') {
+    throw new Error('Alt+J did not wrap from Bing to Baidu.');
+}
+
+engineShortcutHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
+engineShortcutHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+engineShortcutHarness.timers[11].callback();
+if (engineShortcutHarness.controller.currentEngine().id !== 'baidu'
+    || Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('Opposing rapid engine shortcuts did not cancel without animation.');
+}
+
+const blockedEngineShortcutCases = [
+    ['missing Alt', makeEngineShortcutEvent('KeyL', { altKey: false })],
+    ['Control', makeEngineShortcutEvent('KeyL', { ctrlKey: true })],
+    ['Shift', makeEngineShortcutEvent('KeyL', { shiftKey: true })],
+    ['Meta', makeEngineShortcutEvent('KeyL', { metaKey: true })],
+    ['IME composition', makeEngineShortcutEvent('KeyL', { isComposing: true })],
+    ['AltGraph', makeEngineShortcutEvent('KeyL', { getModifierState(name) { return name === 'AltGraph'; } })],
+    ['unrelated key', makeEngineShortcutEvent('KeyK')]
+];
+for (const [caseName, event] of blockedEngineShortcutCases) {
+    activeSearchElement = engineShortcutHarness.input;
+    const timerCount = engineShortcutHarness.timers.length;
+    if (engineShortcutHarness.controller.handleSearchEngineShortcut(event)
+        || event.wasPrevented()
+        || engineShortcutHarness.timers.length !== timerCount) {
+        throw new Error(`Engine shortcut was not ignored for ${caseName}.`);
+    }
+}
+activeSearchElement = searchEngineButton;
+const unfocusedEngineEvent = makeEngineShortcutEvent('KeyL');
+if (engineShortcutHarness.controller.handleSearchEngineShortcut(unfocusedEngineEvent)
+    || unfocusedEngineEvent.wasPrevented()) {
+    throw new Error('Alt+L switched engines while the search input did not own focus.');
+}
+activeSearchElement = engineShortcutHarness.input;
+
+const cancelPendingEvent = makeEngineShortcutEvent('KeyL');
+engineShortcutHarness.controller.handleSearchEngineShortcut(cancelPendingEvent);
+const cancelPendingTimer = engineShortcutHarness.timers[engineShortcutHarness.timers.length - 1];
+engineShortcutHarness.controller.setSearchExpanded(false, false, false);
+if (!cancelPendingTimer.cancelled
+    || Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('Collapsing search did not cancel a pending engine shortcut and track.');
+}
+
+const reducedEngineShortcutHarness = createEngineShortcutHarness(true);
+const reducedNextEvent = makeEngineShortcutEvent('KeyL');
+reducedEngineShortcutHarness.controller.handleSearchEngineShortcut(reducedNextEvent);
+reducedEngineShortcutHarness.timers[0].callback();
+if (!reducedNextEvent.wasPrevented()
+    || reducedEngineShortcutHarness.controller.currentEngine().id !== 'google'
+    || reducedEngineShortcutHarness.timers.length !== 1
+    || Object.prototype.hasOwnProperty.call(reducedEngineShortcutHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('Reduced motion did not apply the final engine immediately after debounce.');
+}
+
+const animationWindowTiming = createDeterministicSearchTiming();
+const animationWindowHarness = createEngineShortcutHarness(false, animationWindowTiming);
+animationWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+animationWindowTiming.advance(100);
+if (animationWindowHarness.form.dataset.engineSwitchPhase !== 'out'
+    || animationWindowHarness.controller.currentEngine().id !== 'bing') {
+    throw new Error('The deterministic shortcut scenario did not enter the first animation window.');
+}
+animationWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+animationWindowTiming.advance(100);
+animationWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+animationWindowTiming.advance(400);
+if (animationWindowHarness.controller.currentEngine().id !== 'baidu'
+    || animationWindowHarness.form.dataset.currentEngine !== 'baidu'
+    || animationWindowHarness.input.value !== 'shortcut query'
+    || activeSearchElement !== animationWindowHarness.input
+    || Object.prototype.hasOwnProperty.call(animationWindowHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('Three Alt+L presses spanning 100ms animation windows did not accumulate from Bing to Baidu.');
+}
+
+const entryWindowTiming = createDeterministicSearchTiming();
+const entryWindowHarness = createEngineShortcutHarness(false, entryWindowTiming);
+entryWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+entryWindowTiming.advance(190);
+if (entryWindowHarness.controller.currentEngine().id !== 'google'
+    || entryWindowHarness.form.dataset.engineSwitchPhase !== 'in') {
+    throw new Error('The deterministic shortcut scenario did not reach the engine-entry phase.');
+}
+entryWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+entryWindowTiming.advance(400);
+if (entryWindowHarness.controller.currentEngine().id !== 'duckduckgo'
+    || Object.prototype.hasOwnProperty.call(entryWindowHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('An Alt+L press during engine entry lost its projected target.');
+}
+
+const staleFinishTiming = createDeterministicSearchTiming();
+const staleFinishHarness = createEngineShortcutHarness(false, staleFinishTiming);
+staleFinishHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+staleFinishTiming.advance(190);
+const staleFinishTimer = staleFinishTiming.scheduled[staleFinishTiming.scheduled.length - 1];
+if (staleFinishHarness.controller.currentEngine().id !== 'google'
+    || staleFinishHarness.form.dataset.engineSwitchPhase !== 'in'
+    || !staleFinishTimer
+    || staleFinishTimer.dueAt !== 270) {
+    throw new Error('The stale-finish regression did not reach the expected animation boundary.');
+}
+staleFinishHarness.controller.setSearchExpanded(false, false, false);
+staleFinishHarness.controller.setSearchExpanded(true, true, false);
+staleFinishHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+if (!staleFinishTimer.cancelled) {
+    throw new Error('A superseded animation finish timer was not cancelled.');
+}
+staleFinishTimer.callback();
+staleFinishTiming.advance(400);
+if (staleFinishHarness.controller.currentEngine().id !== 'duckduckgo'
+    || Object.prototype.hasOwnProperty.call(staleFinishHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('A stale animation finish callback cleared the newer logical engine target.');
+}
+
+const continuousTrackTiming = createDeterministicSearchTiming();
+const continuousTrackHarness = createEngineShortcutHarness(false, continuousTrackTiming);
+continuousTrackHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+continuousTrackTiming.advance(160);
+const activeMidpointTimer = continuousTrackTiming.scheduled[continuousTrackTiming.scheduled.length - 1];
+if (continuousTrackHarness.form.dataset.engineSwitchPhase !== 'out'
+    || !activeMidpointTimer
+    || activeMidpointTimer.dueAt !== 180) {
+    throw new Error('The continuous-track regression did not reach the outgoing animation phase.');
+}
+continuousTrackHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+if (continuousTrackHarness.form.dataset.engineSwitchPhase !== 'out'
+    || activeMidpointTimer.cancelled) {
+    throw new Error('A key during the outgoing phase restarted the visible engine track.');
+}
+continuousTrackTiming.advance(180);
+if (continuousTrackHarness.form.dataset.engineSwitchPhase !== 'out'
+    || continuousTrackHarness.controller.currentEngine().id !== 'google') {
+    throw new Error('The first engine track did not continue into the accumulated follow-up target.');
+}
+continuousTrackHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+continuousTrackTiming.advance(400);
+if (continuousTrackHarness.controller.currentEngine().id !== 'baidu'
+    || Object.prototype.hasOwnProperty.call(continuousTrackHarness.form.dataset, 'engineSwitchPhase')) {
+    throw new Error('The uninterrupted animation track did not finish at the latest logical target.');
+}
+
+for (const firstInterval of [160, 170, 180, 190, 200]) {
+    for (const secondInterval of [160, 170, 180, 190, 200]) {
+        const boundaryTiming = createDeterministicSearchTiming();
+        const boundaryHarness = createEngineShortcutHarness(false, boundaryTiming);
+        boundaryHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+        boundaryTiming.advance(firstInterval);
+        boundaryHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+        boundaryTiming.advance(secondInterval);
+        boundaryHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
+        boundaryTiming.advance(400);
+        if (boundaryHarness.controller.currentEngine().id !== 'baidu'
+            || Object.prototype.hasOwnProperty.call(boundaryHarness.form.dataset, 'engineSwitchPhase')) {
+            throw new Error(
+                `Alt+L boundary intervals ${firstInterval}/${secondInterval}ms did not accumulate to Baidu.`
+            );
+        }
+    }
+}
+
+const reverseWindowTiming = createDeterministicSearchTiming();
+const reverseWindowHarness = createEngineShortcutHarness(false, reverseWindowTiming);
+reverseWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
+reverseWindowTiming.advance(120);
+reverseWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
+reverseWindowTiming.advance(120);
+reverseWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
+reverseWindowTiming.advance(400);
+if (reverseWindowHarness.controller.currentEngine().id !== 'google') {
+    throw new Error('Three reverse Alt+J presses spanning animation windows did not accumulate correctly.');
 }
 
 let previousEmptyFeedbackTimer = null;
@@ -1994,6 +2491,7 @@ const resetSearchController = searchContext.__searchHelpers.createHomepageSearch
     form: resetSearchForm,
     input: resetSearchInput,
     engineButton: makeSearchElement(),
+    engineIdentity: makeSearchElement(),
     engineName: makeSearchElement(),
     submitButton: makeSearchElement(),
     menu: makeSearchElement(),
@@ -2007,7 +2505,8 @@ const resetSearchController = searchContext.__searchHelpers.createHomepageSearch
 }, {
     schedule: searchSchedule,
     cancelSchedule: searchCancelSchedule,
-    activeElement: () => activeSearchElement
+    activeElement: () => activeSearchElement,
+    reduceMotion: () => false
 });
 let resetBlankPrevented = false;
 resetSearchController.handleSearchSubmit({
