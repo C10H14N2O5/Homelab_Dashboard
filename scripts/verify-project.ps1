@@ -567,6 +567,12 @@ const requiredMarkers = [
     'data-background-mode="landscape"',
     'data-background-mode="portrait"',
     'id="background-upload-button"',
+    'id="background-upload-dialog"',
+    'id="background-upload-progress"',
+    'id="background-upload-list"',
+    'id="background-upload-stop"',
+    'id="background-upload-retry"',
+    '.background-upload-actions .background-action-button[hidden]',
     'id="background-delete-button"',
     'id="background-original-link"',
     'id="background-delete-dialog"',
@@ -611,7 +617,7 @@ const requiredMarkers = [
     "className = 'background-section-empty'",
     'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {',
     'const inventorySummary =',
-    "'Content-Type': 'application/octet-stream'",
+    "request.setRequestHeader('Content-Type', 'application/octet-stream')",
     "errorCode === 'trash_unavailable'",
     'result.payload && result.payload.preferences',
     'id="service-count-label"',
@@ -628,6 +634,12 @@ const requiredMarkers = [
 requiredMarkers.forEach((marker) => {
     if (!html.includes(marker)) throw new Error(`Missing frontend contract marker: ${marker}`);
 });
+
+const uploadInputTag = html.match(/<input\b[^>]*id="background-upload-input"[^>]*>/i)?.[0] || '';
+if (!/\bmultiple(?:\s|>|=)/i.test(uploadInputTag)
+    || !/\baccept="[^"]*\.jpg[^"]*\.avif[^"]*"/i.test(uploadInputTag)) {
+    throw new Error('Background upload input must support multiple filtered image selections.');
+}
 
 const runtimeScript = scripts[1];
 if (runtimeScript.includes('window.open(')) {
@@ -1640,18 +1652,76 @@ if (!await context.__resetBestdoriHistory() || resetRequestCount !== 1 || !reset
     throw new Error('Confirmed Bestdori history reset did not complete exactly once.');
 }
 
-const uploadFunctionStart = runtimeScript.indexOf('async function uploadBackgroundFile(');
+const uploadFunctionStart = runtimeScript.indexOf('function requestBackgroundUpload(');
 const uploadFunctionEnd = runtimeScript.indexOf('function backgroundDeleteDialogIsOpen(', uploadFunctionStart);
 if (uploadFunctionStart < 0 || uploadFunctionEnd < 0) {
     throw new Error('Unable to extract the background upload implementation.');
 }
 const uploadFunctionSource = runtimeScript.slice(uploadFunctionStart, uploadFunctionEnd);
 if (!uploadFunctionSource.includes('endpoint.searchParams.set(\'name\', file.name)')
-    || !uploadFunctionSource.includes("method: 'POST'")
-    || !uploadFunctionSource.includes("'Content-Type': 'application/octet-stream'")
-    || !uploadFunctionSource.includes('}, 60000, null')
+    || !uploadFunctionSource.includes("request.open('POST', endpoint.href, true)")
+    || !uploadFunctionSource.includes("request.setRequestHeader('Content-Type', 'application/octet-stream')")
+    || !uploadFunctionSource.includes("request.setRequestHeader('X-Requested-With', 'homelab-dashboard')")
+    || !uploadFunctionSource.includes("request.upload.addEventListener('progress'")
+    || !uploadFunctionSource.includes('request.timeout = 60000')
+    || !uploadFunctionSource.includes('request.send(file)')
+    || !uploadFunctionSource.includes('backgroundUploadRequest.abort()')
+    || !uploadFunctionSource.includes("item.retryable && ['failed', 'cancelled'].includes(item.status)")
     || uploadFunctionSource.includes("requestBackgroundPreferences('PATCH'")) {
     throw new Error('Background upload request or no-auto-select contract mismatch.');
+}
+
+const uploadQueueStart = runtimeScript.indexOf('async function executeBackgroundUploadQueue(');
+const uploadQueueEnd = runtimeScript.indexOf('async function runBackgroundUploadQueue(', uploadQueueStart);
+if (uploadQueueStart < 0 || uploadQueueEnd < 0) {
+    throw new Error('Unable to extract the sequential background upload queue.');
+}
+vm.runInContext(
+    runtimeScript.slice(uploadQueueStart, uploadQueueEnd)
+        + '\nglobalThis.__executeBackgroundUploadQueue = executeBackgroundUploadQueue;',
+    context
+);
+
+let activeUploads = 0;
+let maximumActiveUploads = 0;
+const uploadOrder = [];
+const settledOrder = [];
+const sequentialResult = await context.__executeBackgroundUploadQueue(
+    ['first', 'second', 'third'],
+    async (item) => {
+        activeUploads += 1;
+        maximumActiveUploads = Math.max(maximumActiveUploads, activeUploads);
+        uploadOrder.push(item);
+        await Promise.resolve();
+        activeUploads -= 1;
+        if (item === 'second') throw Object.assign(new Error('single-file failure'), { isGlobal: false });
+        return `${item}-ok`;
+    },
+    async (item, result, error) => {
+        settledOrder.push([item, result, error ? error.message : null]);
+    },
+    () => false
+);
+if (maximumActiveUploads !== 1
+    || JSON.stringify(uploadOrder) !== JSON.stringify(['first', 'second', 'third'])
+    || JSON.stringify(settledOrder.map((entry) => entry[0])) !== JSON.stringify(uploadOrder)
+    || sequentialResult.processed !== 3
+    || sequentialResult.remaining.length !== 0) {
+    throw new Error('Background upload queue is not strictly sequential or did not continue after a per-file failure.');
+}
+
+const globalStopResult = await context.__executeBackgroundUploadQueue(
+    ['first', 'second', 'third'],
+    async (item) => {
+        if (item === 'second') throw Object.assign(new Error('global failure'), { isGlobal: true });
+        return item;
+    },
+    async () => {},
+    () => false
+);
+if (globalStopResult.processed !== 2
+    || JSON.stringify(Array.from(globalStopResult.remaining)) !== JSON.stringify(['third'])) {
+    throw new Error('A global background upload failure did not stop the remaining queue.');
 }
 
 const removalRequestStart = runtimeScript.indexOf('async function requestBackgroundRemoval(');
