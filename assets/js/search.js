@@ -41,6 +41,13 @@
                     action: 'https://www.baidu.com/s',
                     queryParameter: 'wd',
                     symbol: '#search-logo-baidu'
+                }),
+                Object.freeze({
+                    id: 'bilibili',
+                    name: '哔哩哔哩',
+                    action: 'https://search.bilibili.com/all',
+                    queryParameter: 'keyword',
+                    symbol: '#search-logo-bilibili'
                 })
             ]);
 

@@ -247,6 +247,10 @@
             --search-engine-width: 10rem;
         }
 
+        .search-form[data-search-enhanced="true"][data-current-engine="bilibili"] {
+            --search-engine-width: 8rem;
+        }
+
         .search-form[data-search-enhanced="true"] .search-engine-button {
             width: calc(var(--search-collapsed-width) - 2px);
             height: calc(3.25rem - 2px);

@@ -644,7 +644,7 @@ if (searchShortcutKeycaps.length !== 1
     throw new Error('The collapsed search pill must center one decorative keycap beside its wrapped icon and name.');
 }
 const searchOptionIds = [...html.matchAll(/\bdata-search-engine="([^"]+)"/g)].map((match) => match[1]);
-if (JSON.stringify(searchOptionIds) !== JSON.stringify(['bing', 'google', 'duckduckgo', 'baidu'])) {
+if (JSON.stringify(searchOptionIds) !== JSON.stringify(['bing', 'google', 'duckduckgo', 'baidu', 'bilibili'])) {
     throw new Error(`Search engine option order mismatch: ${searchOptionIds.join(', ')}`);
 }
 if (html.includes('search-engine-option-note')
@@ -663,15 +663,19 @@ if (html.indexOf('id="homepage-search-form"') < html.indexOf('class="hero-subtit
     || html.indexOf('id="homepage-search-form"') > html.indexOf('<section class="dashboard"')) {
     throw new Error('The search form must remain below the Hero subtitle and above the service dashboard.');
 }
-for (const symbolId of ['search-logo-bing', 'search-logo-google', 'search-logo-duckduckgo', 'search-logo-baidu']) {
+for (const symbolId of ['search-logo-bing', 'search-logo-google', 'search-logo-duckduckgo', 'search-logo-baidu', 'search-logo-bilibili']) {
     if (!html.includes(`id="${symbolId}"`)) throw new Error(`Missing inline search icon symbol: ${symbolId}`);
 }
 if (!/<symbol\b[^>]*\bid="search-logo-baidu"[\s\S]*?<path\b[^>]*\bfill="currentColor"/.test(html)) {
     throw new Error('The Baidu search icon must use the high-contrast monochrome foreground color.');
 }
+if (!/<symbol\b[^>]*\bid="search-logo-bilibili"[\s\S]*?<path\b[^>]*\bfill="#FB7299"/.test(html)) {
+    throw new Error('The Bilibili search icon must preserve the supplied pink foreground color.');
+}
 if (!/\.search-form\s*\{[^}]*--search-engine-width:\s*7rem;[^}]*--search-shortcut-width:\s*4\.15rem;[^}]*--search-collapsed-width:\s*calc\(var\(--search-engine-width\) \+ var\(--search-shortcut-width\)\);[^}]*--search-motion-duration:\s*300ms;/.test(html)
     || !/data-current-engine="google"[\s\S]*?--search-engine-width:\s*7\.5rem;/.test(html)
     || !/data-current-engine="duckduckgo"[\s\S]*?--search-engine-width:\s*10rem;/.test(html)
+    || !/data-current-engine="bilibili"[\s\S]*?--search-engine-width:\s*8rem;/.test(html)
     || !/\.search-shell\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(html)
     || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*width:\s*calc\(var\(--search-collapsed-width\) - 2px\);[^}]*display:\s*inline-flex;/.test(html)
     || !/\.search-form\[data-search-enhanced="true"\]\s+\.search-engine-button\s*\{[^}]*transition:\s*[^}]*width\s+var\(--search-motion-duration\)[^}]*height\s+var\(--search-motion-duration\)[^}]*margin-left\s+var\(--search-motion-duration\)[^}]*padding\s+var\(--search-motion-duration\)[^}]*gap\s+var\(--search-motion-duration\)/.test(html)
@@ -2010,7 +2014,8 @@ const expectedSearchEngines = [
     ['bing', 'Bing', 'https://www.bing.com/search', 'q', '#search-logo-bing'],
     ['google', 'Google', 'https://www.google.com/search', 'q', '#search-logo-google'],
     ['duckduckgo', 'DuckDuckGo', 'https://duckduckgo.com/', 'q', '#search-logo-duckduckgo'],
-    ['baidu', '\u767e\u5ea6', 'https://www.baidu.com/s', 'wd', '#search-logo-baidu']
+    ['baidu', '\u767e\u5ea6', 'https://www.baidu.com/s', 'wd', '#search-logo-baidu'],
+    ['bilibili', '\u54d4\u54e9\u54d4\u54e9', 'https://search.bilibili.com/all', 'keyword', '#search-logo-bilibili']
 ];
 const actualSearchEngines = Array.from(searchContext.__searchHelpers.SEARCH_ENGINES, (engine) => [
     engine.id,
@@ -2222,6 +2227,13 @@ if (searchForm.action !== 'https://www.baidu.com/s'
     || searchInput.value !== 'keep this query') {
     throw new Error('In-memory search engine selection changed the query or form contract.');
 }
+searchController.applySearchEngine('bilibili');
+if (searchForm.action !== 'https://search.bilibili.com/all'
+    || searchInput.name !== 'keyword'
+    || searchEngineName.textContent !== '\u54d4\u54e9\u54d4\u54e9'
+    || searchInput.value !== 'keep this query') {
+    throw new Error('Bilibili selection changed the query or form contract.');
+}
 
 searchController.setSearchExpanded(true);
 if (searchEngineButton.attributes['aria-controls'] !== 'search-engine-list'
@@ -2432,7 +2444,7 @@ if (Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'en
     throw new Error('The engine track did not clean up after its second 90ms phase.');
 }
 
-engineShortcutHarness.controller.applySearchEngine('baidu');
+engineShortcutHarness.controller.applySearchEngine('bilibili');
 const wrapNextEvent = makeEngineShortcutEvent('KeyL');
 engineShortcutHarness.controller.handleSearchEngineShortcut(wrapNextEvent);
 engineShortcutHarness.timers[4].callback();
@@ -2441,7 +2453,7 @@ engineShortcutHarness.timers[6].callback();
 if (!wrapNextEvent.wasPrevented()
     || engineShortcutHarness.controller.currentEngine().id !== 'bing'
     || engineShortcutHarness.form.dataset.currentEngine !== 'bing') {
-    throw new Error('Alt+L did not wrap from Baidu to Bing.');
+    throw new Error('Alt+L did not wrap from Bilibili to Bing.');
 }
 
 const wrapPreviousEvent = makeEngineShortcutEvent('KeyJ');
@@ -2453,14 +2465,14 @@ if (engineShortcutHarness.form.dataset.engineSwitchDirection !== 'previous') {
 engineShortcutHarness.timers[8].callback();
 engineShortcutHarness.timers[9].callback();
 if (!wrapPreviousEvent.wasPrevented()
-    || engineShortcutHarness.controller.currentEngine().id !== 'baidu') {
-    throw new Error('Alt+J did not wrap from Bing to Baidu.');
+    || engineShortcutHarness.controller.currentEngine().id !== 'bilibili') {
+    throw new Error('Alt+J did not wrap from Bing to Bilibili.');
 }
 
 engineShortcutHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
 engineShortcutHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyL'));
 engineShortcutHarness.timers[11].callback();
-if (engineShortcutHarness.controller.currentEngine().id !== 'baidu'
+if (engineShortcutHarness.controller.currentEngine().id !== 'bilibili'
     || Object.prototype.hasOwnProperty.call(engineShortcutHarness.form.dataset, 'engineSwitchPhase')) {
     throw new Error('Opposing rapid engine shortcuts did not cancel without animation.');
 }
@@ -2624,7 +2636,7 @@ reverseWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEve
 reverseWindowTiming.advance(120);
 reverseWindowHarness.controller.handleSearchEngineShortcut(makeEngineShortcutEvent('KeyJ'));
 reverseWindowTiming.advance(400);
-if (reverseWindowHarness.controller.currentEngine().id !== 'google') {
+if (reverseWindowHarness.controller.currentEngine().id !== 'duckduckgo') {
     throw new Error('Three reverse Alt+J presses spanning animation windows did not accumulate correctly.');
 }
 

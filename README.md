@@ -13,7 +13,7 @@
 | 背景图片 | `assets/default-background.svg` 导出为 `backgrounds/bg.jpg` 随仓库提供兜底；其余原图由部署机器本地保存，缩略图由后端生成 |
 | 服务入口 | 由 `index.html` 中的服务卡片定义，并由页面自动统计 |
 | 快捷入口 | Services / Quick Links 双频道；Quick Links 固定维护 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini |
-| 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度搜索；默认 Bing，无 JavaScript 时仍可提交 |
+| 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度、哔哩哔哩搜索；默认 Bing，无 JavaScript 时仍可提交 |
 | 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
@@ -107,13 +107,13 @@ API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录�
 
 ### 多搜索引擎搜索
 
-Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、名称和轻量 `Alt + ~` 键帽在其中居中排列；点击后外层以约 300ms 向右展开为输入框，同一枚“图标 + 名称”胶囊同步缩小为引擎列表按钮，键帽淡出且不再占位，不使用元素替换或额外三角符号。列表只显示四个引擎的图标和名称，并可通过按钮、方向键、Home/End、Enter/Space 和 Escape 选择或关闭。桌面端以固定上限向右展开，窄屏时使用 Hero 的可用宽度；组件或窗口失去焦点时会收起，但不会丢弃尚未提交的内容。
+Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、名称和轻量 `Alt + ~` 键帽在其中居中排列；点击后外层以约 300ms 向右展开为输入框，同一枚“图标 + 名称”胶囊同步缩小为引擎列表按钮，键帽淡出且不再占位，不使用元素替换或额外三角符号。列表只显示五个引擎的图标和名称，并可通过按钮、方向键、Home/End、Enter/Space 和 Escape 选择或关闭。桌面端以固定上限向右展开，窄屏时使用 Hero 的可用宽度；组件或窗口失去焦点时会收起，但不会丢弃尚未提交的内容。
 
 页面焦点不在输入、选择或可编辑控件中，且没有对话框打开时，按住 `Alt` 并按键盘左上角的物理 Backquote 键即可呼出搜索并聚焦输入框；实现依据 `KeyboardEvent.code === "Backquote"`，不受键盘字符映射影响。链接、卡片和普通按钮获得焦点时仍可呼出；裸 Backquote、IME 组词、AltGr、其它修饰键组合和长按重复事件不会触发。搜索输入框已聚焦时不会响应全局呼出组合键。
 
 搜索输入框拥有焦点时，`Alt+J` 会循环切换到上一个引擎，`Alt+L` 会循环切换到下一个引擎；首尾相接，输入内容和焦点保持不变。连续按键会在约 90ms 内合并，并在动画退出或进入阶段继续累计逻辑目标；新按键不会把正在运行的图标轨道强制拉回起点，当前轨道结束后只向最新目标接续一次。每轮换轨都带有独立代次，已取消但迟到的旧动画回调不会覆盖或清除更新后的目标。图标和名称用每轮约 180ms 完成横向换轨，`Alt+J` 的新引擎从左侧进入，`Alt+L` 从右侧进入，外层搜索框不重新缩放。减少动态效果时保留 90ms 合并逻辑，但立即显示最终引擎。增强初始化成功后，输入框通过 `aria-keyshortcuts="Alt+J Alt+L"` 暴露快捷键，不增加额外的可见教学文案。
 
-首批引擎和固定请求格式如下：
+当前引擎和固定请求格式如下：
 
 | 引擎 | 搜索地址 | 关键词参数 | 用途 |
 | --- | --- | --- | --- |
@@ -121,6 +121,7 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、
 | Google | `https://www.google.com/search` | `q` | 国际网络 |
 | DuckDuckGo | `https://duckduckgo.com/` | `q` | 隐私搜索 |
 | 百度 | `https://www.baidu.com/s` | `wd` | 国内备用 |
+| 哔哩哔哩 | `https://search.bilibili.com/all` | `keyword` | 站内视频搜索 |
 
 搜索使用浏览器原生 GET 表单并在新标签页打开结果，不使用第三方搜索 API，也不调用 Dashboard Python 服务。输入期间不会发送联想或其它网络请求；页面不保存关键词、搜索记录、账号信息或引擎选择。每次刷新、新标签页或重新打开浏览器都从 Bing 开始，切换结果只存在于当前页面内存中；增强初始化会尽力删除旧版本遗留的 `homelab-search-engine-v1` 本地存储项，清理失败不会影响搜索。静态 HTML 本身就是可用的 Bing 表单，因此关闭 JavaScript 或增强初始化失败后仍可使用 Bing。空白提交不会导航，只会在当前组件内依次轮换八句轻量提示；轮换位置仅存在于当前页面会话，刷新后从第一句重新开始。
 
@@ -414,10 +415,10 @@ py_compile
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
 ```powershell
-.\scripts\package-release.ps1 -Version V2.9.2
+.\scripts\package-release.ps1 -Version V2.9.3
 ```
 
-脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.9.2-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、完整的稳定路径 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
+脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.9.3-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、完整的稳定路径 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
 
 ## 部署和迁移
 
