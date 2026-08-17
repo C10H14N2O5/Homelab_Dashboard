@@ -19,7 +19,7 @@ if ($Build -and ($SkipPython -or $SkipFrontend)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $indexPath = Join-Path $projectRoot 'index.html'
-$frontendAssetRoot = Join-Path $projectRoot 'assets\v2.9.0'
+$frontendAssetRoot = Join-Path $projectRoot 'assets'
 $frontendStylePath = Join-Path $frontendAssetRoot 'dashboard.css'
 $frontendModuleRoot = Join-Path $frontendAssetRoot 'js'
 $frontendModulePaths = @(
@@ -116,15 +116,15 @@ function Assert-RepositorySourceControlPolicy {
 
 $requiredFiles = @(
     'index.html',
-    'assets\v2.9.0\dashboard.css',
-    'assets\v2.9.0\js\core-http.js',
-    'assets\v2.9.0\js\background-manager.js',
-    'assets\v2.9.0\js\background-upload.js',
-    'assets\v2.9.0\js\bestdori.js',
-    'assets\v2.9.0\js\search.js',
-    'assets\v2.9.0\js\channel-switch.js',
-    'assets\v2.9.0\js\service-status.js',
-    'assets\v2.9.0\js\app.js',
+    'assets\dashboard.css',
+    'assets\js\core-http.js',
+    'assets\js\background-manager.js',
+    'assets\js\background-upload.js',
+    'assets\js\bestdori.js',
+    'assets\js\search.js',
+    'assets\js\channel-switch.js',
+    'assets\js\service-status.js',
+    'assets\js\app.js',
     'README.md',
     'CHANGELOG.md',
     'LICENSE',
@@ -222,15 +222,15 @@ $maintenanceContracts = @(
     @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
     @{ Name = 'release license notices'; Source = $packageSource; Marker = 'THIRD_PARTY_NOTICES.md' },
     @{ Name = 'release default background source'; Source = $packageSource; Marker = 'assets\default-background.svg' },
-    @{ Name = 'release versioned stylesheet'; Source = $packageSource; Marker = 'assets\v2.9.0\dashboard.css' },
-    @{ Name = 'release module entry point'; Source = $packageSource; Marker = 'assets\v2.9.0\js\app.js' },
-    @{ Name = 'release background manager module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\background-manager.js' },
-    @{ Name = 'release background upload module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\background-upload.js' },
-    @{ Name = 'release Bestdori module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\bestdori.js' },
-    @{ Name = 'release channel switch module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\channel-switch.js' },
-    @{ Name = 'release core HTTP module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\core-http.js' },
-    @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\search.js' },
-    @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\service-status.js' },
+    @{ Name = 'release stable stylesheet'; Source = $packageSource; Marker = 'assets\dashboard.css' },
+    @{ Name = 'release module entry point'; Source = $packageSource; Marker = 'assets\js\app.js' },
+    @{ Name = 'release background manager module'; Source = $packageSource; Marker = 'assets\js\background-manager.js' },
+    @{ Name = 'release background upload module'; Source = $packageSource; Marker = 'assets\js\background-upload.js' },
+    @{ Name = 'release Bestdori module'; Source = $packageSource; Marker = 'assets\js\bestdori.js' },
+    @{ Name = 'release channel switch module'; Source = $packageSource; Marker = 'assets\js\channel-switch.js' },
+    @{ Name = 'release core HTTP module'; Source = $packageSource; Marker = 'assets\js\core-http.js' },
+    @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\js\search.js' },
+    @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\js\service-status.js' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
@@ -319,7 +319,7 @@ if (JSON.stringify(Object.keys(moduleSources)) !== JSON.stringify(expectedModule
     throw new Error(`Unexpected ES module inputs: ${Object.keys(moduleSources).join(', ')}`);
 }
 for (const [name, source] of moduleEntries) {
-    new vm.SourceTextModule(source, { identifier: `assets/v2.9.0/js/${name}` });
+    new vm.SourceTextModule(source, { identifier: `assets/js/${name}` });
     for (const match of source.matchAll(/\bfrom\s+['"](\.\/[^'"]+)['"]/g)) {
         const dependency = match[1].slice(2);
         if (!Object.prototype.hasOwnProperty.call(moduleSources, dependency)) {
@@ -360,17 +360,20 @@ const stylesheetReferences = [...htmlDocument.matchAll(/<link\b[^>]*\brel="style
 const scriptReferences = [...htmlDocument.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/gi)]
     .map((match) => match[1]);
 if (stylesheetReferences.length !== 1
-    || stylesheetReferences[0] !== '/assets/v2.9.0/dashboard.css') {
+    || stylesheetReferences[0] !== '/assets/dashboard.css') {
     throw new Error(`Unexpected stylesheet references: ${stylesheetReferences.join(', ')}`);
 }
-if (scriptReferences.length !== 1 || scriptReferences[0] !== '/assets/v2.9.0/js/app.js') {
+if (scriptReferences.length !== 1 || scriptReferences[0] !== '/assets/js/app.js') {
     throw new Error(`Unexpected script references: ${scriptReferences.join(', ')}`);
 }
-if (!/<script\b[^>]*\btype="module"[^>]*\bsrc="\/assets\/v2\.9\.0\/js\/app\.js"[^>]*><\/script>/i.test(htmlDocument)) {
-    throw new Error('V2.9.0 must load its entry point as a native ES module.');
+if (!/<script\b[^>]*\btype="module"[^>]*\bsrc="\/assets\/js\/app\.js"[^>]*><\/script>/i.test(htmlDocument)) {
+    throw new Error('Homepage must load its entry point as a native ES module.');
 }
 if (/<style\b/i.test(htmlDocument)) {
-    throw new Error('V2.9.0 must keep dashboard styles in the versioned external stylesheet.');
+    throw new Error('Homepage must keep dashboard styles in the external stylesheet.');
+}
+if (/\/assets\/v\d+(?:\.\d+)+(?:\/|\\)/i.test(htmlDocument)) {
+    throw new Error('Homepage must use stable asset paths without a version directory.');
 }
 
 // Preserve the existing contract searches while sourcing each concern from its

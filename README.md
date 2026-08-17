@@ -27,17 +27,16 @@
 zoraxy-homelab-dashboard/
 ├── assets/
 │   ├── default-background.svg   # 项目自有兜底壁纸源文件
-│   └── v2.9.0/
-│       ├── dashboard.css       # Homepage 样式，按发布版本固定路径
-│       └── js/
-│           ├── app.js          # 原生 ES 模块入口与独立降级编排
-│           ├── core-http.js    # 共用超时请求
-│           ├── background-manager.js
-│           ├── background-upload.js
-│           ├── bestdori.js
-│           ├── search.js
-│           ├── channel-switch.js
-│           └── service-status.js
+│   ├── dashboard.css            # Homepage 样式，使用稳定部署路径
+│   └── js/
+│       ├── app.js              # 原生 ES 模块入口与独立降级编排
+│       ├── core-http.js        # 共用超时请求
+│       ├── background-manager.js
+│       ├── background-upload.js
+│       ├── bestdori.js
+│       ├── search.js
+│       ├── channel-switch.js
+│       └── service-status.js
 ├── backgrounds/
 │   ├── .gitignore               # 仅放行项目兜底导出图
 │   ├── bg.jpg                   # SVG 导出的默认占位壁纸
@@ -75,13 +74,13 @@ zoraxy-homelab-dashboard/
 
 历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
-仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用版本目录，部署新前端时先完整上传新目录并验证静态响应，最后替换 `index.html`；至少保留上一版资源以便回滚。
+仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用稳定路径，部署时直接覆盖完整的 `assets/` 与 `index.html`，然后使用 `Ctrl+F5` 强制刷新验收；版本和回滚由 Git Tag/Release 管理。
 
 项目代码、文档和项目自有占位资产按 [MIT License](LICENSE) 发布。品牌标识、用户壁纸以及运行时获取的第三方卡面不属于本项目许可范围，详见 [ASSETS.md](ASSETS.md)；二进制依赖及完整许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `licenses/`。
 
 GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者日期、说明和版本标签，并将历史邮箱映射为 GitHub noreply 地址。公开版额外使用项目自有占位背景、保留示例域名和公开发行门禁，因此两边的 Commit SHA 不同；功能开发仍以私人 Gitea 为权威来源，公共镜像通过人工审核同步。
 
-V2.9.0 直接使用浏览器原生 ES 模块，不需要 Node.js、npm 或打包器参与生产运行。模块必须经 Zoraxy 或其它 HTTP 静态服务器加载；直接双击 `index.html` 的 `file://` 预览不属于支持方式。开发时可在仓库根目录运行 `python -m http.server 8765 --bind 127.0.0.1`，再访问 `http://127.0.0.1:8765/`；此纯静态预览中的同源 `/api/` 请求失败属于预期，完整联调仍以 Zoraxy 环境为准。
+前端直接使用浏览器原生 ES 模块，不需要 Node.js、npm 或打包器参与生产运行。模块必须经 Zoraxy 或其它 HTTP 静态服务器加载；直接双击 `index.html` 的 `file://` 预览不属于支持方式。开发时可在仓库根目录运行 `python -m http.server 8765 --bind 127.0.0.1`，再访问 `http://127.0.0.1:8765/`；此纯静态预览中的同源 `/api/` 请求失败属于预期，完整联调仍以 Zoraxy 环境为准。
 
 ## 运行架构
 
@@ -415,21 +414,21 @@ py_compile
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
 ```powershell
-.\scripts\package-release.ps1 -Version V2.9.0
+.\scripts\package-release.ps1 -Version V2.9.2
 ```
 
-脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.9.0-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、当前版本的完整 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
+脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.9.2-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、完整的稳定路径 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
 
 ## 部署和迁移
 
-1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、当前 `assets/` 版本目录和 Zoraxy 配置。
+1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置。
 2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时先完整上传新的版本化 `assets/` 目录，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，最后原子替换与后端配套的 `index.html`。若前端先于后端上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
+4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
 5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复与其兼容的 EXE、JSON、`index.html` 和相关 Host Rule 配置；恢复旧 `index.html` 前不得删除它所引用的旧版 `assets/`。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
+若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -465,7 +464,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端首屏内联脚本、版本化外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、壁纸多选属性、单文件预检、严格串行上传、单项失败继续和全局错误停止、上传请求与进度契约、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
+验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、壁纸多选属性、单文件预检、严格串行上传、单项失败继续和全局错误停止、上传请求与进度契约、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
 
 人工部署后还应检查：
 
@@ -495,4 +494,4 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
-- `index.html`、版本化前端 `assets/`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。
+- `index.html`、稳定路径的前端 `assets/`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。
