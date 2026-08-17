@@ -40,8 +40,11 @@ THUMBNAIL_HEIGHT = 270
 THUMBNAIL_QUALITY = 75
 MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16
 MAX_THUMBNAIL_CACHE_ENTRIES = 2048
+THUMBNAIL_NAME_HASH_LENGTH = 24
+THUMBNAIL_SOURCE_HASH_LENGTH = 32
 THUMBNAIL_FILE_PATTERN = re.compile(
-    r"^thumbnail-(?P<name>[0-9a-f]{64})-(?P<source>[0-9a-f]{64})\.webp$"
+    rf"^thumbnail-(?:[0-9a-f]{{{THUMBNAIL_NAME_HASH_LENGTH}}}-"
+    rf"[0-9a-f]{{{THUMBNAIL_SOURCE_HASH_LENGTH}}}|[0-9a-f]{{64}}-[0-9a-f]{{64}})\.webp$"
 )
 REMOVAL_TOKEN_TTL_SECONDS = 60
 MAX_REMOVAL_TOKENS = 32
@@ -129,13 +132,13 @@ class StateStore:
 
     @staticmethod
     def _thumbnail_name_hash(background: str) -> str:
-        return hashlib.sha256(background.encode("utf-8")).hexdigest()
+        return hashlib.sha256(background.encode("utf-8")).hexdigest()[:THUMBNAIL_NAME_HASH_LENGTH]
 
     def _thumbnail_cache_name(self, background: str, source_stat: os.stat_result) -> str:
         name_hash = self._thumbnail_name_hash(background)
         signature = hashlib.sha256(
-            f"{background}\0{source_stat.st_size}\0{source_stat.st_mtime_ns}".encode("utf-8")
-        ).hexdigest()
+            f"{source_stat.st_size}\0{source_stat.st_mtime_ns}".encode("utf-8")
+        ).hexdigest()[:THUMBNAIL_SOURCE_HASH_LENGTH]
         return f"thumbnail-{name_hash}-{signature}.webp"
 
     @staticmethod
@@ -276,7 +279,8 @@ class StateStore:
         if directory is None:
             return
         name_hash = self._thumbnail_name_hash(background)
-        prefix = f"thumbnail-{name_hash}-"
+        legacy_name_hash = hashlib.sha256(background.encode("utf-8")).hexdigest()
+        prefixes = (f"thumbnail-{name_hash}-", f"thumbnail-{legacy_name_hash}-")
         try:
             entries = os.scandir(directory)
         except OSError:
@@ -289,7 +293,7 @@ class StateStore:
                 bounded_entries.append(entry)
         for entry in bounded_entries:
             if (
-                entry.name.startswith(prefix)
+                entry.name.startswith(prefixes)
                 and THUMBNAIL_FILE_PATTERN.fullmatch(entry.name)
                 and entry.is_file(follow_symlinks=False)
             ):

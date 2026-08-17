@@ -40,6 +40,28 @@ class StoreTests(unittest.TestCase):
         self.assertIsInstance(thumbnail, str)
         return self.project.backgrounds / thumbnail.split("?", 1)[0]
 
+    def test_thumbnail_cache_key_separates_name_group_from_source_version(self) -> None:
+        source_stat = (self.project.backgrounds / "test.jpg").stat()
+        original = self.store._thumbnail_cache_name("test.jpg", source_stat)
+        renamed = self.store._thumbnail_cache_name("renamed.jpg", source_stat)
+        changed = self.store._thumbnail_cache_name(
+            "test.jpg",
+            mock.Mock(st_size=source_stat.st_size, st_mtime_ns=source_stat.st_mtime_ns + 1),
+        )
+
+        original_name, original_source = original.removeprefix("thumbnail-").removesuffix(".webp").split("-")
+        renamed_name, renamed_source = renamed.removeprefix("thumbnail-").removesuffix(".webp").split("-")
+        changed_name, changed_source = changed.removeprefix("thumbnail-").removesuffix(".webp").split("-")
+        self.assertEqual((len(original_name), len(original_source), len(original)), (24, 32, 72))
+        self.assertNotEqual(renamed_name, original_name)
+        self.assertEqual(renamed_source, original_source)
+        self.assertEqual(changed_name, original_name)
+        self.assertNotEqual(changed_source, original_source)
+        self.assertIsNotNone(backgrounds.THUMBNAIL_FILE_PATTERN.fullmatch(original))
+        self.assertIsNotNone(
+            backgrounds.THUMBNAIL_FILE_PATTERN.fullmatch(f"thumbnail-{'a' * 64}-{'b' * 64}.webp")
+        )
+
     def test_initial_state_and_independent_updates_persist(self) -> None:
         self.assertEqual(
             self.store.get(),
@@ -164,8 +186,9 @@ class StoreTests(unittest.TestCase):
         for record in first["backgrounds"]:
             self.assertRegex(
                 record["thumbnail"],
-                r"^thumbnails/thumbnail-[0-9a-f]{64}-[0-9a-f]{64}\.webp\?v=\d+-\d+$",
+                r"^thumbnails/thumbnail-[0-9a-f]{24}-[0-9a-f]{32}\.webp\?v=\d+-\d+$",
             )
+            self.assertEqual(len(self.thumbnail_path(first, record["name"]).name), 72)
             with backgrounds.Image.open(self.thumbnail_path(first, record["name"])) as thumbnail:
                 self.assertEqual((thumbnail.format, thumbnail.size), ("WEBP", (480, 270)))
 
@@ -429,12 +452,17 @@ class StoreTests(unittest.TestCase):
         self.write_real_backgrounds()
         manifest = self.store.list_backgrounds()
         cache = self.thumbnail_path(manifest, "test.jpg")
+        legacy_name_hash = backgrounds.hashlib.sha256(b"test.jpg").hexdigest()
+        legacy_cache = self.store.thumbnail_dir / f"thumbnail-{legacy_name_hash}-{'a' * 64}.webp"
+        legacy_cache.write_bytes(b"legacy")
         with mock.patch.object(backgrounds, "send2trash", side_effect=OSError("trash unavailable")):
             with self.assertRaises(backgrounds.TrashUnavailable) as issued:
                 self.store.remove_background("test.jpg")
         self.assertTrue(cache.is_file())
+        self.assertTrue(legacy_cache.is_file())
         self.store.remove_background("test.jpg", issued.exception.confirmation_token)
         self.assertFalse(cache.exists())
+        self.assertFalse(legacy_cache.exists())
 
         restored = self.project.backgrounds / "test.jpg"
         restored.write_bytes(image_bytes("JPEG"))
