@@ -26,7 +26,10 @@
 ```text
 zoraxy-homelab-dashboard/
 ├── assets/
-│   └── default-background.svg   # 项目自有兜底壁纸源文件
+│   ├── default-background.svg   # 项目自有兜底壁纸源文件
+│   └── v2.8.1/
+│       ├── dashboard.css        # Homepage 样式，按发布版本固定路径
+│       └── app.js               # Homepage 主业务脚本，按发布版本固定路径
 ├── backgrounds/
 │   ├── .gitignore               # 仅放行项目兜底导出图
 │   ├── bg.jpg                   # SVG 导出的默认占位壁纸
@@ -43,7 +46,7 @@ zoraxy-homelab-dashboard/
 │   ├── README.md                # 审计报告索引、管理规则和模板
 │   └── YYYY-MM-DD-*-audit.md    # 按日期归档的历次审计报告
 ├── requirements.txt             # Python 构建依赖及固定版本
-├── index.html                   # 实际网页，包含 HTML/CSS/JavaScript/SVG
+├── index.html                   # 页面结构、首屏引导脚本和内联 SVG
 ├── licenses/                    # EXE 捆绑组件的完整许可证
 ├── LICENSE                      # 项目 MIT License
 ├── ASSETS.md                    # 自有、品牌和运行时资产边界
@@ -55,11 +58,11 @@ zoraxy-homelab-dashboard/
 
 历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
-仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html` 和 `backgrounds/`；不要复制 README、脚本、源码、EXE、配置、状态或 Git 文件。
+仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用版本目录，部署新前端时先完整上传新目录并验证静态响应，最后替换 `index.html`；至少保留上一版资源以便回滚。
 
 项目代码、文档和项目自有占位资产按 [MIT License](LICENSE) 发布。品牌标识、用户壁纸以及运行时获取的第三方卡面不属于本项目许可范围，详见 [ASSETS.md](ASSETS.md)；二进制依赖及完整许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `licenses/`。
 
-GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、日期、说明和版本标签，但首次公开前替换了不分发的旧背景 Blob，并将历史邮箱映射为 GitHub noreply 地址，因此两边的 Commit SHA 不同。功能开发仍以私人 Gitea 为权威来源，公共镜像通过人工审核同步。
+GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者日期、说明和版本标签，并将历史邮箱映射为 GitHub noreply 地址。公开版额外使用项目自有占位背景、保留示例域名和公开发行门禁，因此两边的 Commit SHA 不同；功能开发仍以私人 Gitea 为权威来源，公共镜像通过人工审核同步。
 
 ## 运行架构
 
@@ -88,7 +91,7 @@ API 与 Zoraxy 没有进程级启动依赖。API 初始化只读取背景目录�
 
 Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、名称和轻量 `Alt + ~` 键帽在其中居中排列；点击后外层以约 300ms 向右展开为输入框，同一枚“图标 + 名称”胶囊同步缩小为引擎列表按钮，键帽淡出且不再占位，不使用元素替换或额外三角符号。列表只显示四个引擎的图标和名称，并可通过按钮、方向键、Home/End、Enter/Space 和 Escape 选择或关闭。桌面端以固定上限向右展开，窄屏时使用 Hero 的可用宽度；组件或窗口失去焦点时会收起，但不会丢弃尚未提交的内容。
 
-页面焦点不在输入、选择或可编辑控件中，且没有对话框打开时，按住 `Alt` 并按键盘左上角的 `~` 键即可呼出搜索并聚焦输入框；实现依据 `KeyboardEvent.code === "Backquote"`，不受键盘字符映射影响。链接、卡片和普通按钮获得焦点时仍可呼出；裸 Backquote、IME 组词、AltGr、其它修饰键组合和长按重复事件不会触发。搜索输入框已聚焦时不会响应全局呼出组合键。
+页面焦点不在输入、选择或可编辑控件中，且没有对话框打开时，按住 `Alt` 并按键盘左上角的物理 Backquote 键即可呼出搜索并聚焦输入框；实现依据 `KeyboardEvent.code === "Backquote"`，不受键盘字符映射影响。链接、卡片和普通按钮获得焦点时仍可呼出；裸 Backquote、IME 组词、AltGr、其它修饰键组合和长按重复事件不会触发。搜索输入框已聚焦时不会响应全局呼出组合键。
 
 搜索输入框拥有焦点时，`Alt+J` 会循环切换到上一个引擎，`Alt+L` 会循环切换到下一个引擎；首尾相接，输入内容和焦点保持不变。连续按键会在约 90ms 内合并，并在动画退出或进入阶段继续累计逻辑目标；新按键不会把正在运行的图标轨道强制拉回起点，当前轨道结束后只向最新目标接续一次。每轮换轨都带有独立代次，已取消但迟到的旧动画回调不会覆盖或清除更新后的目标。图标和名称用每轮约 180ms 完成横向换轨，`Alt+J` 的新引擎从左侧进入，`Alt+L` 从右侧进入，外层搜索框不重新缩放。减少动态效果时保留 90ms 合并逻辑，但立即显示最终引擎。增强初始化成功后，输入框通过 `aria-keyshortcuts="Alt+J Alt+L"` 暴露快捷键，不增加额外的可见教学文案。
 
@@ -239,8 +242,6 @@ Content-Type: application/json
 
 永久去重记录独立保存在非公开状态目录的 `HomeLabWallpaperState-data/BestdoriCardDraws.json`，记录卡面 ID、实际文件名、SHA-256、抽取时间和卡面元数据，不与浏览器缓存或其它抽卡工具共享。“清理失效记录”只删除背景文件已缺失或 SHA-256 不匹配的记录；“清空全部记录”需要二次确认。两项操作都只维护 JSON 记录，不会删除任何背景图片。记录文件损坏时，抽卡与历史维护 API 会安全失败，壁纸偏好、上传、删除、入口探测和健康检查仍可继续使用。
 
-Bestdori 是独立第三方服务，本项目与 Bestdori、Bushiroad 或 BanG Dream 权利方不存在隶属或背书关系。MIT 许可证仅覆盖本仓库中的集成代码，不覆盖 Bestdori API、目录数据、元数据或下载的卡面图片；服务可用性、接口和使用条件可能由第三方变更，使用者应自行确认用途符合相关条款。仓库不内置任何 Bestdori 卡面。
-
 ## Python 状态服务
 
 `state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
@@ -283,7 +284,7 @@ Bestdori 是独立第三方服务，本项目与 Bestdori、Bushiroad 或 BanG D
 
 1. 修改 `index.html` 中全部 Services 与 Quick Links 地址、名称和探测目标；卡片数量和动画序号会自动生成。
 2. 使用首次引导或严格 v2 配置设置自己的 `backgroundDir`、`allowedOrigins`、`probeDomainSuffix`、回环监听地址和探测超时。
-3. 在 Zoraxy 中为自己的首页域配置同源 `/api/...` 转发，并只把 `index.html` 与 `backgrounds/` 放入公开 Web 根。
+3. 在 Zoraxy 中为自己的首页域配置同源 `/api/...` 转发，并只把 `index.html`、当前版本的 `assets/` 和 `backgrounds/` 放入公开 Web 根。
 4. 按实际暴露范围配置 Basic Auth 或等价访问控制；Origin、请求头和 CORS 不是身份认证。
 5. 确认 EXE、JSON 配置、状态、日志、去重记录、源代码和 `.git/` 均无法通过站点下载。
 6. 替换或新增壁纸时自行核对授权；不要把私人、来源不明或仅允许个人使用的素材提交到公开仓库。
@@ -395,21 +396,21 @@ py_compile
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
 ```powershell
-.\scripts\package-release.ps1 -Version V2.7.0
+.\scripts\package-release.ps1 -Version V2.8.1
 ```
 
-脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.7.0-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含静态网页、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
+脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.8.1-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、当前版本的完整 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
 
 ## 部署和迁移
 
-1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html` 和 Zoraxy 配置。
+1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、当前 `assets/` 版本目录和 Zoraxy 配置。
 2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`，再部署与后端配套的 `index.html`。推荐按此顺序升级；若前端先上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
+4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时先完整上传新的版本化 `assets/` 目录，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，最后原子替换与后端配套的 `index.html`。若前端先于后端上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
 5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须同时恢复与其兼容的 EXE、JSON、`index.html` 和相关 Host Rule 配置。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
+若回滚到旧前端，必须同时恢复与其兼容的 EXE、JSON、`index.html` 和相关 Host Rule 配置；恢复旧 `index.html` 前不得删除它所引用的旧版 `assets/`。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -445,7 +446,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端两段脚本、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、壁纸多选属性、单文件预检、严格串行上传、单项失败继续和全局错误停止、上传请求与进度契约、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
+验证包括：PowerShell 语法、前端首屏内联脚本、版本化外部 CSS/JavaScript 引用与语法、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、壁纸多选属性、单文件预检、严格串行上传、单项失败继续和全局错误停止、上传请求与进度契约、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
 
 人工部署后还应检查：
 
@@ -475,4 +476,4 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
 - `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
-- `index.html`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。
+- `index.html`、版本化前端 `assets/`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。

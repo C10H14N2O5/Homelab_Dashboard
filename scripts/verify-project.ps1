@@ -19,6 +19,9 @@ if ($Build -and ($SkipPython -or $SkipFrontend)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $indexPath = Join-Path $projectRoot 'index.html'
+$frontendAssetRoot = Join-Path $projectRoot 'assets\v2.8.1'
+$frontendStylePath = Join-Path $frontendAssetRoot 'dashboard.css'
+$frontendScriptPath = Join-Path $frontendAssetRoot 'app.js'
 $stateServicePath = Join-Path $projectRoot 'state-service'
 $uninstallPath = Join-Path $PSScriptRoot 'uninstall-state-service.ps1'
 
@@ -103,6 +106,8 @@ function Assert-RepositorySourceControlPolicy {
 
 $requiredFiles = @(
     'index.html',
+    'assets\v2.8.1\dashboard.css',
+    'assets\v2.8.1\app.js',
     'README.md',
     'CHANGELOG.md',
     'LICENSE',
@@ -166,6 +171,9 @@ $maintenanceContracts = @(
     @{ Name = 'release file manifest'; Source = $packageSource; Marker = 'SHA256SUMS.txt' },
     @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
     @{ Name = 'release license notices'; Source = $packageSource; Marker = 'THIRD_PARTY_NOTICES.md' },
+    @{ Name = 'release default background source'; Source = $packageSource; Marker = 'assets\default-background.svg' },
+    @{ Name = 'release versioned stylesheet'; Source = $packageSource; Marker = 'assets\v2.8.1\dashboard.css' },
+    @{ Name = 'release versioned application script'; Source = $packageSource; Marker = 'assets\v2.8.1\app.js' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
@@ -231,10 +239,37 @@ const fs = require('fs');
 const vm = require('vm');
 
 (async () => {
-const html = fs.readFileSync(process.argv[2] || process.argv[1], 'utf8');
-const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
-if (scripts.length !== 2) throw new Error(`Expected 2 inline scripts, found ${scripts.length}.`);
-scripts.forEach((source, index) => new vm.Script(source, { filename: `inline-script-${index + 1}.js` }));
+const htmlDocument = fs.readFileSync(process.argv[2], 'utf8');
+const stylesheet = fs.readFileSync(process.argv[3], 'utf8');
+const runtimeScript = fs.readFileSync(process.argv[4], 'utf8');
+const inlineScripts = [...htmlDocument.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((match) => match[1]);
+if (inlineScripts.length !== 1) {
+    throw new Error(`Expected one inline bootstrap script, found ${inlineScripts.length}.`);
+}
+inlineScripts.forEach((source, index) => {
+    new vm.Script(source, { filename: `inline-bootstrap-${index + 1}.js` });
+});
+new vm.Script(runtimeScript, { filename: 'assets/v2.8.1/app.js' });
+
+const stylesheetReferences = [...htmlDocument.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/gi)]
+    .map((match) => match[1]);
+const scriptReferences = [...htmlDocument.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/gi)]
+    .map((match) => match[1]);
+if (stylesheetReferences.length !== 1
+    || stylesheetReferences[0] !== '/assets/v2.8.1/dashboard.css') {
+    throw new Error(`Unexpected stylesheet references: ${stylesheetReferences.join(', ')}`);
+}
+if (scriptReferences.length !== 1 || scriptReferences[0] !== '/assets/v2.8.1/app.js') {
+    throw new Error(`Unexpected script references: ${scriptReferences.join(', ')}`);
+}
+if (/<style\b/i.test(htmlDocument)) {
+    throw new Error('V2.8.1 must keep dashboard styles in the versioned external stylesheet.');
+}
+
+// Preserve the existing contract searches while sourcing each concern from its
+// deployed file. HTML remains first so structural index comparisons are stable.
+const html = `${htmlDocument}\n${stylesheet}\n${runtimeScript}`;
 
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
@@ -641,7 +676,6 @@ if (!/\bmultiple(?:\s|>|=)/i.test(uploadInputTag)
     throw new Error('Background upload input must support multiple filtered image selections.');
 }
 
-const runtimeScript = scripts[1];
 if (runtimeScript.includes('window.open(')) {
     throw new Error('New-tab navigation must use native safe links or forms instead of window.open().');
 }
@@ -3110,7 +3144,7 @@ if (context.cards.some((card) => card.stateElement.dataset.state !== 'unknown')
     throw new Error('API failure did not restore controls and render unknown states.');
 }
 
-console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} cards, ${ids.length} unique ids.`);
+console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, 2 external assets, ${cards.length} cards, ${ids.length} unique ids.`);
 })().catch((error) => {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
@@ -3120,7 +3154,7 @@ console.log(`Frontend checks passed: ${scripts.length} scripts, ${cards.length} 
     try {
         [IO.File]::WriteAllText($frontendValidationPath, $frontendValidation, [Text.UTF8Encoding]::new($false))
         Invoke-CheckedCommand -Name 'frontend HTML and JavaScript' -Command {
-            & $node.Source $frontendValidationPath $indexPath
+            & $node.Source $frontendValidationPath $indexPath $frontendStylePath $frontendScriptPath
         }
     } finally {
         if (Test-Path -LiteralPath $frontendValidationPath -PathType Leaf) {

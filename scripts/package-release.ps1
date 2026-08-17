@@ -29,6 +29,9 @@ if ([IO.Path]::GetExtension($resolvedExecutable) -ne '.exe') {
 
 $requiredRelativeFiles = @(
     'index.html',
+    'assets\default-background.svg',
+    'assets\v2.8.1\dashboard.css',
+    'assets\v2.8.1\app.js',
     'backgrounds\bg.jpg',
     'README.md',
     'LICENSE',
