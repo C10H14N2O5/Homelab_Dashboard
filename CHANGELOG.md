@@ -4,7 +4,11 @@
 
 ## [Unreleased]
 
-- 暂无
+### Changed
+
+- 将后端单体 `state-service/main.py` 按职责拆为 `core`、`config`、`backgrounds`、`bestdori`、`probe`、`http_api` 和 `launcher` 模块；`main.py` 保留为稳定薄入口。
+- 将 Python 测试按对应模块迁入 `state-service/tests/`，并让项目验证器逐个语法检查正式模块及运行完整测试集。
+- 源码运行命令、PyInstaller 单文件入口与产物名称、配置和状态 JSON、Dashboard API、回环监听及安全边界保持不变。
 
 ## [2.9.0] - 2026-08-17
 

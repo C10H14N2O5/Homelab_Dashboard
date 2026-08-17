@@ -149,6 +149,7 @@ $requiredFiles = @(
     'state-service\homelab_state\bestdori.py',
     'state-service\homelab_state\probe.py',
     'state-service\homelab_state\http_api.py',
+    'state-service\homelab_state\launcher.py',
     'state-service\tests\__init__.py',
     'state-service\tests\helpers.py',
     'state-service\tests\test_config.py',
@@ -156,6 +157,7 @@ $requiredFiles = @(
     'state-service\tests\test_bestdori.py',
     'state-service\tests\test_probe.py',
     'state-service\tests\test_http_api.py',
+    'state-service\tests\test_launcher.py',
     'scripts\build-state-service.ps1',
     'scripts\package-release.ps1',
     'scripts\process-utils.ps1',
@@ -173,13 +175,18 @@ $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-serv
 $packageSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package-release.ps1'))
 $processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
 $stateServiceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\main.py'))
+$launcherSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\homelab_state\launcher.py')
+)
 $httpServiceSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\homelab_state\http_api.py')
 )
 $backgroundServiceSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\homelab_state\backgrounds.py')
 )
-$stateServiceTestSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\test_main.py'))
+$launcherTestSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\tests\test_launcher.py')
+)
 $httpServiceTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_http_api.py')
 )
@@ -195,6 +202,9 @@ $maintenanceContracts = @(
     @{ Name = 'asynchronous stdout drain'; Source = $processUtilsSource; Marker = 'ReadToEndAsync' },
     @{ Name = 'complete process-tree termination'; Source = $processUtilsSource; Marker = 'taskkill.exe' },
     @{ Name = 'process timeout exception'; Source = $processUtilsSource; Marker = '[TimeoutException]' },
+    @{ Name = 'thin Python entry point'; Source = $stateServiceSource; Marker = 'from homelab_state.launcher import main' },
+    @{ Name = 'source-mode main.py command'; Source = $launcherSource; Marker = 'parent.parent / "main.py"' },
+    @{ Name = 'source-mode launcher regression'; Source = $launcherTestSource; Marker = 'test_executable_command_supports_source_mode' },
     @{ Name = 'HTTP connection limit'; Source = $httpServiceSource; Marker = 'MAX_HTTP_CONNECTIONS = 16' },
     @{ Name = 'HTTP request read deadline'; Source = $httpServiceSource; Marker = 'HTTP_REQUEST_READ_DEADLINE_SECONDS = 300.0' },
     @{ Name = 'strict transfer framing'; Source = $httpServiceSource; Marker = 'Transfer-Encoding is not supported' },

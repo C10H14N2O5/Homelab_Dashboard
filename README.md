@@ -43,8 +43,17 @@ zoraxy-homelab-dashboard/
 │   ├── bg.jpg                   # SVG 导出的默认占位壁纸
 │   └── thumbnails/              # 运行时生成的 WebP 缩略图缓存，不进入 Git
 ├── state-service/
-│   ├── main.py                  # API、入口探测、状态存储、启动器、监视器和首次引导
-│   └── test_main.py             # Python 单元测试
+│   ├── main.py                  # 稳定的薄入口；转交 homelab_state.launcher.main
+│   ├── homelab_state/
+│   │   ├── core.py              # 共享常量、异常、校验和原子 JSON 写入
+│   │   ├── config.py            # 严格 v2 配置模型、解析和路径边界
+│   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
+│   │   ├── bestdori.py          # 固定源客户端、抽卡和去重历史
+│   │   ├── probe.py             # 回环固定的 HTTPS 批量入口探测
+│   │   ├── http_api.py          # HTTP 服务、请求安全边界和 API 路由
+│   │   └── launcher.py          # 首次引导、后端生命周期和终端监视器
+│   ├── tests/                   # 按上述模块划分的 Python 单元测试
+│   └── test_main.py             # 薄入口兼容性测试
 ├── scripts/
 │   ├── build-state-service.ps1  # 测试、PyInstaller 构建和 EXE 冒烟测试
 │   ├── package-release.ps1      # 组装 Windows Release 包和 SHA-256
@@ -254,7 +263,7 @@ Content-Type: application/json
 
 ## Python 状态服务
 
-`state-service/main.py` 使用标准库、Pillow 和 Send2Trash，提供：
+`state-service/main.py` 是稳定的薄入口，实际实现按职责位于 `state-service/homelab_state/`。这种拆分只改变源码组织：开发命令、PyInstaller 的 `main.py` 单文件构建入口、生成的 `HomeLabWallpaperState.exe`、配置与状态格式以及 Dashboard API 均保持不变。服务使用标准库、Pillow 和 Send2Trash，提供：
 
 - `GET /api/background-files`：扫描第一层原图、核对缩略图缓存并返回结构化清单；
 - `GET /api/background-preferences`：读取并自愈状态；

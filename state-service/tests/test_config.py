@@ -4,8 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-import main
-from homelab_state import config
+from homelab_state import config, launcher
 from homelab_state.core import ConfigurationError
 from tests.helpers import TEST_ORIGIN, TemporaryProject
 
@@ -19,11 +18,11 @@ class ConfigTests(unittest.TestCase):
 
     def test_interactive_defaults(self) -> None:
         self.assertEqual(config.DEFAULT_BACKGROUND_DIRECTORY, r"D:\Zoraxy\www\html\backgrounds")
-        self.assertEqual(main.MONITOR_REFRESH_SECONDS, 60.0)
+        self.assertEqual(launcher.MONITOR_REFRESH_SECONDS, 60.0)
 
     def test_prompt_value_strips_redirected_utf8_bom(self) -> None:
         with mock.patch("builtins.input", return_value="\ufeffD:\\wallpapers  "):
-            self.assertEqual(main.prompt_value("背景目录", "default"), r"D:\wallpapers")
+            self.assertEqual(launcher.prompt_value("背景目录", "default"), r"D:\wallpapers")
 
     def test_wizard_preserves_existing_background_default(self) -> None:
         existing = self.project.write_config()
@@ -33,12 +32,12 @@ class ConfigTests(unittest.TestCase):
             prompts.append((label, default))
             return default
 
-        with mock.patch.object(main, "prompt_value", side_effect=accept_default), mock.patch.object(
-            main, "prompt_yes_no", return_value=False
+        with mock.patch.object(launcher, "prompt_value", side_effect=accept_default), mock.patch.object(
+            launcher, "prompt_yes_no", return_value=False
         ), mock.patch.object(sys, "frozen", False, create=True), mock.patch.object(
-            main, "validate_application_location"
+            launcher, "validate_application_location"
         ) as validate_location, mock.patch("builtins.print"):
-            configured = main.run_configuration_wizard(self.project.config_path)
+            configured = launcher.run_configuration_wizard(self.project.config_path)
 
         self.assertEqual(prompts[0], ("背景目录", r"web\html\backgrounds"))
         self.assertEqual(configured.background_dir, existing.background_dir)
@@ -61,12 +60,12 @@ class ConfigTests(unittest.TestCase):
             AbortWizard(),
         ]
 
-        with mock.patch.object(main, "prompt_value", side_effect=answers), mock.patch.object(
-            main,
+        with mock.patch.object(launcher, "prompt_value", side_effect=answers), mock.patch.object(
+            launcher,
             "atomic_write_json",
         ) as write_config, mock.patch("builtins.print"):
             with self.assertRaises(AbortWizard):
-                main.run_configuration_wizard(public_config)
+                launcher.run_configuration_wizard(public_config)
 
         write_config.assert_not_called()
         self.assertFalse(public_config.exists())
@@ -82,13 +81,13 @@ class ConfigTests(unittest.TestCase):
         def accept_default(_label: str, default: str) -> str:
             return default
 
-        with mock.patch.object(main, "prompt_value", side_effect=accept_default), mock.patch.object(
-            main,
+        with mock.patch.object(launcher, "prompt_value", side_effect=accept_default), mock.patch.object(
+            launcher,
             "validate_application_location",
             side_effect=AbortWizard(),
-        ), mock.patch.object(main, "atomic_write_json") as write_config, mock.patch("builtins.print"):
+        ), mock.patch.object(launcher, "atomic_write_json") as write_config, mock.patch("builtins.print"):
             with self.assertRaises(AbortWizard):
-                main.run_configuration_wizard(self.project.config_path)
+                launcher.run_configuration_wizard(self.project.config_path)
 
         write_config.assert_not_called()
         self.assertEqual(self.project.config_path.read_bytes(), original)
