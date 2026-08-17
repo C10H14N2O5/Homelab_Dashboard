@@ -50,6 +50,13 @@ if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or
     -not (Test-Path -LiteralPath $testFile -PathType Leaf)) {
     throw "Python service source or tests are missing in: $resolvedSourceDir"
 }
+$pythonSources = @(
+    Get-ChildItem -LiteralPath $resolvedSourceDir -Filter '*.py' -File -Recurse |
+        Select-Object -ExpandProperty FullName
+)
+if ($pythonSources.Count -eq 0) {
+    throw "No Python sources were found in: $resolvedSourceDir"
+}
 
 & $resolvedPython --version
 if ($LASTEXITCODE -ne 0) {
@@ -61,7 +68,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Checking Python syntax...'
-& $resolvedPython -m py_compile $entryPoint $testFile
+& $resolvedPython -m py_compile @pythonSources
 if ($LASTEXITCODE -ne 0) {
     throw "Python syntax check failed with exit code $LASTEXITCODE"
 }

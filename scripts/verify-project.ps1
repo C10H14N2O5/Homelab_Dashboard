@@ -142,6 +142,16 @@ $requiredFiles = @(
     'requirements.txt',
     'state-service\main.py',
     'state-service\test_main.py',
+    'state-service\homelab_state\__init__.py',
+    'state-service\homelab_state\core.py',
+    'state-service\homelab_state\config.py',
+    'state-service\homelab_state\backgrounds.py',
+    'state-service\homelab_state\bestdori.py',
+    'state-service\tests\__init__.py',
+    'state-service\tests\helpers.py',
+    'state-service\tests\test_config.py',
+    'state-service\tests\test_backgrounds.py',
+    'state-service\tests\test_bestdori.py',
     'scripts\build-state-service.ps1',
     'scripts\package-release.ps1',
     'scripts\process-utils.ps1',
@@ -159,6 +169,9 @@ $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-serv
 $packageSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package-release.ps1'))
 $processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
 $stateServiceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\main.py'))
+$backgroundServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\homelab_state\backgrounds.py')
+)
 $stateServiceTestSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\test_main.py'))
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
@@ -177,8 +190,8 @@ $maintenanceContracts = @(
     @{ Name = 'strict transfer framing'; Source = $stateServiceSource; Marker = 'Transfer-Encoding is not supported' },
     @{ Name = 'request smuggling regression'; Source = $stateServiceTestSource; Marker = 'test_bodyless_routes_reject_unread_bytes_and_request_smuggling' },
     @{ Name = 'slow request regression'; Source = $stateServiceTestSource; Marker = 'test_request_read_deadline_cannot_be_extended_by_trickle_input' },
-    @{ Name = 'background file quota'; Source = $stateServiceSource; Marker = 'MAX_BACKGROUND_FILES = 512' },
-    @{ Name = 'thumbnail generation budget'; Source = $stateServiceSource; Marker = 'MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16' },
+    @{ Name = 'background file quota'; Source = $backgroundServiceSource; Marker = 'MAX_BACKGROUND_FILES = 512' },
+    @{ Name = 'thumbnail generation budget'; Source = $backgroundServiceSource; Marker = 'MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },
@@ -3373,8 +3386,12 @@ if ($SkipPython) {
 
     Push-Location -LiteralPath $stateServicePath
     try {
+        $pythonSources = @(
+            Get-ChildItem -LiteralPath $stateServicePath -Filter '*.py' -File -Recurse |
+                Select-Object -ExpandProperty FullName
+        )
         Invoke-CheckedCommand -Name 'Python syntax' -Command {
-            & $pythonPath -m py_compile .\main.py .\test_main.py
+            & $pythonPath -m py_compile @pythonSources
         }
         Invoke-CheckedCommand -Name 'Python unit tests' -Command {
             & $pythonPath -m unittest discover -s . -p 'test_*.py' -v
