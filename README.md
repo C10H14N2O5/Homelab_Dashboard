@@ -27,9 +27,6 @@
 zoraxy-homelab-dashboard/
 ├── assets/
 │   ├── default-background.svg   # 项目自有兜底壁纸源文件
-│   ├── v2.8.1/                  # 上一版外置资源，供部署回滚
-│   │   ├── dashboard.css
-│   │   └── app.js
 │   └── v2.9.0/
 │       ├── dashboard.css       # Homepage 样式，按发布版本固定路径
 │       └── js/
