@@ -19,9 +19,19 @@ if ($Build -and ($SkipPython -or $SkipFrontend)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $indexPath = Join-Path $projectRoot 'index.html'
-$frontendAssetRoot = Join-Path $projectRoot 'assets\v2.8.1'
+$frontendAssetRoot = Join-Path $projectRoot 'assets\v2.9.0'
 $frontendStylePath = Join-Path $frontendAssetRoot 'dashboard.css'
-$frontendScriptPath = Join-Path $frontendAssetRoot 'app.js'
+$frontendModuleRoot = Join-Path $frontendAssetRoot 'js'
+$frontendModulePaths = @(
+    'core-http.js',
+    'background-manager.js',
+    'background-upload.js',
+    'bestdori.js',
+    'search.js',
+    'channel-switch.js',
+    'service-status.js',
+    'app.js'
+) | ForEach-Object { Join-Path $frontendModuleRoot $_ }
 $stateServicePath = Join-Path $projectRoot 'state-service'
 $uninstallPath = Join-Path $PSScriptRoot 'uninstall-state-service.ps1'
 
@@ -106,8 +116,15 @@ function Assert-RepositorySourceControlPolicy {
 
 $requiredFiles = @(
     'index.html',
-    'assets\v2.8.1\dashboard.css',
-    'assets\v2.8.1\app.js',
+    'assets\v2.9.0\dashboard.css',
+    'assets\v2.9.0\js\core-http.js',
+    'assets\v2.9.0\js\background-manager.js',
+    'assets\v2.9.0\js\background-upload.js',
+    'assets\v2.9.0\js\bestdori.js',
+    'assets\v2.9.0\js\search.js',
+    'assets\v2.9.0\js\channel-switch.js',
+    'assets\v2.9.0\js\service-status.js',
+    'assets\v2.9.0\js\app.js',
     'README.md',
     'CHANGELOG.md',
     'LICENSE',
@@ -172,8 +189,15 @@ $maintenanceContracts = @(
     @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
     @{ Name = 'release license notices'; Source = $packageSource; Marker = 'THIRD_PARTY_NOTICES.md' },
     @{ Name = 'release default background source'; Source = $packageSource; Marker = 'assets\default-background.svg' },
-    @{ Name = 'release versioned stylesheet'; Source = $packageSource; Marker = 'assets\v2.8.1\dashboard.css' },
-    @{ Name = 'release versioned application script'; Source = $packageSource; Marker = 'assets\v2.8.1\app.js' },
+    @{ Name = 'release versioned stylesheet'; Source = $packageSource; Marker = 'assets\v2.9.0\dashboard.css' },
+    @{ Name = 'release module entry point'; Source = $packageSource; Marker = 'assets\v2.9.0\js\app.js' },
+    @{ Name = 'release background manager module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\background-manager.js' },
+    @{ Name = 'release background upload module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\background-upload.js' },
+    @{ Name = 'release Bestdori module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\bestdori.js' },
+    @{ Name = 'release channel switch module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\channel-switch.js' },
+    @{ Name = 'release core HTTP module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\core-http.js' },
+    @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\search.js' },
+    @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\v2.9.0\js\service-status.js' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
@@ -237,11 +261,58 @@ if ($SkipFrontend) {
     $frontendValidation = @'
 const fs = require('fs');
 const vm = require('vm');
+const path = require('path');
 
 (async () => {
 const htmlDocument = fs.readFileSync(process.argv[2], 'utf8');
 const stylesheet = fs.readFileSync(process.argv[3], 'utf8');
-const runtimeScript = fs.readFileSync(process.argv[4], 'utf8');
+const modulePaths = process.argv.slice(4);
+const moduleEntries = modulePaths.map((modulePath) => [
+    path.basename(modulePath),
+    fs.readFileSync(modulePath, 'utf8')
+]);
+const moduleSources = Object.fromEntries(moduleEntries);
+const expectedModuleNames = [
+    'core-http.js',
+    'background-manager.js',
+    'background-upload.js',
+    'bestdori.js',
+    'search.js',
+    'channel-switch.js',
+    'service-status.js',
+    'app.js'
+];
+if (JSON.stringify(Object.keys(moduleSources)) !== JSON.stringify(expectedModuleNames)) {
+    throw new Error(`Unexpected ES module inputs: ${Object.keys(moduleSources).join(', ')}`);
+}
+for (const [name, source] of moduleEntries) {
+    new vm.SourceTextModule(source, { identifier: `assets/v2.9.0/js/${name}` });
+    for (const match of source.matchAll(/\bfrom\s+['"](\.\/[^'"]+)['"]/g)) {
+        const dependency = match[1].slice(2);
+        if (!Object.prototype.hasOwnProperty.call(moduleSources, dependency)) {
+            throw new Error(`${name} imports missing local module ${match[1]}.`);
+        }
+    }
+}
+const coreScript = moduleSources['core-http.js'];
+const backgroundManagerScript = moduleSources['background-manager.js'];
+const backgroundUploadScript = moduleSources['background-upload.js'];
+const bestdoriScript = moduleSources['bestdori.js'];
+const searchScript = moduleSources['search.js'];
+const channelScript = moduleSources['channel-switch.js'];
+const serviceScript = moduleSources['service-status.js'];
+const appScript = moduleSources['app.js'];
+const runtimeScript = moduleEntries.map((entry) => entry[1]).join('\n');
+const backgroundNetworkScript = coreScript.slice(coreScript.indexOf('function fetchWithTimeout('))
+    + '\n'
+    + backgroundManagerScript.slice(backgroundManagerScript.indexOf('function preloadBackground('));
+const bestdoriRequestScript = backgroundManagerScript.slice(
+    backgroundManagerScript.indexOf('function backgroundManagerIsBusy('),
+    backgroundManagerScript.indexOf('function syncBackgroundControlsBusy(')
+) + '\n' + bestdoriScript.slice(
+    bestdoriScript.indexOf('function bestdoriErrorMessage('),
+    bestdoriScript.indexOf('function cardDrawDialogIsOpen(')
+);
 const inlineScripts = [...htmlDocument.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
     .map((match) => match[1]);
 if (inlineScripts.length !== 1) {
@@ -250,21 +321,23 @@ if (inlineScripts.length !== 1) {
 inlineScripts.forEach((source, index) => {
     new vm.Script(source, { filename: `inline-bootstrap-${index + 1}.js` });
 });
-new vm.Script(runtimeScript, { filename: 'assets/v2.8.1/app.js' });
 
 const stylesheetReferences = [...htmlDocument.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/gi)]
     .map((match) => match[1]);
 const scriptReferences = [...htmlDocument.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/gi)]
     .map((match) => match[1]);
 if (stylesheetReferences.length !== 1
-    || stylesheetReferences[0] !== '/assets/v2.8.1/dashboard.css') {
+    || stylesheetReferences[0] !== '/assets/v2.9.0/dashboard.css') {
     throw new Error(`Unexpected stylesheet references: ${stylesheetReferences.join(', ')}`);
 }
-if (scriptReferences.length !== 1 || scriptReferences[0] !== '/assets/v2.8.1/app.js') {
+if (scriptReferences.length !== 1 || scriptReferences[0] !== '/assets/v2.9.0/js/app.js') {
     throw new Error(`Unexpected script references: ${scriptReferences.join(', ')}`);
 }
+if (!/<script\b[^>]*\btype="module"[^>]*\bsrc="\/assets\/v2\.9\.0\/js\/app\.js"[^>]*><\/script>/i.test(htmlDocument)) {
+    throw new Error('V2.9.0 must load its entry point as a native ES module.');
+}
 if (/<style\b/i.test(htmlDocument)) {
-    throw new Error('V2.8.1 must keep dashboard styles in the versioned external stylesheet.');
+    throw new Error('V2.9.0 must keep dashboard styles in the versioned external stylesheet.');
 }
 
 // Preserve the existing contract searches while sourcing each concern from its
@@ -679,8 +752,8 @@ if (!/\bmultiple(?:\s|>|=)/i.test(uploadInputTag)
 if (runtimeScript.includes('window.open(')) {
     throw new Error('New-tab navigation must use native safe links or forms instead of window.open().');
 }
-const helperStart = runtimeScript.indexOf('function fetchWithTimeout(');
-const helperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', helperStart);
+const helperStart = backgroundNetworkScript.indexOf('function fetchWithTimeout(');
+const helperEnd = backgroundNetworkScript.indexOf('function syncBackgroundControlsBusy(', helperStart);
 if (helperStart < 0 || helperEnd < 0) throw new Error('Unable to extract timeout helpers for behavior checks.');
 
 const context = vm.createContext({
@@ -697,7 +770,7 @@ const context = vm.createContext({
     window: { setTimeout, clearTimeout }
 });
 vm.runInContext(
-    runtimeScript.slice(helperStart, helperEnd)
+    backgroundNetworkScript.slice(helperStart, helperEnd)
         + '\nglobalThis.__helpers = { fetchWithTimeout, preloadBackground };',
     context
 );
@@ -742,13 +815,13 @@ if (lastImage.onload !== null || lastImage.onerror !== null || lastImage.current
     throw new Error('Image timeout did not clean up handlers and cancel the source.');
 }
 
-const backgroundManagerHelperStart = runtimeScript.indexOf('function normalizeBackgroundName(');
-const backgroundManagerHelperEnd = runtimeScript.indexOf('function backgroundUrlFromName(', backgroundManagerHelperStart);
+const backgroundManagerHelperStart = backgroundManagerScript.indexOf('function normalizeBackgroundName(');
+const backgroundManagerHelperEnd = backgroundManagerScript.indexOf('function backgroundUrlFromName(', backgroundManagerHelperStart);
 if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
     throw new Error('Unable to extract background file manager helpers for behavior checks.');
 }
 vm.runInContext(
-    runtimeScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
+    backgroundManagerScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
         + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, readBoundedResponseText, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
     context
 );
@@ -932,8 +1005,8 @@ ordinaryBackgroundNames.forEach((fileName) => {
     }
 });
 
-const backgroundSortStart = runtimeScript.indexOf('function mergeAndSortBackgrounds(');
-const backgroundSortEnd = runtimeScript.indexOf('async function requestBackgroundInventory(', backgroundSortStart);
+const backgroundSortStart = backgroundManagerScript.indexOf('function mergeAndSortBackgrounds(');
+const backgroundSortEnd = backgroundManagerScript.indexOf('async function requestBackgroundInventory(', backgroundSortStart);
 if (backgroundSortStart < 0 || backgroundSortEnd < 0) {
     throw new Error('Unable to extract the background natural-order helper.');
 }
@@ -949,7 +1022,7 @@ context.backgroundUrlForMode = (mode) => context.backgroundUrlFromName(
 );
 context.backgroundFileName = (url) => decodeURIComponent(url.pathname.split('/').pop());
 vm.runInContext(
-    runtimeScript.slice(backgroundSortStart, backgroundSortEnd)
+    backgroundManagerScript.slice(backgroundSortStart, backgroundSortEnd)
         + '\nglobalThis.__mergeAndSortBackgrounds = mergeAndSortBackgrounds;',
     context
 );
@@ -1011,12 +1084,12 @@ if (overflowOrder.length !== context.maximumBackgroundInventoryItems
     throw new Error('The capped wallpaper list did not retain selected backgrounds in natural order.');
 }
 
-const renderFunctionStart = runtimeScript.indexOf('function renderBackgroundOptions(');
-const renderFunctionEnd = runtimeScript.indexOf('function focusBackgroundOption(', renderFunctionStart);
+const renderFunctionStart = backgroundManagerScript.indexOf('function renderBackgroundOptions(');
+const renderFunctionEnd = backgroundManagerScript.indexOf('function focusBackgroundOption(', renderFunctionStart);
 if (renderFunctionStart < 0 || renderFunctionEnd < 0) {
     throw new Error('Unable to extract the grouped background renderer.');
 }
-const groupedRendererSource = runtimeScript.slice(renderFunctionStart, renderFunctionEnd);
+const groupedRendererSource = backgroundManagerScript.slice(renderFunctionStart, renderFunctionEnd);
 if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
     || !groupedRendererSource.includes('backgroundLibraryExpanded[source]')
     || !groupedRendererSource.includes('groupedBackgrounds.ordinary.length')
@@ -1034,13 +1107,13 @@ if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
     throw new Error('Grouped background renderer is missing thumbnail, original-selection, count, collapse, or toggle behavior.');
 }
 
-const inventoryRequestStart = runtimeScript.indexOf('async function requestBackgroundInventory(');
-const inventoryRequestEnd = runtimeScript.indexOf('async function requestLegacyBackgroundListing(', inventoryRequestStart);
+const inventoryRequestStart = backgroundManagerScript.indexOf('async function requestBackgroundInventory(');
+const inventoryRequestEnd = backgroundManagerScript.indexOf('async function requestLegacyBackgroundListing(', inventoryRequestStart);
 if (inventoryRequestStart < 0 || inventoryRequestEnd < 0) {
     throw new Error('Unable to extract the background inventory request.');
 }
 vm.runInContext(
-    runtimeScript.slice(inventoryRequestStart, inventoryRequestEnd)
+    backgroundManagerScript.slice(inventoryRequestStart, inventoryRequestEnd)
         + '\nglobalThis.__requestBackgroundInventory = requestBackgroundInventory;',
     context
 );
@@ -1076,13 +1149,13 @@ if (requestedInventory.version !== 1
     throw new Error('Background inventory request contract mismatch.');
 }
 
-const scanFunctionStart = runtimeScript.indexOf('async function scanBackgroundDirectory(');
-const scanFunctionEnd = runtimeScript.indexOf('function setEditingBackgroundMode(', scanFunctionStart);
+const scanFunctionStart = backgroundManagerScript.indexOf('async function scanBackgroundDirectory(');
+const scanFunctionEnd = backgroundManagerScript.indexOf('function setEditingBackgroundMode(', scanFunctionStart);
 if (scanFunctionStart < 0 || scanFunctionEnd < 0) {
     throw new Error('Unable to extract the background scan fallback workflow.');
 }
 vm.runInContext(
-    runtimeScript.slice(scanFunctionStart, scanFunctionEnd)
+    backgroundManagerScript.slice(scanFunctionStart, scanFunctionEnd)
         + '\nglobalThis.__scanBackgroundDirectory = scanBackgroundDirectory;',
     context
 );
@@ -1120,8 +1193,8 @@ if (legacyListingRequestCount !== 1
     throw new Error('Inventory failure did not enter and announce the legacy original-loading fallback.');
 }
 
-const transitionHelperStart = runtimeScript.indexOf('function cancelBackgroundSectionTransition(');
-const transitionHelperEnd = runtimeScript.indexOf('function focusBackgroundOption(', transitionHelperStart);
+const transitionHelperStart = backgroundManagerScript.indexOf('function cancelBackgroundSectionTransition(');
+const transitionHelperEnd = backgroundManagerScript.indexOf('function focusBackgroundOption(', transitionHelperStart);
 if (transitionHelperStart < 0 || transitionHelperEnd < 0) {
     throw new Error('Unable to extract background section transition helpers.');
 }
@@ -1190,7 +1263,7 @@ const transitionContext = vm.createContext({
     }
 });
 vm.runInContext(
-    runtimeScript.slice(transitionHelperStart, transitionHelperEnd)
+    backgroundManagerScript.slice(transitionHelperStart, transitionHelperEnd)
         + '\nglobalThis.__backgroundTransitionHelpers = { setBackgroundSectionExpanded };',
     transitionContext
 );
@@ -1282,33 +1355,33 @@ if (completedBackgroundFocus !== 2
     throw new Error('Reduced-motion background expansion did not complete immediately.');
 }
 
-const bestdoriHelperStart = runtimeScript.indexOf('function backgroundManagerIsBusy(');
-const bestdoriHelperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', bestdoriHelperStart);
+const bestdoriHelperStart = bestdoriRequestScript.indexOf('function backgroundManagerIsBusy(');
+const bestdoriHelperEnd = bestdoriRequestScript.length;
 if (bestdoriHelperStart < 0 || bestdoriHelperEnd < 0) {
     throw new Error('Unable to extract Bestdori request helpers for behavior checks.');
 }
 vm.runInContext(
-    runtimeScript.slice(bestdoriHelperStart, bestdoriHelperEnd)
+    bestdoriRequestScript.slice(bestdoriHelperStart, bestdoriHelperEnd)
         + '\nglobalThis.__bestdoriHelpers = { backgroundManagerIsBusy, bestdoriErrorMessage, buildBestdoriDrawRequest, requestBestdoriJson };',
     context
 );
 
 context.backgroundScanPending = false;
 context.backgroundWritePending = false;
-context.backgroundUploadPending = false;
 context.backgroundDeletePending = false;
-context.backgroundDrawPending = false;
+context.backgroundUploadController = { isBusy: () => false };
+context.bestdoriController = { isBusy: () => false };
 if (context.__bestdoriHelpers.backgroundManagerIsBusy()) {
     throw new Error('Idle background manager was reported as busy.');
 }
-context.backgroundDrawPending = true;
+context.bestdoriController = { isBusy: () => true };
 if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
     throw new Error('Bestdori work was not included in the shared background-manager busy state.');
 }
-context.backgroundDrawPending = false;
+context.bestdoriController = { isBusy: () => false };
 
-const cardDrawStatusHelperStart = runtimeScript.indexOf('function setCardDrawStatus(');
-const cardDrawStatusHelperEnd = runtimeScript.indexOf('function syncCardDrawControls(', cardDrawStatusHelperStart);
+const cardDrawStatusHelperStart = bestdoriScript.indexOf('function setCardDrawStatus(');
+const cardDrawStatusHelperEnd = bestdoriScript.indexOf('function syncCardDrawControls(', cardDrawStatusHelperStart);
 if (cardDrawStatusHelperStart < 0 || cardDrawStatusHelperEnd < 0) {
     throw new Error('Unable to extract Bestdori status helpers.');
 }
@@ -1328,7 +1401,7 @@ const cardDrawStatusContext = vm.createContext({
     selectedCardDrawRarities: () => cardDrawRaritiesForStatus
 });
 vm.runInContext(
-    runtimeScript.slice(cardDrawStatusHelperStart, cardDrawStatusHelperEnd)
+    bestdoriScript.slice(cardDrawStatusHelperStart, cardDrawStatusHelperEnd)
         + '\nglobalThis.__resetCardDrawStatus = resetCardDrawStatus;',
     cardDrawStatusContext
 );
@@ -1366,8 +1439,8 @@ if (cardDrawStatusElement.textContent !== '\u8bf7\u9009\u62e9\u89d2\u8272\u4e0e\
     throw new Error('Unloaded character mode did not restore its neutral status.');
 }
 
-const cardDrawCloseStart = runtimeScript.indexOf('function closeCardDrawDialog(');
-const cardDrawCloseEnd = runtimeScript.indexOf('async function openCardDrawDialog(', cardDrawCloseStart);
+const cardDrawCloseStart = bestdoriScript.indexOf('function closeCardDrawDialog(');
+const cardDrawCloseEnd = bestdoriScript.indexOf('async function openCardDrawDialog(', cardDrawCloseStart);
 if (cardDrawCloseStart < 0 || cardDrawCloseEnd < 0) {
     throw new Error('Unable to extract the Bestdori dialog closer.');
 }
@@ -1395,7 +1468,7 @@ cardDrawStatusContext.focusWithoutScroll = () => {
     cardDrawFocusRestored = true;
 };
 vm.runInContext(
-    runtimeScript.slice(cardDrawCloseStart, cardDrawCloseEnd)
+    bestdoriScript.slice(cardDrawCloseStart, cardDrawCloseEnd)
         + '\nglobalThis.__closeCardDrawDialog = closeCardDrawDialog;',
     cardDrawStatusContext
 );
@@ -1418,22 +1491,22 @@ if (cardDrawStatusContext.__closeCardDrawDialog('close')
 }
 cardDrawStatusContext.backgroundDrawPending = false;
 
-const cardDrawBindingStart = runtimeScript.indexOf('cardDrawModeInputs.forEach((input) => {');
-const cardDrawBindingEnd = runtimeScript.indexOf("cardHistoryReconcile.addEventListener('click'", cardDrawBindingStart);
+const cardDrawBindingStart = bestdoriScript.indexOf('cardDrawModeInputs.forEach((input) => {');
+const cardDrawBindingEnd = bestdoriScript.indexOf("cardHistoryReconcile.addEventListener('click'", cardDrawBindingStart);
 if (cardDrawBindingStart < 0 || cardDrawBindingEnd < 0) {
     throw new Error('Unable to inspect Bestdori form-change bindings.');
 }
-const cardDrawBindingSource = runtimeScript.slice(cardDrawBindingStart, cardDrawBindingEnd);
+const cardDrawBindingSource = bestdoriScript.slice(cardDrawBindingStart, cardDrawBindingEnd);
 if ((cardDrawBindingSource.match(/resetCardDrawStatus\(\);/g) || []).length !== 3) {
     throw new Error('Mode, rarity, and character changes must all refresh the Bestdori status.');
 }
 
-const originalLinkHelperStart = runtimeScript.indexOf('function syncBackgroundOriginalLink(');
-const originalLinkHelperEnd = runtimeScript.indexOf('function syncBackgroundControlsBusy(', originalLinkHelperStart);
+const originalLinkHelperStart = backgroundManagerScript.indexOf('function syncBackgroundOriginalLink(');
+const originalLinkHelperEnd = backgroundManagerScript.indexOf('function syncBackgroundControlsBusy(', originalLinkHelperStart);
 if (originalLinkHelperStart < 0 || originalLinkHelperEnd < 0) {
     throw new Error('Unable to extract the original-background link helper.');
 }
-const originalLinkHelperSource = runtimeScript.slice(originalLinkHelperStart, originalLinkHelperEnd);
+const originalLinkHelperSource = backgroundManagerScript.slice(originalLinkHelperStart, originalLinkHelperEnd);
 if (originalLinkHelperSource.includes('backgroundPreferencesConnection')
     || originalLinkHelperSource.includes('backgroundManagerIsBusy')
     || originalLinkHelperSource.includes('thumbnailUrl')) {
@@ -1552,12 +1625,12 @@ await expectRejection(
     'Bestdori API error'
 );
 
-const drawFunctionStart = runtimeScript.indexOf('async function drawBestdoriCard(');
-const drawFunctionEnd = runtimeScript.indexOf('async function reconcileBestdoriHistory(', drawFunctionStart);
+const drawFunctionStart = bestdoriScript.indexOf('async function drawBestdoriCard(');
+const drawFunctionEnd = bestdoriScript.indexOf('async function reconcileBestdoriHistory(', drawFunctionStart);
 if (drawFunctionStart < 0 || drawFunctionEnd < 0) {
     throw new Error('Unable to extract the Bestdori draw workflow.');
 }
-const drawFunctionSource = runtimeScript.slice(drawFunctionStart, drawFunctionEnd);
+const drawFunctionSource = bestdoriScript.slice(drawFunctionStart, drawFunctionEnd);
 if (drawFunctionSource.includes("requestBackgroundPreferences('PATCH'")) {
     throw new Error('A successful card draw must not automatically apply the downloaded background.');
 }
@@ -1567,6 +1640,10 @@ vm.runInContext(
 );
 context.bestdoriDrawEndpoint = { href: 'https://home.example.test/api/background-files/draw' };
 context.backgroundPreferencesConnection = 'online';
+context.isManagerBusy = () => context.backgroundManagerIsBusy();
+context.isManagerOnline = () => context.backgroundPreferencesConnection === 'online';
+context.syncManagerControls = () => {};
+context.setManagerStatus = () => {};
 context.backgroundDrawPending = false;
 context.cardCharacterSelect = { value: '4' };
 context.selectedCardDrawMode = () => 'character';
@@ -1625,13 +1702,13 @@ if (await context.__drawBestdoriCard() || !drawErrorStatus.includes('simulated d
     throw new Error('Bestdori draw failure was not reported without claiming success.');
 }
 
-const resetOpenStart = runtimeScript.indexOf('function openCardHistoryResetDialog(');
-const resetOpenEnd = runtimeScript.indexOf('function closeCardHistoryResetDialog(', resetOpenStart);
+const resetOpenStart = bestdoriScript.indexOf('function openCardHistoryResetDialog(');
+const resetOpenEnd = bestdoriScript.indexOf('function closeCardHistoryResetDialog(', resetOpenStart);
 if (resetOpenStart < 0 || resetOpenEnd < 0) {
     throw new Error('Unable to extract Bestdori reset confirmation opener.');
 }
 vm.runInContext(
-    runtimeScript.slice(resetOpenStart, resetOpenEnd)
+    bestdoriScript.slice(resetOpenStart, resetOpenEnd)
         + '\nglobalThis.__openCardHistoryResetDialog = openCardHistoryResetDialog;',
     context
 );
@@ -1654,13 +1731,13 @@ if (!context.__openCardHistoryResetDialog() || !context.cardHistoryResetDialog.o
     throw new Error('Opening reset confirmation sent a reset request before the second confirmation.');
 }
 
-const resetFunctionStart = runtimeScript.indexOf('async function resetBestdoriHistory(');
-const resetFunctionEnd = runtimeScript.indexOf('function backgroundDeleteDialogIsOpen(', resetFunctionStart);
+const resetFunctionStart = bestdoriScript.indexOf('async function resetBestdoriHistory(');
+const resetFunctionEnd = bestdoriScript.indexOf("backgroundDrawButton.addEventListener('click'", resetFunctionStart);
 if (resetFunctionStart < 0 || resetFunctionEnd < 0) {
     throw new Error('Unable to extract Bestdori history reset workflow.');
 }
 vm.runInContext(
-    runtimeScript.slice(resetFunctionStart, resetFunctionEnd)
+    bestdoriScript.slice(resetFunctionStart, resetFunctionEnd)
         + '\nglobalThis.__resetBestdoriHistory = resetBestdoriHistory;',
     context
 );
@@ -1686,12 +1763,12 @@ if (!await context.__resetBestdoriHistory() || resetRequestCount !== 1 || !reset
     throw new Error('Confirmed Bestdori history reset did not complete exactly once.');
 }
 
-const uploadFunctionStart = runtimeScript.indexOf('function requestBackgroundUpload(');
-const uploadFunctionEnd = runtimeScript.indexOf('function backgroundDeleteDialogIsOpen(', uploadFunctionStart);
+const uploadFunctionStart = backgroundUploadScript.indexOf('function requestBackgroundUpload(');
+const uploadFunctionEnd = backgroundUploadScript.indexOf("backgroundUploadButton.addEventListener('click'", uploadFunctionStart);
 if (uploadFunctionStart < 0 || uploadFunctionEnd < 0) {
     throw new Error('Unable to extract the background upload implementation.');
 }
-const uploadFunctionSource = runtimeScript.slice(uploadFunctionStart, uploadFunctionEnd);
+const uploadFunctionSource = backgroundUploadScript.slice(uploadFunctionStart, uploadFunctionEnd);
 if (!uploadFunctionSource.includes('endpoint.searchParams.set(\'name\', file.name)')
     || !uploadFunctionSource.includes("request.open('POST', endpoint.href, true)")
     || !uploadFunctionSource.includes("request.setRequestHeader('Content-Type', 'application/octet-stream')")
@@ -1705,13 +1782,13 @@ if (!uploadFunctionSource.includes('endpoint.searchParams.set(\'name\', file.nam
     throw new Error('Background upload request or no-auto-select contract mismatch.');
 }
 
-const uploadQueueStart = runtimeScript.indexOf('async function executeBackgroundUploadQueue(');
-const uploadQueueEnd = runtimeScript.indexOf('async function runBackgroundUploadQueue(', uploadQueueStart);
+const uploadQueueStart = backgroundUploadScript.indexOf('async function executeBackgroundUploadQueue(');
+const uploadQueueEnd = backgroundUploadScript.indexOf('async function runBackgroundUploadQueue(', uploadQueueStart);
 if (uploadQueueStart < 0 || uploadQueueEnd < 0) {
     throw new Error('Unable to extract the sequential background upload queue.');
 }
 vm.runInContext(
-    runtimeScript.slice(uploadQueueStart, uploadQueueEnd)
+    backgroundUploadScript.slice(uploadQueueStart, uploadQueueEnd)
         + '\nglobalThis.__executeBackgroundUploadQueue = executeBackgroundUploadQueue;',
     context
 );
@@ -1758,13 +1835,13 @@ if (globalStopResult.processed !== 2
     throw new Error('A global background upload failure did not stop the remaining queue.');
 }
 
-const removalRequestStart = runtimeScript.indexOf('async function requestBackgroundRemoval(');
-const removalRequestEnd = runtimeScript.indexOf('async function confirmBackgroundDeletion(', removalRequestStart);
+const removalRequestStart = backgroundManagerScript.indexOf('async function requestBackgroundRemoval(');
+const removalRequestEnd = backgroundManagerScript.indexOf('async function confirmBackgroundDeletion(', removalRequestStart);
 if (removalRequestStart < 0 || removalRequestEnd < 0) {
     throw new Error('Unable to extract the background removal request for behavior checks.');
 }
 vm.runInContext(
-    runtimeScript.slice(removalRequestStart, removalRequestEnd)
+    backgroundManagerScript.slice(removalRequestStart, removalRequestEnd)
         + '\nglobalThis.__requestBackgroundRemoval = requestBackgroundRemoval;',
     context
 );
@@ -1815,12 +1892,12 @@ if (successfulRemoval.requiresPermanentConfirmation
     throw new Error('Successful removal did not retain the nested preference response.');
 }
 
-const searchSourceStart = runtimeScript.indexOf("const SEARCH_ENGINE_STORAGE_KEY = 'homelab-search-engine-v1'");
-const searchSourceEnd = runtimeScript.indexOf('const homepageSearchForm', searchSourceStart);
+const searchSourceStart = searchScript.indexOf("const SEARCH_ENGINE_STORAGE_KEY = 'homelab-search-engine-v1'");
+const searchSourceEnd = searchScript.indexOf('export function initializeSearch(', searchSourceStart);
 if (searchSourceStart < 0 || searchSourceEnd < 0) {
     throw new Error('Unable to extract the homepage search implementation.');
 }
-const searchSource = runtimeScript.slice(searchSourceStart, searchSourceEnd);
+const searchSource = searchScript.slice(searchSourceStart, searchSourceEnd);
 if (/\bfetch\s*\(|\bXMLHttpRequest\b|\bsendBeacon\b/.test(searchSource)) {
     throw new Error('Homepage search initialization, input, and engine switching must not send network requests.');
 }
@@ -2623,12 +2700,12 @@ if (!resetBlankPrevented
     throw new Error('A new search controller did not restart the empty-feedback sequence.');
 }
 
-const channelHelperStart = runtimeScript.indexOf('const serviceChannelDescription =');
-const channelHelperEnd = runtimeScript.indexOf('function setCardState(', channelHelperStart);
+const channelHelperStart = channelScript.indexOf('const serviceChannelDescription =');
+const channelHelperEnd = channelScript.lastIndexOf('    try {');
 if (channelHelperStart < 0 || channelHelperEnd < 0) {
     throw new Error('Unable to extract Stage 2R channel helpers for behavior checks.');
 }
-const channelHelperSource = runtimeScript.slice(channelHelperStart, channelHelperEnd);
+const channelHelperSource = channelScript.slice(channelHelperStart, channelHelperEnd);
 if (/refreshStatuses|fetchWithTimeout|serviceStatusEndpoint/.test(channelHelperSource)) {
     throw new Error('Channel switching must not initiate or alter service-status requests.');
 }
@@ -2771,6 +2848,7 @@ channelContext.channelMobileMotionMedia = {
 };
 vm.runInContext(
     channelHelperSource
+        + '\nconst initializeChannelSwitch = initializeChannelSwitchController;'
         + '\nglobalThis.__channelHelpers = { initializeChannelSwitch, setActiveChannel, configureChannelMotion, finishChannelSwitch, renderChannelNote, quickLinkChannelNotes, restoreStaticServicesChannel };',
     channelContext
 );
@@ -3045,12 +3123,12 @@ if (!channelContext.channelSwitch.disabled
     throw new Error('Stage 2R JavaScript failure fallback did not preserve static Services.');
 }
 
-const serviceHelperStart = runtimeScript.indexOf('function setCardState(');
-const serviceHelperEnd = runtimeScript.indexOf('initializeServiceCards();', serviceHelperStart);
+const serviceHelperStart = serviceScript.indexOf('function setCardState(');
+const serviceHelperEnd = serviceScript.indexOf('initializeServiceCards();', serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
     throw new Error('Unable to extract service status helpers for behavior checks.');
 }
-const serviceHelperSource = runtimeScript.slice(serviceHelperStart, serviceHelperEnd);
+const serviceHelperSource = serviceScript.slice(serviceHelperStart, serviceHelperEnd);
 if (!/const targets = cards\.map\(\(card\) => card\.dataset\.probeUrl \|\| card\.href\);/.test(serviceHelperSource)
     || /\bquickLinks\b/.test(serviceHelperSource)) {
     throw new Error('Service probing must continue to derive its batch exclusively from service cards.');
@@ -3144,7 +3222,7 @@ if (context.cards.some((card) => card.stateElement.dataset.state !== 'unknown')
     throw new Error('API failure did not restore controls and render unknown states.');
 }
 
-console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, 2 external assets, ${cards.length} cards, ${ids.length} unique ids.`);
+console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, 9 external assets, ${cards.length} cards, ${ids.length} unique ids.`);
 })().catch((error) => {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
@@ -3154,7 +3232,7 @@ console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, 2
     try {
         [IO.File]::WriteAllText($frontendValidationPath, $frontendValidation, [Text.UTF8Encoding]::new($false))
         Invoke-CheckedCommand -Name 'frontend HTML and JavaScript' -Command {
-            & $node.Source $frontendValidationPath $indexPath $frontendStylePath $frontendScriptPath
+            & $node.Source --experimental-vm-modules $frontendValidationPath $indexPath $frontendStylePath @frontendModulePaths
         }
     } finally {
         if (Test-Path -LiteralPath $frontendValidationPath -PathType Leaf) {
