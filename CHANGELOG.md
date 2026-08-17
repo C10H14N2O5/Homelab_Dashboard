@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+- 暂无
+
+## [2.9.1] - 2026-08-17
+
 ### Changed
 
 - 将后端单体 `state-service/main.py` 按职责拆为 `core`、`config`、`backgrounds`、`bestdori`、`probe`、`http_api` 和 `launcher` 模块；`main.py` 保留为稳定薄入口。
