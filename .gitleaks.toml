@@ -7,5 +7,5 @@ useDefault = true
 description = "Deterministic service.home.example.test TLS fixture; it protects no real service."
 condition = "AND"
 regexTarget = "line"
-paths = ['''^state-service/test_main\.py$''']
+paths = ['''^state-service/tests/test_probe\.py$''']
 regexes = ['''^TEST_PRIVATE_KEY_DER = "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSl''']
