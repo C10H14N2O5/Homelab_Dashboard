@@ -574,6 +574,12 @@ const cardEditorDialogRule = stylesheet.match(/\.card-editor-dialog,\s*\.card-co
 const cardConfirmDialogRule = [...stylesheet.matchAll(/\.card-confirm-dialog\s*\{([^}]*)\}/g)]
     .map((match) => match[1])
     .find((rule) => /28rem/.test(rule)) || '';
+const cardEditorMotionRule = [...stylesheet.matchAll(/\.card-editor-dialog\s*\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .find((rule) => /translateY\(12px\)/.test(rule)) || '';
+const cardConfirmMotionRule = [...stylesheet.matchAll(/\.card-confirm-dialog\s*\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .find((rule) => /translateY\(8px\)/.test(rule)) || '';
 const cardEditorStripRule = stylesheet.match(/\.card-editor-strip\s*\{([^}]*)\}/)?.[1] || '';
 const cardEditorOptionRule = stylesheet.match(/\.card-editor-option\s*\{([^}]*)\}/)?.[1] || '';
 const narrowEditorStart = stylesheet.indexOf('@media (max-width: 767px)');
@@ -593,6 +599,24 @@ if (!/width:\s*min\(68rem,\s*calc\(100vw - 2rem\)\)/.test(cardEditorDialogRule)
     || !/width:\s*auto/.test(cardEditorOptionRule)
     || !/min-width:\s*0/.test(cardEditorOptionRule)) {
     throw new Error('Card selection must use a bounded responsive grid instead of a single horizontal strip.');
+}
+if (!/opacity:\s*0/.test(cardEditorMotionRule)
+    || !/transform:\s*translateY\(12px\)\s*scale\(0\.98\)/.test(cardEditorMotionRule)
+    || !/opacity\s+180ms\s+ease/.test(cardEditorMotionRule)
+    || !/transform\s+220ms\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(cardEditorMotionRule)
+    || !/opacity:\s*0/.test(cardConfirmMotionRule)
+    || !/transform:\s*translateY\(8px\)\s*scale\(0\.98\)/.test(cardConfirmMotionRule)
+    || !/opacity\s+160ms\s+ease/.test(cardConfirmMotionRule)
+    || !/transform\s+180ms\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(cardConfirmMotionRule)
+    || !/\.card-editor-dialog\.is-visible\s*\{[^}]*opacity:\s*1;[^}]*translateY\(0\)\s*scale\(1\)/.test(stylesheet)
+    || !/\.card-confirm-dialog\.is-visible\s*\{[^}]*opacity:\s*1;[^}]*translateY\(0\)\s*scale\(1\)/.test(stylesheet)
+    || !/\.card-editor-dialog\.is-closing\s*\{[^}]*pointer-events:\s*none;[^}]*transition-duration:\s*180ms/.test(stylesheet)
+    || !/\.card-confirm-dialog\.is-closing\s*\{[^}]*pointer-events:\s*none;[^}]*transition-duration:\s*160ms/.test(stylesheet)
+    || !/\.card-editor-dialog::backdrop\s*\{[^}]*transition:\s*opacity\s+220ms\s+ease/.test(stylesheet)
+    || !/\.card-confirm-dialog::backdrop\s*\{[^}]*transition:\s*opacity\s+180ms\s+ease/.test(stylesheet)
+    || !/\.card-editor-dialog\.is-visible::backdrop,\s*\.card-confirm-dialog\.is-visible::backdrop\s*\{[^}]*opacity:\s*1/.test(stylesheet)
+    || !/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.card-editor-dialog,\s*\.card-confirm-dialog\s*\{[^}]*transform:\s*none/.test(stylesheet)) {
+    throw new Error('Card editor and confirmation dialogs lost their background-picker-aligned motion or reduced-motion contract.');
 }
 if (narrowEditorStart < 0
     || compactEditorStart < narrowEditorStart
@@ -662,6 +686,233 @@ if (!cardEditorScript.includes("const BLANK_CARD_ID = '__new_card__'")
     || !cardEditorScript.includes('function serverValidationFeedback(error)')
     || !cardEditorScript.includes("field: 'probeUrl'")) {
     throw new Error('Card editor lost permanent blank-add, batched draft, dirty guard, or conflict preservation behavior.');
+}
+const dialogMotionStart = cardEditorScript.indexOf('function createDialogMotionController(dialog, closeFallbackMs) {');
+const dialogMotionEnd = cardEditorScript.indexOf('\n\nexport function initializeCardEditor', dialogMotionStart);
+if (dialogMotionStart < 0 || dialogMotionEnd < 0) {
+    throw new Error('Card dialog motion controller is missing.');
+}
+const dialogMotionScript = cardEditorScript.slice(dialogMotionStart, dialogMotionEnd);
+function makeDialogMotionHarness(reducedMotion = false, fallbackMs = 300) {
+    const classes = new Set();
+    const attributes = new Set();
+    const listeners = new Map();
+    const animationFrames = [];
+    const timers = new Map();
+    let nextTimer = 1;
+    const dialog = {
+        open: false,
+        closeCount: 0,
+        showCount: 0,
+        returnValue: '',
+        classList: {
+            add(...names) { names.forEach((name) => classes.add(name)); },
+            contains(name) { return classes.has(name); },
+            remove(...names) { names.forEach((name) => classes.delete(name)); }
+        },
+        addEventListener(type, handler) {
+            if (!listeners.has(type)) listeners.set(type, new Set());
+            listeners.get(type).add(handler);
+        },
+        removeEventListener(type, handler) {
+            listeners.get(type)?.delete(handler);
+        },
+        dispatch(type, event = {}) {
+            Array.from(listeners.get(type) || []).forEach((handler) => handler(event));
+        },
+        hasAttribute(name) { return name === 'open' && (this.open || attributes.has('open')); },
+        setAttribute(name) {
+            attributes.add(name);
+            if (name === 'open') this.open = true;
+        },
+        removeAttribute(name) {
+            attributes.delete(name);
+            if (name === 'open') this.open = false;
+        },
+        showModal() {
+            this.showCount += 1;
+            this.open = true;
+        },
+        close(returnValue = '') {
+            this.closeCount += 1;
+            this.returnValue = returnValue;
+            this.open = false;
+            attributes.delete('open');
+            this.dispatch('close', { target: this });
+        }
+    };
+    const runtimeWindow = {
+        clearTimeout(id) { timers.delete(id); },
+        matchMedia() { return { matches: reducedMotion }; },
+        requestAnimationFrame(callback) {
+            animationFrames.push(callback);
+            return animationFrames.length;
+        },
+        setTimeout(callback, delay) {
+            if (delay !== fallbackMs) throw new Error(`Unexpected dialog close fallback: ${delay}.`);
+            const id = nextTimer++;
+            timers.set(id, callback);
+            return id;
+        }
+    };
+    const context = vm.createContext({ window: runtimeWindow });
+    new vm.Script(
+        `${dialogMotionScript}\n`
+        + 'globalThis.createDialogMotionController = createDialogMotionController;'
+    ).runInContext(context);
+    return {
+        classes,
+        controller: context.createDialogMotionController(dialog, fallbackMs),
+        dialog,
+        runNextFrame() {
+            const callback = animationFrames.shift();
+            if (callback) callback();
+        },
+        runAllFrames() {
+            while (animationFrames.length) animationFrames.shift()();
+        },
+        runTimers() {
+            Array.from(timers.values()).forEach((callback) => callback());
+        },
+        timerCount() { return timers.size; }
+    };
+}
+
+const animatedDialog = makeDialogMotionHarness();
+let editorOpenFocuses = 0;
+animatedDialog.controller.show(() => { editorOpenFocuses += 1; });
+if (!animatedDialog.dialog.open
+    || animatedDialog.dialog.showCount !== 1
+    || animatedDialog.classes.has('is-visible')) {
+    throw new Error('Card dialog must expose its initial hidden frame before entering.');
+}
+animatedDialog.runNextFrame();
+if (animatedDialog.classes.has('is-visible')) {
+    throw new Error('Card dialog reveal must wait for the second animation frame.');
+}
+animatedDialog.runNextFrame();
+if (!animatedDialog.classes.has('is-visible') || editorOpenFocuses !== 1) {
+    throw new Error('Card dialog did not reveal and focus after its two-frame entrance setup.');
+}
+let editorCloseFocuses = 0;
+const animatedClose = animatedDialog.controller.hide('saved', () => { editorCloseFocuses += 1; });
+const duplicateClose = animatedDialog.controller.hide('ignored');
+if (duplicateClose !== animatedClose
+    || animatedDialog.dialog.closeCount !== 0
+    || !animatedDialog.classes.has('is-closing')
+    || animatedDialog.classes.has('is-visible')) {
+    throw new Error('Card dialog closed before its exit transition or accepted a duplicate close.');
+}
+animatedDialog.dialog.dispatch('transitionend', { target: animatedDialog.dialog, propertyName: 'transform' });
+if (animatedDialog.dialog.closeCount !== 0) {
+    throw new Error('A non-opacity transition ended the card dialog prematurely.');
+}
+animatedDialog.dialog.dispatch('transitionend', { target: animatedDialog.dialog, propertyName: 'opacity' });
+if (!await animatedClose
+    || animatedDialog.dialog.closeCount !== 1
+    || animatedDialog.dialog.returnValue !== 'saved'
+    || editorCloseFocuses !== 1
+    || animatedDialog.classes.has('is-closing')
+    || animatedDialog.timerCount() !== 0) {
+    throw new Error('Card dialog transition completion did not close once, clean state, and restore focus.');
+}
+
+const staleRevealDialog = makeDialogMotionHarness();
+staleRevealDialog.controller.show();
+const staleClose = staleRevealDialog.controller.hide();
+staleRevealDialog.runAllFrames();
+if (staleRevealDialog.classes.has('is-visible')) {
+    throw new Error('A stale entrance frame revealed a closing card dialog.');
+}
+staleRevealDialog.runTimers();
+if (!await staleClose || staleRevealDialog.dialog.closeCount !== 1) {
+    throw new Error('Card dialog close timeout did not provide a bounded fallback.');
+}
+
+const reducedDialog = makeDialogMotionHarness(true, 240);
+let reducedOpenFocuses = 0;
+let reducedCloseFocuses = 0;
+reducedDialog.controller.show(() => { reducedOpenFocuses += 1; });
+const reducedClose = reducedDialog.controller.hide('cancel', () => { reducedCloseFocuses += 1; });
+if (!await reducedClose
+    || reducedOpenFocuses !== 1
+    || reducedCloseFocuses !== 1
+    || reducedDialog.dialog.closeCount !== 1
+    || reducedDialog.timerCount() !== 0) {
+    throw new Error('Reduced-motion card dialogs must open, focus, and close immediately.');
+}
+
+const settleConfirmationStart = cardEditorScript.indexOf('    async function settleConfirmation(result) {');
+const settleConfirmationEnd = cardEditorScript.indexOf('\n\n    function askConfirmation', settleConfirmationStart);
+const settleConfirmationScript = cardEditorScript.slice(settleConfirmationStart, settleConfirmationEnd).replace(/^    /gm, '');
+let releaseConfirmationClose;
+const confirmationCloseGate = new Promise((resolve) => { releaseConfirmationClose = resolve; });
+let confirmationResolved = 'pending';
+let confirmationFocusRestored = false;
+let confirmationReturnValue = null;
+const confirmationReturnFocus = {
+    isConnected: true,
+    closest: () => null,
+    focus: () => { confirmationFocusRestored = true; }
+};
+const confirmationContext = vm.createContext({
+    confirmResolver: (value) => { confirmationResolved = value; },
+    confirmReturnFocus: confirmationReturnFocus,
+    confirmMotion: {
+        isClosing: () => false,
+        async hide(returnValue, restoreFocus) {
+            confirmationReturnValue = returnValue;
+            await confirmationCloseGate;
+            restoreFocus();
+            return true;
+        }
+    }
+});
+new vm.Script(
+    `${settleConfirmationScript}\n`
+    + 'globalThis.settleConfirmation = settleConfirmation;'
+).runInContext(confirmationContext);
+const confirmationSettlement = confirmationContext.settleConfirmation(true);
+await Promise.resolve();
+if (confirmationResolved !== 'pending' || confirmationReturnValue !== 'confirm') {
+    throw new Error('Card confirmation resolved before its exit animation completed.');
+}
+releaseConfirmationClose();
+await confirmationSettlement;
+if (confirmationResolved !== true || !confirmationFocusRestored) {
+    throw new Error('Card confirmation did not resolve and restore focus after closing.');
+}
+
+const requestCloseStart = cardEditorScript.indexOf('    async function requestClose() {');
+const requestCloseEnd = cardEditorScript.indexOf('\n\n    function setBusy', requestCloseStart);
+const openEditorStart = cardEditorScript.indexOf('    async function openEditor() {');
+const openEditorEnd = cardEditorScript.indexOf('\n\n    async function deleteSelectedCard', openEditorStart);
+const saveDraftStart = cardEditorScript.indexOf('    async function saveDraft(event) {');
+const saveDraftEnd = cardEditorScript.indexOf('\n\n    async function importSvgFile', saveDraftStart);
+const cardEditorEventStart = cardEditorScript.indexOf("    launchButton.addEventListener('click', openEditor);");
+const cardEditorEventScript = cardEditorScript.slice(cardEditorEventStart);
+const requestCloseScript = cardEditorScript.slice(requestCloseStart, requestCloseEnd);
+const openEditorScript = cardEditorScript.slice(openEditorStart, openEditorEnd);
+const saveDraftScript = cardEditorScript.slice(saveDraftStart, saveDraftEnd);
+if (settleConfirmationStart < 0
+    || settleConfirmationEnd < 0
+    || requestCloseStart < 0
+    || requestCloseEnd < 0
+    || openEditorStart < 0
+    || openEditorEnd < 0
+    || saveDraftStart < 0
+    || saveDraftEnd < 0
+    || !requestCloseScript.includes("await editorMotion.hide('',")
+    || requestCloseScript.includes('dialog.close(')
+    || !openEditorScript.includes('editorMotion.show(() => {')
+    || openEditorScript.includes('dialog.showModal(')
+    || !saveDraftScript.includes("await editorMotion.hide('saved',")
+    || saveDraftScript.includes('dialog.close(')
+    || settleConfirmationScript.includes('confirmDialog.close(')
+    || !cardEditorEventScript.includes("dialog.addEventListener('cancel'")
+    || !cardEditorEventScript.includes('requestClose();')
+    || !cardEditorEventScript.includes('if (event.target === dialog) requestClose();')) {
+    throw new Error('Every card editor open/close path must use the animated controller without direct native closure.');
 }
 const moveCardStart = cardEditorScript.indexOf('export function moveCardToTargetPosition(cards, sourceId, targetId) {');
 const moveCardEndMarker = '\n}\n\nfunction serverValidationFeedback(error) {';

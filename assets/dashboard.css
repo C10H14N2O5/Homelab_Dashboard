@@ -1174,8 +1174,41 @@
             box-shadow: 0 32px 90px rgba(2, 8, 23, 0.72);
         }
 
+        .card-editor-dialog {
+            opacity: 0;
+            transform: translateY(12px) scale(0.98);
+            transform-origin: center;
+            transition: opacity 180ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+            will-change: opacity, transform;
+        }
+
+        .card-editor-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .card-editor-dialog.is-closing {
+            pointer-events: none;
+            transition-duration: 180ms;
+        }
+
         .card-confirm-dialog {
             width: min(28rem, calc(100vw - 2rem));
+            opacity: 0;
+            transform: translateY(8px) scale(0.98);
+            transform-origin: center;
+            transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+            will-change: opacity, transform;
+        }
+
+        .card-confirm-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .card-confirm-dialog.is-closing {
+            pointer-events: none;
+            transition-duration: 160ms;
         }
 
         .card-editor-dialog::backdrop,
@@ -1183,6 +1216,28 @@
             background: rgba(2, 8, 23, 0.74);
             -webkit-backdrop-filter: blur(6px);
             backdrop-filter: blur(6px);
+            opacity: 0;
+        }
+
+        .card-editor-dialog::backdrop {
+            transition: opacity 220ms ease;
+        }
+
+        .card-confirm-dialog::backdrop {
+            transition: opacity 180ms ease;
+        }
+
+        .card-editor-dialog.is-visible::backdrop,
+        .card-confirm-dialog.is-visible::backdrop {
+            opacity: 1;
+        }
+
+        .card-editor-dialog.is-closing::backdrop {
+            transition-duration: 180ms;
+        }
+
+        .card-confirm-dialog.is-closing::backdrop {
+            transition-duration: 160ms;
         }
 
         .card-editor-shell {
@@ -2744,6 +2799,11 @@
             }
 
             .background-dialog {
+                transform: none;
+            }
+
+            .card-editor-dialog,
+            .card-confirm-dialog {
                 transform: none;
             }
 
