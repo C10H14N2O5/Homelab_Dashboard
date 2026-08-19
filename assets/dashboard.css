@@ -960,11 +960,7 @@
         .service-icon svg {
             width: 1.38rem;
             height: 1.38rem;
-            fill: none;
-            stroke: currentColor;
-            stroke-width: 1.8;
-            stroke-linecap: round;
-            stroke-linejoin: round;
+            display: block;
         }
 
         .quick-link-icon {
@@ -1075,6 +1071,13 @@
             margin: 0;
         }
 
+        .dashboard-footer-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
         #last-checked {
             text-align: right;
         }
@@ -1084,7 +1087,7 @@
             display: none;
         }
 
-        .dashboard[data-active-channel="quick-links"] .background-picker-button {
+        .dashboard[data-active-channel="quick-links"] .dashboard-footer-actions {
             grid-column: 2;
         }
 
@@ -1114,6 +1117,9 @@
         }
 
         .background-picker-button:focus-visible,
+        .card-editor-dialog button:focus-visible,
+        .card-editor-dialog input:focus-visible,
+        .card-confirm-dialog button:focus-visible,
         .dialog-close:focus-visible,
         .background-mode-button:focus-visible,
         .background-action-button:focus-visible,
@@ -1136,6 +1142,314 @@
             stroke-width: 1.8;
             stroke-linecap: round;
             stroke-linejoin: round;
+        }
+
+        .card-empty-state {
+            grid-column: 1 / -1;
+            min-height: 5.7rem;
+            display: grid;
+            place-items: center;
+            padding: 1rem;
+            color: var(--subtle);
+            font-size: 0.78rem;
+            text-align: center;
+            border: 1px dashed rgba(226, 232, 240, 0.16);
+            border-radius: 1rem;
+            background: rgba(8, 20, 36, 0.34);
+        }
+
+        .card-editor-dialog,
+        .card-confirm-dialog {
+            width: min(68rem, calc(100vw - 2rem));
+            max-width: none;
+            max-height: min(88vh, 48rem);
+            max-height: min(88svh, 48rem);
+            margin: auto;
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.98);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1.2rem;
+            box-shadow: 0 32px 90px rgba(2, 8, 23, 0.72);
+        }
+
+        .card-confirm-dialog {
+            width: min(28rem, calc(100vw - 2rem));
+        }
+
+        .card-editor-dialog::backdrop,
+        .card-confirm-dialog::backdrop {
+            background: rgba(2, 8, 23, 0.74);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+        }
+
+        .card-editor-shell {
+            max-height: min(88vh, 48rem);
+            max-height: min(88svh, 48rem);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .card-editor-list-section,
+        .card-editor-fields {
+            padding: 0.95rem 1.15rem;
+        }
+
+        .card-editor-list-section {
+            border-bottom: 1px solid rgba(226, 232, 240, 0.1);
+        }
+
+        .card-editor-section-heading {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .card-editor-section-heading h3 {
+            margin: 0;
+            font-size: 0.83rem;
+        }
+
+        .card-editor-section-heading p {
+            margin: 0;
+            color: var(--subtle);
+            font-size: 0.66rem;
+            line-height: 1.45;
+        }
+
+        .card-editor-strip {
+            margin-top: 0.7rem;
+            padding: 0.25rem;
+            max-height: 10.2rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+            grid-auto-flow: row;
+            grid-auto-rows: minmax(4.5rem, auto);
+            align-content: start;
+            gap: 0.55rem;
+            overflow-x: hidden;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            scroll-snap-type: none;
+        }
+
+        .card-editor-option {
+            width: auto;
+            min-width: 0;
+            min-height: 4.5rem;
+            display: grid;
+            grid-template-columns: 1.7rem minmax(0, 1fr);
+            align-items: stretch;
+            overflow: hidden;
+            border: 1px solid rgba(226, 232, 240, 0.13);
+            border-radius: 0.85rem;
+            background: rgba(15, 31, 51, 0.72);
+            scroll-snap-align: none;
+        }
+
+        .card-editor-option[aria-selected="true"] {
+            border-color: rgba(125, 211, 252, 0.72);
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+        }
+
+        .card-editor-option.is-dragging {
+            opacity: 0.5;
+        }
+
+        .card-editor-option.is-drop-target {
+            border-color: #7dd3fc;
+            box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.72);
+        }
+
+        .card-editor-option[data-add-card="true"] {
+            grid-template-columns: 1fr;
+            border-style: dashed;
+        }
+
+        .card-editor-drag-handle {
+            display: grid;
+            place-items: center;
+            padding: 0;
+            color: var(--subtle);
+            background: rgba(3, 12, 24, 0.46);
+            border: 0;
+            border-right: 1px solid rgba(226, 232, 240, 0.1);
+            cursor: grab;
+            touch-action: none;
+        }
+
+        .card-editor-drag-handle::before {
+            content: "";
+            width: 0.8rem;
+            height: 1.15rem;
+            background: radial-gradient(circle, currentColor 0 1.4px, transparent 1.6px) 0 0 / 0.4rem 0.38rem;
+        }
+
+        .card-editor-drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .card-editor-option-select {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: 1.7rem minmax(0, 1fr);
+            align-items: center;
+            gap: 0.42rem;
+            padding: 0.55rem;
+            color: var(--text);
+            text-align: left;
+            background: transparent;
+            border: 0;
+            cursor: pointer;
+        }
+
+        .card-editor-option[data-add-card="true"] .card-editor-option-select {
+            grid-template-columns: 1fr;
+            place-items: center;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        .card-editor-option-icon,
+        .card-icon-preview {
+            display: grid;
+            place-items: center;
+            color: var(--accent);
+            border: 1px solid rgba(125, 211, 252, 0.18);
+            border-radius: 0.55rem;
+            background: rgba(14, 116, 144, 0.12);
+        }
+
+        .card-editor-option-icon {
+            width: 1.7rem;
+            height: 1.7rem;
+        }
+
+        .card-editor-option-icon svg {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        .card-editor-option-name {
+            min-width: 0;
+            overflow: hidden;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .card-editor-form {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-icon-editor {
+            margin-top: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .card-icon-preview {
+            width: 4rem;
+            height: 4rem;
+            flex: 0 0 auto;
+            border-radius: 0.85rem;
+        }
+
+        .card-icon-preview svg {
+            width: 2.25rem;
+            height: 2.25rem;
+        }
+
+        .card-icon-preview:empty::before {
+            content: "SVG";
+            color: var(--subtle);
+            font-size: 0.66rem;
+            font-weight: 750;
+        }
+
+        .card-icon-editor p {
+            margin: 0.38rem 0 0;
+            color: var(--subtle);
+            font-size: 0.66rem;
+            line-height: 1.45;
+        }
+
+        .card-editor-field-grid {
+            margin-top: 0.9rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.7rem;
+        }
+
+        .card-editor-field {
+            min-width: 0;
+            display: grid;
+            gap: 0.35rem;
+            color: var(--muted);
+            font-size: 0.7rem;
+            font-weight: 650;
+        }
+
+        .card-editor-field strong {
+            color: #fda4af;
+        }
+
+        .card-editor-field-wide {
+            grid-column: 1 / -1;
+        }
+
+        .card-editor-field input {
+            width: 100%;
+            min-width: 0;
+            min-height: 2.55rem;
+            padding: 0.55rem 0.65rem;
+            color: var(--text);
+            background: rgba(3, 12, 24, 0.68);
+            border: 1px solid rgba(226, 232, 240, 0.14);
+            border-radius: 0.65rem;
+        }
+
+        .card-editor-field input[aria-invalid="true"] {
+            border-color: rgba(251, 113, 133, 0.78);
+            box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.12);
+        }
+
+        .card-editor-status {
+            min-height: 1.5rem;
+            margin: 0;
+            padding: 0 1.15rem 0.7rem;
+            color: var(--muted);
+            font-size: 0.72rem;
+            line-height: 1.5;
+        }
+
+        .card-editor-status[data-kind="error"] {
+            color: #fda4af;
+        }
+
+        .card-editor-status[data-kind="success"] {
+            color: #86efac;
+        }
+
+        .card-editor-actions {
+            padding: 0.85rem 1.15rem 1.05rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.55rem;
+            border-top: 1px solid rgba(226, 232, 240, 0.1);
+        }
+
+        .card-save-button {
+            color: #bae6fd;
+            border-color: rgba(56, 189, 248, 0.38);
         }
 
         .background-dialog {
@@ -2225,14 +2539,49 @@
                 margin-block: 0.2rem;
             }
 
+            .dashboard-footer-actions {
+                align-self: flex-start;
+                flex-wrap: wrap;
+                justify-content: flex-start;
+            }
+
             .dashboard[data-active-channel="quick-links"] .dashboard-footer {
                 display: grid;
                 grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
                 align-items: center;
             }
 
-            .dashboard[data-active-channel="quick-links"] .background-picker-button {
+            .dashboard[data-active-channel="quick-links"] .dashboard-footer-actions {
                 align-self: center;
+            }
+
+            .card-editor-dialog {
+                width: min(100% - 1rem, 68rem);
+                max-height: calc(100svh - 1rem);
+                border-radius: 1rem;
+            }
+
+            .card-editor-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                max-height: min(20rem, 42svh);
+            }
+
+            .card-editor-drag-handle {
+                display: none;
+            }
+
+            .card-editor-option {
+                grid-template-columns: 1fr;
+            }
+
+            .card-editor-shell {
+                max-height: calc(100svh - 1rem);
+            }
+
+            .card-editor-section-heading {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 0.28rem;
             }
 
             html.intro-first .background-layer,
@@ -2277,6 +2626,27 @@
             .refresh-button {
                 width: 2.45rem;
                 padding-inline: 0;
+            }
+
+            .card-editor-field-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card-editor-strip {
+                grid-template-columns: 1fr;
+                max-height: min(22rem, 46svh);
+            }
+
+            .card-editor-field-wide {
+                grid-column: auto;
+            }
+
+            .card-editor-actions {
+                flex-direction: column-reverse;
+            }
+
+            .card-editor-actions .background-action-button {
+                width: 100%;
             }
 
             .background-dialog {
@@ -2344,6 +2714,16 @@
             .background-mode-button {
                 flex-direction: column;
                 gap: 0.08rem;
+            }
+        }
+
+        @media (hover: none), (pointer: coarse) {
+            .card-editor-drag-handle {
+                display: none;
+            }
+
+            .card-editor-option {
+                grid-template-columns: 1fr;
             }
         }
 

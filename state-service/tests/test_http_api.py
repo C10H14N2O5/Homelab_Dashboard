@@ -10,7 +10,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest import mock
 
-from homelab_state import backgrounds, bestdori, core, http_api, probe
+from homelab_state import backgrounds, bestdori, cards, core, http_api, probe
 from tests.helpers import (
     FIXED_TIME,
     TEST_ORIGIN,
@@ -66,6 +66,31 @@ class FakeBestdoriManager:
         return {"removed": 3, "remaining": 0}
 
 
+def card_initialize_request() -> dict[str, object]:
+    icon = '<svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg>'
+    return {
+        "version": 1,
+        "services": [
+            {
+                "id": "synology-nas",
+                "iconSvg": icon,
+                "name": "Synology NAS",
+                "description": "数据存储中心",
+                "url": "https://nas.home.example.test/",
+                "probeUrl": None,
+            }
+        ],
+        "quickLinks": [
+            {
+                "id": "github",
+                "iconSvg": icon,
+                "name": "GitHub",
+                "url": "https://github.com/",
+            }
+        ],
+    }
+
+
 class APITests(unittest.TestCase):
     def setUp(self) -> None:
         self.project = TemporaryProject()
@@ -74,6 +99,11 @@ class APITests(unittest.TestCase):
             listen_port=0,
         )
         self.store = backgrounds.StateStore(self.config.background_dir, self.config.state_file, lambda: FIXED_TIME)
+        self.cards_store = cards.CardsStore.for_state_directory(
+            self.config.state_dir,
+            self.config.probe_domain_suffix,
+            lambda: FIXED_TIME,
+        )
         logger = logging.getLogger(f"test-{id(self)}")
         logger.handlers.clear()
         logger.addHandler(logging.NullHandler())
@@ -83,6 +113,7 @@ class APITests(unittest.TestCase):
             logger,
             FakeProbeClient(),
             FakeBestdoriManager(),
+            self.cards_store,
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -154,6 +185,22 @@ class APITests(unittest.TestCase):
         if headers:
             request_headers.update(headers)
         return self.request("POST", http_api.SERVICE_STATUS_PATH, json.dumps(value).encode(), request_headers)
+
+    def cards_request(
+        self,
+        method: str,
+        path: str,
+        value: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request(method, path, json.dumps(value).encode(), request_headers)
 
     def upload(
         self,
@@ -541,6 +588,216 @@ class APITests(unittest.TestCase):
                 status, _ = self.patch(value, headers)
                 self.assertEqual(status, expected)
 
+    def test_cards_initialize_get_update_and_conflict_contract(self) -> None:
+        status, initial = self.request("GET", http_api.CARDS_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(initial, {"version": 1, "initialized": False, "channels": None})
+        self.assertFalse((self.config.state_dir / cards.CARDS_STATE_FILE_NAME).exists())
+
+        status, not_initialized = self.cards_request(
+            "PATCH",
+            http_api.CARDS_PATH,
+            {"version": 1, "channel": "services", "expectedRevision": 1, "cards": []},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(not_initialized, {"error": "not_initialized"})
+
+        status, initialized = self.cards_request(
+            "POST",
+            http_api.CARDS_INITIALIZE_PATH,
+            card_initialize_request(),
+        )
+        self.assertEqual(status, 201)
+        self.assertTrue(initialized["initialized"])
+        self.assertEqual(initialized["channels"]["services"]["revision"], 1)
+        self.assertEqual(initialized["channels"]["quickLinks"]["revision"], 1)
+        self.assertEqual(initialized["channels"]["services"]["updatedAt"], FIXED_TIME)
+        self.assertIn(
+            'xmlns="http://www.w3.org/2000/svg"',
+            initialized["channels"]["services"]["cards"][0]["iconSvg"],
+        )
+
+        status, fetched = self.request("GET", http_api.CARDS_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(fetched, initialized)
+
+        status, duplicate = self.cards_request(
+            "POST",
+            http_api.CARDS_INITIALIZE_PATH,
+            card_initialize_request(),
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(duplicate, {"error": "already_initialized"})
+
+        status, updated = self.cards_request(
+            "PATCH",
+            http_api.CARDS_PATH,
+            {"version": 1, "channel": "quickLinks", "expectedRevision": 1, "cards": []},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["channels"]["quickLinks"]["revision"], 2)
+        self.assertEqual(updated["channels"]["quickLinks"]["cards"], [])
+        self.assertEqual(updated["channels"]["services"], initialized["channels"]["services"])
+
+        status, conflict = self.cards_request(
+            "PATCH",
+            http_api.CARDS_PATH,
+            {"version": 1, "channel": "quickLinks", "expectedRevision": 1, "cards": []},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(conflict, {"error": "revision_conflict", "currentRevision": 2})
+
+    def test_cards_update_validation_identifies_the_rejected_payload_card(self) -> None:
+        invalid_initialize = card_initialize_request()
+        invalid_initialize["services"][0]["probeUrl"] = "https://example.com/"
+        status, initialize_error = self.cards_request(
+            "POST",
+            http_api.CARDS_INITIALIZE_PATH,
+            invalid_initialize,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            initialize_error,
+            {"error": "effective service probe URL is not allowed by the configured probe policy"},
+        )
+
+        status, _ = self.cards_request(
+            "POST",
+            http_api.CARDS_INITIALIZE_PATH,
+            card_initialize_request(),
+        )
+        self.assertEqual(status, 201)
+
+        icon = '<svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg>'
+        card_a = {
+            "id": "card-a",
+            "iconSvg": icon,
+            "name": "Card A",
+            "description": "Invalid probe target",
+            "url": "https://a.home.example.test/",
+            "probeUrl": "https://example.com/",
+        }
+        card_b = {
+            "id": "card-b",
+            "iconSvg": icon,
+            "name": "Card B",
+            "description": "Currently selected in the editor",
+            "url": "https://b.home.example.test/",
+            "probeUrl": None,
+        }
+        status, update_error = self.cards_request(
+            "PATCH",
+            http_api.CARDS_PATH,
+            {
+                "version": 1,
+                "channel": "services",
+                "expectedRevision": 1,
+                "cards": [card_a, card_b],
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            update_error,
+            {
+                "error": "effective service probe URL is not allowed by the configured probe policy",
+                "cardId": "card-a",
+            },
+        )
+
+        status, request_error = self.cards_request(
+            "PATCH",
+            http_api.CARDS_PATH,
+            {
+                "version": 1,
+                "channel": "services",
+                "expectedRevision": 0,
+                "cards": [card_b],
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            request_error,
+            {"error": "expectedRevision must be a positive integer"},
+        )
+
+    def test_cards_write_validation_security_limits_and_methods(self) -> None:
+        valid = card_initialize_request()
+        cases = (
+            ("POST", http_api.CARDS_INITIALIZE_PATH, valid, {"Origin": "https://evil.test"}, 403),
+            ("POST", http_api.CARDS_INITIALIZE_PATH, valid, {"X-Requested-With": "wrong"}, 403),
+            ("POST", http_api.CARDS_INITIALIZE_PATH, valid, {"Content-Type": "text/plain"}, 415),
+            (
+                "POST",
+                http_api.CARDS_INITIALIZE_PATH,
+                {**valid, "unexpected": True},
+                None,
+                400,
+            ),
+            (
+                "POST",
+                http_api.CARDS_INITIALIZE_PATH,
+                {**valid, "version": True},
+                None,
+                400,
+            ),
+        )
+        for method, path, value, headers, expected in cases:
+            with self.subTest(method=method, headers=headers, expected=expected):
+                status, _ = self.cards_request(method, path, value, headers)
+                self.assertEqual(status, expected)
+
+        dashboard_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        duplicate_json = (
+            b'{"version":1,"services":[],"services":[],"quickLinks":[]}'
+        )
+        status, _ = self.request(
+            "POST",
+            http_api.CARDS_INITIALIZE_PATH,
+            duplicate_json,
+            dashboard_headers,
+        )
+        self.assertEqual(status, 400)
+
+        connection = HTTPConnection(self.host, self.port, timeout=2)
+        connection.putrequest("POST", http_api.CARDS_INITIALIZE_PATH)
+        for name, value in dashboard_headers.items():
+            connection.putheader(name, value)
+        connection.putheader("Content-Length", str(cards.MAX_CARDS_REQUEST_BODY + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read()
+        connection.close()
+
+        for method, path in (
+            ("POST", http_api.CARDS_PATH),
+            ("PUT", http_api.CARDS_PATH),
+            ("DELETE", http_api.CARDS_PATH),
+            ("GET", http_api.CARDS_INITIALIZE_PATH),
+            ("PATCH", http_api.CARDS_INITIALIZE_PATH),
+            ("PUT", http_api.CARDS_INITIALIZE_PATH),
+        ):
+            with self.subTest(method=method, path=path):
+                status, _ = self.request(method, path)
+                self.assertEqual(status, 405)
+
+    def test_cards_corrupt_state_maps_to_unavailable_without_affecting_health(self) -> None:
+        with mock.patch.object(
+            self.server.cards_store,
+            "get",
+            side_effect=cards.CardsStateUnavailable("damaged"),
+        ):
+            status, payload = self.request("GET", http_api.CARDS_PATH)
+        self.assertEqual(status, 503)
+        self.assertEqual(payload, {"error": "cards_state_unavailable"})
+        status, health = self.request("GET", http_api.HEALTH_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(health["status"], "ok")
+
     def test_background_upload_contract_and_collision_naming(self) -> None:
         payload = image_bytes()
         status, uploaded = self.upload("from-browser.png", payload)
@@ -716,8 +973,10 @@ class APITests(unittest.TestCase):
         }
         endpoints = (
             ("PATCH", http_api.API_PATH),
+            ("PATCH", http_api.CARDS_PATH),
             ("POST", http_api.BACKGROUND_REMOVE_PATH),
             ("POST", http_api.SERVICE_STATUS_PATH),
+            ("POST", http_api.CARDS_INITIALIZE_PATH),
             ("POST", http_api.BESTDORI_DRAW_PATH),
             ("POST", http_api.BESTDORI_RECONCILE_PATH),
             ("POST", http_api.BESTDORI_RESET_PATH),

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter()]
     [switch]$SkipPython,
@@ -30,6 +30,9 @@ $frontendModulePaths = @(
     'search.js',
     'channel-switch.js',
     'service-status.js',
+    'card-svg.js',
+    'card-editor.js',
+    'card-manager.js',
     'app.js'
 ) | ForEach-Object { Join-Path $frontendModuleRoot $_ }
 $stateServicePath = Join-Path $projectRoot 'state-service'
@@ -88,9 +91,17 @@ function Test-BlockedRepositoryPath {
         $lower -notin @('backgrounds/bg.jpg', 'assets/default-background.svg')) {
         return $true
     }
-    if ($leafName -in @('state.json', 'state.json.bak', 'homelabwallpaperstate.json') -or
+    if ($leafName -in @(
+            'state.json',
+            'state.json.bak',
+            'dashboardcards.json',
+            'dashboardcards.json.bak',
+            'homelabwallpaperstate.json'
+        ) -or
         $leafName -like 'state.json.corrupt-*' -or
+        $leafName -like 'dashboardcards.json.corrupt-*' -or
         $leafName -like '.state-*.tmp' -or
+        $leafName -like '.dashboardcards.json.*.tmp' -or
         $leafName -match '\.log(?:\..+)?$') {
         return $true
     }
@@ -124,6 +135,9 @@ $requiredFiles = @(
     'assets\js\search.js',
     'assets\js\channel-switch.js',
     'assets\js\service-status.js',
+    'assets\js\card-svg.js',
+    'assets\js\card-editor.js',
+    'assets\js\card-manager.js',
     'assets\js\app.js',
     'README.md',
     'CHANGELOG.md',
@@ -146,6 +160,7 @@ $requiredFiles = @(
     'state-service\homelab_state\core.py',
     'state-service\homelab_state\config.py',
     'state-service\homelab_state\backgrounds.py',
+    'state-service\homelab_state\cards.py',
     'state-service\homelab_state\bestdori.py',
     'state-service\homelab_state\probe.py',
     'state-service\homelab_state\http_api.py',
@@ -154,6 +169,7 @@ $requiredFiles = @(
     'state-service\tests\helpers.py',
     'state-service\tests\test_config.py',
     'state-service\tests\test_backgrounds.py',
+    'state-service\tests\test_cards.py',
     'state-service\tests\test_bestdori.py',
     'state-service\tests\test_probe.py',
     'state-service\tests\test_http_api.py',
@@ -175,6 +191,9 @@ $buildSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'build-state-serv
 $packageSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package-release.ps1'))
 $processUtilsSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'process-utils.ps1'))
 $stateServiceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'state-service\main.py'))
+$coreServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\homelab_state\core.py')
+)
 $launcherSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\homelab_state\launcher.py')
 )
@@ -184,14 +203,27 @@ $httpServiceSource = [IO.File]::ReadAllText(
 $backgroundServiceSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\homelab_state\backgrounds.py')
 )
+$cardsServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\homelab_state\cards.py')
+)
 $launcherTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_launcher.py')
 )
 $httpServiceTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_http_api.py')
 )
+$cardsServiceTestSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\tests\test_cards.py')
+)
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
+$coreServiceVersionMatch = [regex]::Match($coreServiceSource, '(?m)^SERVICE_VERSION\s*=\s*(\d+)\s*$')
+$buildServiceVersionMatch = [regex]::Match($buildSource, '(?m)^\$expectedServiceVersion\s*=\s*(\d+)\s*$')
+if (-not $coreServiceVersionMatch.Success -or
+    -not $buildServiceVersionMatch.Success -or
+    $coreServiceVersionMatch.Groups[1].Value -ne $buildServiceVersionMatch.Groups[1].Value) {
+    throw 'Source and packaged smoke-test service versions must match.'
+}
 if ($readmeSource.Contains('index.txt')) {
     throw 'README.md must not list the removed index.txt file.'
 }
@@ -212,11 +244,18 @@ $maintenanceContracts = @(
     @{ Name = 'slow request regression'; Source = $httpServiceTestSource; Marker = 'test_request_read_deadline_cannot_be_extended_by_trickle_input' },
     @{ Name = 'background file quota'; Source = $backgroundServiceSource; Marker = 'MAX_BACKGROUND_FILES = 512' },
     @{ Name = 'thumbnail generation budget'; Source = $backgroundServiceSource; Marker = 'MAX_THUMBNAIL_GENERATION_ATTEMPTS = 16' },
+    @{ Name = 'dashboard cards private state'; Source = $cardsServiceSource; Marker = 'CARDS_STATE_FILE_NAME = "DashboardCards.json"' },
+    @{ Name = 'dashboard cards channel limit'; Source = $cardsServiceSource; Marker = 'MAX_CARDS_PER_CHANNEL = 32' },
+    @{ Name = 'dashboard cards SVG sanitizer'; Source = $cardsServiceSource; Marker = 'def sanitize_svg(' },
+    @{ Name = 'dashboard cards concurrent initialization regression'; Source = $cardsServiceTestSource; Marker = 'test_concurrent_initialize_has_one_winner' },
+    @{ Name = 'dashboard cards cross-channel concurrency regression'; Source = $cardsServiceTestSource; Marker = 'test_concurrent_different_channel_updates_both_persist' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
     @{ Name = 'packaged PATCH compatibility check'; Source = $buildSource; Marker = 'X-Requested-With' },
     @{ Name = 'packaged background upload check'; Source = $buildSource; Marker = '/api/background-files/upload' },
     @{ Name = 'packaged thumbnail inventory check'; Source = $buildSource; Marker = '$backgroundInventory' },
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
+    @{ Name = 'packaged card initialization check'; Source = $buildSource; Marker = '/api/cards/initialize' },
+    @{ Name = 'packaged card restart persistence check'; Source = $buildSource; Marker = 'did not preserve card state across restart' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'release file manifest'; Source = $packageSource; Marker = 'SHA256SUMS.txt' },
     @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
@@ -227,6 +266,9 @@ $maintenanceContracts = @(
     @{ Name = 'release background manager module'; Source = $packageSource; Marker = 'assets\js\background-manager.js' },
     @{ Name = 'release background upload module'; Source = $packageSource; Marker = 'assets\js\background-upload.js' },
     @{ Name = 'release Bestdori module'; Source = $packageSource; Marker = 'assets\js\bestdori.js' },
+    @{ Name = 'release card editor module'; Source = $packageSource; Marker = 'assets\js\card-editor.js' },
+    @{ Name = 'release card manager module'; Source = $packageSource; Marker = 'assets\js\card-manager.js' },
+    @{ Name = 'release card SVG module'; Source = $packageSource; Marker = 'assets\js\card-svg.js' },
     @{ Name = 'release channel switch module'; Source = $packageSource; Marker = 'assets\js\channel-switch.js' },
     @{ Name = 'release core HTTP module'; Source = $packageSource; Marker = 'assets\js\core-http.js' },
     @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\js\search.js' },
@@ -234,6 +276,7 @@ $maintenanceContracts = @(
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
     @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
+    @{ Name = 'dashboard cards deployment documentation'; Source = $readmeSource; Marker = 'DashboardCards.json' },
     @{ Name = 'CORS removal documentation'; Source = $readmeSource; Marker = 'AstrBot' }
 )
 foreach ($contract in $maintenanceContracts) {
@@ -304,7 +347,9 @@ const moduleEntries = modulePaths.map((modulePath) => [
     path.basename(modulePath),
     fs.readFileSync(modulePath, 'utf8')
 ]);
-const moduleSources = Object.fromEntries(moduleEntries);
+const moduleSources = Object.fromEntries(
+    moduleEntries.map(([name, source]) => [name, source.replace(/\r\n/g, '\n')])
+);
 const expectedModuleNames = [
     'core-http.js',
     'background-manager.js',
@@ -313,6 +358,9 @@ const expectedModuleNames = [
     'search.js',
     'channel-switch.js',
     'service-status.js',
+    'card-svg.js',
+    'card-editor.js',
+    'card-manager.js',
     'app.js'
 ];
 if (JSON.stringify(Object.keys(moduleSources)) !== JSON.stringify(expectedModuleNames)) {
@@ -334,6 +382,9 @@ const bestdoriScript = moduleSources['bestdori.js'];
 const searchScript = moduleSources['search.js'];
 const channelScript = moduleSources['channel-switch.js'];
 const serviceScript = moduleSources['service-status.js'];
+const cardSvgScript = moduleSources['card-svg.js'];
+const cardEditorScript = moduleSources['card-editor.js'];
+const cardManagerScript = moduleSources['card-manager.js'];
 const appScript = moduleSources['app.js'];
 const runtimeScript = moduleEntries.map((entry) => entry[1]).join('\n');
 const backgroundNetworkScript = coreScript.slice(coreScript.indexOf('function fetchWithTimeout('))
@@ -397,6 +448,44 @@ cards.forEach((tag, index) => {
         throw new Error(`Service card ${index + 1} contains a manually assigned animation index.`);
     }
 });
+const expectedServiceCardIds = [
+    'service-synology-nas',
+    'service-qbittorrent',
+    'service-peerbanhelper',
+    'service-router-os',
+    'service-speedtest',
+    'service-astrbot',
+    'service-gitea',
+    'service-jellyfin',
+    'service-zoraxy',
+    'service-cliproxy',
+    'service-ipmi-kvm'
+];
+const serviceCardIds = cards.map((tag) => tag.match(/\bdata-card-id="([^"]+)"/)?.[1] || '');
+if (JSON.stringify(serviceCardIds) !== JSON.stringify(expectedServiceCardIds)) {
+    throw new Error(`Static Services migration IDs/order mismatch: ${serviceCardIds.join(', ')}`);
+}
+const cliProxyTag = cards.find((tag) => tag.includes('data-card-id="service-cliproxy"')) || '';
+if (!cliProxyTag.includes('data-probe-url="https://cliproxy.home.example.com/management.html/"')) {
+    throw new Error('Static CLIProxy migration source lost its independent probe URL.');
+}
+const staticServiceSvgRoots = [...htmlDocument.matchAll(/<span\b[^>]*class="service-icon"[^>]*>\s*<svg\b([^>]*)>/g)]
+    .map((match) => match[1]);
+if (staticServiceSvgRoots.length !== expectedServiceCardIds.length
+    || staticServiceSvgRoots.some((attributes) => (
+        !attributes.includes('fill="none"')
+        || !attributes.includes('stroke="currentColor"')
+        || !attributes.includes('stroke-width="1.8"')
+        || !attributes.includes('stroke-linecap="round"')
+        || !attributes.includes('stroke-linejoin="round"')
+    ))) {
+    throw new Error('Static Services migration SVGs must carry their own safe drawing defaults.');
+}
+const serviceIconSvgRule = stylesheet.match(/\.service-icon svg\s*\{([^}]*)\}/)?.[1] || '';
+if (/\b(?:fill|stroke|stroke-width|stroke-linecap|stroke-linejoin)\s*:/.test(serviceIconSvgRule)
+    || /data-card-channel="services"[^}]*\{[^}]*(?:fill|stroke)\s*:/s.test(stylesheet)) {
+    throw new Error('Service icon CSS must not override colors or strokes chosen by uploaded SVG files.');
+}
 
 const quickLinkPanelMatch = html.match(/<div\b[^>]*\bid="quick-links-panel"[^>]*\bhidden[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>\s*<footer\b/);
 if (!quickLinkPanelMatch) throw new Error('Missing the hidden static Quick Links panel.');
@@ -404,18 +493,20 @@ const quickLinkPanel = quickLinkPanelMatch[1];
 const quickLinks = [...quickLinkPanel.matchAll(/<a\b([^>]*)\bclass="quick-link-card"([^>]*)>([\s\S]*?)<\/a>/g)]
     .map((match) => ({ tag: `<a${match[1]}class="quick-link-card"${match[2]}>`, body: match[3] }));
 const expectedQuickLinks = [
-    ['https://www.bilibili.com/', 'Bilibili'],
-    ['https://github.com/', 'GitHub'],
-    ['https://mail.google.com/', 'Gmail'],
-    ['https://chatgpt.com/', 'ChatGPT'],
-    ['https://gemini.google.com/', 'Gemini']
+    ['https://www.bilibili.com/', 'Bilibili', 'quick-bilibili'],
+    ['https://github.com/', 'GitHub', 'quick-github'],
+    ['https://mail.google.com/', 'Gmail', 'quick-gmail'],
+    ['https://chatgpt.com/', 'ChatGPT', 'quick-chatgpt'],
+    ['https://gemini.google.com/', 'Gemini', 'quick-gemini']
 ];
 if (quickLinks.length !== expectedQuickLinks.length) {
     throw new Error(`Expected ${expectedQuickLinks.length} final Quick Links cards, found ${quickLinks.length}.`);
 }
 quickLinks.forEach(({ tag, body }, index) => {
-    const [expectedHref, expectedName] = expectedQuickLinks[index];
-    if (!tag.includes(`href="${expectedHref}"`) || !tag.includes('target="_blank"')) {
+    const [expectedHref, expectedName, expectedId] = expectedQuickLinks[index];
+    if (!tag.includes(`href="${expectedHref}"`)
+        || !tag.includes(`data-card-id="${expectedId}"`)
+        || !tag.includes('target="_blank"')) {
         throw new Error(`Quick Link card ${index + 1} has the wrong destination or target.`);
     }
     const rel = tag.match(/\brel="([^"]+)"/);
@@ -431,6 +522,10 @@ quickLinks.forEach(({ tag, body }, index) => {
         throw new Error(`Quick Link card ${index + 1} must not participate in service status UI or probing.`);
     }
 });
+const allStaticCardIds = [...serviceCardIds, ...expectedQuickLinks.map((entry) => entry[2])];
+if (new Set(allStaticCardIds).size !== 16) {
+    throw new Error('The 11+5 static migration source must use 16 unique stable card IDs.');
+}
 if (/GitHub (?:Black|Blue|White)|Gemini \u00b7|quick-gemma-gradient/.test(quickLinkPanel)) {
     throw new Error('Unselected Stage 1A icon candidates remain in the final Quick Links panel.');
 }
@@ -439,6 +534,661 @@ if (/<(?:script|foreignObject|image)\b/i.test(quickLinkSvgMarkup)
     || /\son[a-z]+\s*=/i.test(quickLinkSvgMarkup)
     || /(?:href|src)\s*=\s*["'](?:https?:|\/\/|data:)/i.test(quickLinkSvgMarkup)) {
     throw new Error('Quick Links inline SVG contains active or external content.');
+}
+
+const cardEditorLaunchTag = htmlDocument.match(/<button\b[^>]*\bid="card-editor-button"[^>]*>/)?.[0] || '';
+if (!cardEditorLaunchTag.includes('type="button"')
+    || !cardEditorLaunchTag.includes('aria-haspopup="dialog"')
+    || !cardEditorLaunchTag.includes('aria-controls="card-editor-dialog"')
+    || !/\bdisabled(?:\s|>)/.test(cardEditorLaunchTag)) {
+    throw new Error('The card editor launch button must be a progressively enhanced disabled dialog trigger.');
+}
+if (!/<div\b[^>]*class="dashboard-footer-actions"[^>]*>[\s\S]*?id="background-picker-button"[\s\S]*?id="card-editor-button"[\s\S]*?<\/div>/.test(htmlDocument)) {
+    throw new Error('Background and card editor controls must remain grouped side by side in footer order.');
+}
+for (const requiredEditorId of [
+    'card-editor-dialog',
+    'card-editor-strip',
+    'card-editor-form',
+    'card-icon-select',
+    'card-icon-input',
+    'card-name-input',
+    'card-description-input',
+    'card-url-input',
+    'card-probe-input',
+    'card-delete-button',
+    'card-save-button',
+    'card-confirm-dialog',
+    'card-confirm-cancel',
+    'card-confirm-accept'
+]) {
+    if (!htmlDocument.includes(`id="${requiredEditorId}"`)) {
+        throw new Error(`Missing configurable-card editor structure: ${requiredEditorId}.`);
+    }
+}
+const cardIconInputTag = htmlDocument.match(/<input\b[^>]*\bid="card-icon-input"[^>]*>/)?.[0] || '';
+if (!cardIconInputTag.includes('type="file"') || !cardIconInputTag.includes('accept=".svg,image/svg+xml"')) {
+    throw new Error('Card icons must be selected through an SVG-only file input.');
+}
+const cardEditorDialogRule = stylesheet.match(/\.card-editor-dialog,\s*\.card-confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
+const cardConfirmDialogRule = [...stylesheet.matchAll(/\.card-confirm-dialog\s*\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .find((rule) => /28rem/.test(rule)) || '';
+const cardEditorStripRule = stylesheet.match(/\.card-editor-strip\s*\{([^}]*)\}/)?.[1] || '';
+const cardEditorOptionRule = stylesheet.match(/\.card-editor-option\s*\{([^}]*)\}/)?.[1] || '';
+const narrowEditorStart = stylesheet.indexOf('@media (max-width: 767px)');
+const compactEditorStart = stylesheet.indexOf('@media (max-width: 520px)');
+const pointerEditorStart = stylesheet.indexOf('@media (hover: none), (pointer: coarse)');
+const narrowEditorRules = stylesheet.slice(narrowEditorStart, compactEditorStart);
+const compactEditorRules = stylesheet.slice(compactEditorStart, pointerEditorStart);
+if (!/width:\s*min\(68rem,\s*calc\(100vw - 2rem\)\)/.test(cardEditorDialogRule)
+    || !/width:\s*min\(28rem,\s*calc\(100vw - 2rem\)\)/.test(cardConfirmDialogRule)
+    || !/display:\s*grid/.test(cardEditorStripRule)
+    || !/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(9rem,\s*1fr\)\)/.test(cardEditorStripRule)
+    || !/grid-auto-rows:\s*minmax\(4\.5rem,\s*auto\)/.test(cardEditorStripRule)
+    || !/max-height:\s*10\.2rem/.test(cardEditorStripRule)
+    || !/overflow-x:\s*hidden/.test(cardEditorStripRule)
+    || !/overflow-y:\s*auto/.test(cardEditorStripRule)
+    || /display:\s*flex/.test(cardEditorStripRule)
+    || !/width:\s*auto/.test(cardEditorOptionRule)
+    || !/min-width:\s*0/.test(cardEditorOptionRule)) {
+    throw new Error('Card selection must use a bounded responsive grid instead of a single horizontal strip.');
+}
+if (narrowEditorStart < 0
+    || compactEditorStart < narrowEditorStart
+    || pointerEditorStart < compactEditorStart
+    || !/\.card-editor-strip\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(narrowEditorRules)
+    || !/\.card-editor-drag-handle\s*\{[^}]*display:\s*none/.test(narrowEditorRules)
+    || !/\.card-editor-option\s*\{[^}]*grid-template-columns:\s*1fr/.test(narrowEditorRules)
+    || !/\.card-editor-strip\s*\{[^}]*grid-template-columns:\s*1fr/.test(compactEditorRules)) {
+    throw new Error('Card editor grid must follow the dashboard two-column and one-column responsive breakpoints.');
+}
+
+const configurableCardScripts = `${cardSvgScript}\n${cardEditorScript}\n${cardManagerScript}`;
+if (/\.(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML\s*\(/.test(configurableCardScripts)) {
+    throw new Error('Configurable-card code must not inject untrusted markup through HTML parsing sinks.');
+}
+if (!cardManagerScript.includes("const CARD_CACHE_KEY = 'homelab-dashboard-cards-cache-v1'")
+    || !cardManagerScript.includes("new URL('/api/cards', document.baseURI)")
+    || !cardManagerScript.includes("new URL('/api/cards/initialize', document.baseURI)")
+    || !cardManagerScript.includes('const staticSnapshot = extractStaticCards();')
+    || cardManagerScript.indexOf('const staticSnapshot = extractStaticCards();') > cardManagerScript.indexOf('const state = await loadServerState();')
+    || !cardManagerScript.includes('normalizeCardsResponse(JSON.parse(raw))')
+    || !cardManagerScript.includes("if (response.status === 409 && response.payload?.error !== 'already_initialized')")
+    || !cardManagerScript.includes('const confirmed = await getServerState();')
+    || !/channel:\s*key,\r?\n\s*expectedRevision,/.test(cardManagerScript)
+    || !cardManagerScript.includes("conflict.name = 'CardRevisionConflictError'")) {
+    throw new Error('Card manager lost its frozen migration source, validated cache, initialization race, or revision contract.');
+}
+if (!cardManagerScript.includes("response.headers?.get?.('Content-Length')")
+    || !cardManagerScript.includes('response.body.getReader()')
+    || !cardManagerScript.includes('receivedBytes > MAX_RESPONSE_BYTES')
+    || !cardManagerScript.includes('await reader.cancel()')
+    || !cardManagerScript.includes('function removeCache()')
+    || !cardManagerScript.includes('utf8ByteLength(serialized) > MAX_CACHE_BYTES')
+    || !cardManagerScript.includes('removeCache();')) {
+    throw new Error('Card responses and cache writes must remain byte-bounded without retaining stale oversized cache state.');
+}
+const readCacheStart = cardManagerScript.indexOf('    function readCache() {');
+const readCacheEnd = cardManagerScript.indexOf('    function writeCache(state) {', readCacheStart);
+const readCacheScript = cardManagerScript.slice(readCacheStart, readCacheEnd);
+const invalidCacheCatch = readCacheScript.match(/catch\s*\(error\)\s*\{([\s\S]*?)\}/)?.[1] || '';
+if (readCacheStart < 0
+    || readCacheEnd < 0
+    || !/if\s*\(!cached\.initialized\)\s*\{[\s\S]*?removeCache\(\);[\s\S]*?return null;/.test(readCacheScript)
+    || invalidCacheCatch.indexOf('removeCache();') < 0
+    || invalidCacheCatch.indexOf('removeCache();') > invalidCacheCatch.indexOf('return null;')) {
+    throw new Error('Invalid or uninitialized card cache entries must be removed before fallback.');
+}
+if (!cardManagerScript.includes('grid.replaceChildren(fragment);')
+    || !cardManagerScript.includes('name.textContent = card.name;')
+    || !cardManagerScript.includes('icon.append(createSafeSvgElement(card.iconSvg));')
+    || !cardManagerScript.includes("empty.className = 'card-empty-state'")) {
+    throw new Error('Dynamic cards must render through safe DOM construction and support explicit empty channels.');
+}
+if (!cardEditorScript.includes("const BLANK_CARD_ID = '__new_card__'")
+    || !cardEditorScript.includes('const MAX_CARDS = 32;')
+    || !cardEditorScript.includes('function promoteBlankIfComplete()')
+    || !cardEditorScript.includes("addItem.dataset.addCard = 'true'")
+    || !cardEditorScript.includes('buildChangeSummary(originalCards, draftCards)')
+    || !cardEditorScript.includes('await manager.saveChannel(channel, revision, draftCards)')
+    || !cardEditorScript.includes("error.name === 'CardRevisionConflictError'")
+    || !cardEditorScript.includes("window.addEventListener('beforeunload'")
+    || !cardEditorScript.includes('function focusSelectedStripOption()')
+    || !cardEditorScript.includes("selectedItem?.scrollIntoView({ block: 'nearest', inline: 'nearest' });")
+    || !cardEditorScript.includes('export function moveCardToTargetPosition(cards, sourceId, targetId)')
+    || !cardEditorScript.includes('const targetId = selectedId;')
+    || !cardEditorScript.includes('targetCard === blankCard')
+    || !cardEditorScript.includes('function serverValidationFeedback(error)')
+    || !cardEditorScript.includes("field: 'probeUrl'")) {
+    throw new Error('Card editor lost permanent blank-add, batched draft, dirty guard, or conflict preservation behavior.');
+}
+const moveCardStart = cardEditorScript.indexOf('export function moveCardToTargetPosition(cards, sourceId, targetId) {');
+const moveCardEndMarker = '\n}\n\nfunction serverValidationFeedback(error) {';
+const moveCardEnd = cardEditorScript.indexOf(moveCardEndMarker, moveCardStart);
+if (moveCardStart < 0 || moveCardEnd < 0) {
+    throw new Error('Card target-position reorder helper is missing.');
+}
+const moveCardScript = cardEditorScript.slice(moveCardStart, moveCardEnd + 2).replace(/^export /, '');
+const moveCardContext = vm.createContext({});
+new vm.Script(`${moveCardScript}\nglobalThis.moveCardToTargetPosition = moveCardToTargetPosition;`).runInContext(moveCardContext);
+for (const [sourceId, targetId, expected] of [
+    ['a', 'b', 'b,a,c'],
+    ['a', 'c', 'b,c,a'],
+    ['c', 'a', 'c,a,b'],
+    ['c', 'b', 'a,c,b']
+]) {
+    const cards = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    if (!moveCardContext.moveCardToTargetPosition(cards, sourceId, targetId)
+        || cards.map((card) => card.id).join(',') !== expected) {
+        throw new Error(`Dragging ${sourceId} onto ${targetId} did not occupy the target card position.`);
+    }
+}
+for (const [sourceId, targetId] of [['a', 'a'], ['a', 'missing'], ['missing', 'b']]) {
+    const cards = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    if (moveCardContext.moveCardToTargetPosition(cards, sourceId, targetId)
+        || cards.map((card) => card.id).join(',') !== 'a,b,c') {
+        throw new Error('Invalid or same-card reorder unexpectedly changed the draft order.');
+    }
+}
+const cardDropStart = cardEditorScript.indexOf("            item.addEventListener('drop', (event) => {");
+const cardDropEnd = cardEditorScript.indexOf("            item.addEventListener('dragend', finishDrag);", cardDropStart);
+const cardDropScript = cardEditorScript.slice(cardDropStart, cardDropEnd);
+if (!cardDropScript.includes('moveCardToTargetPosition(draftCards, sourceId, card.id)')
+    || /clientX|getBoundingClientRect|\bbefore\b/.test(cardDropScript)) {
+    throw new Error('Card drop handling must use the whole hovered card as its target position.');
+}
+const svgImportStart = cardEditorScript.indexOf('    async function importSvgFile() {');
+const svgImportEnd = cardEditorScript.indexOf("\n\n    launchButton.addEventListener('click', openEditor);", svgImportStart);
+const svgImportScript = cardEditorScript.slice(svgImportStart, svgImportEnd);
+const promoteBlankStart = cardEditorScript.indexOf('    function promoteBlankIfComplete() {');
+const promoteBlankEnd = cardEditorScript.indexOf('\n\n    function updateSelectedField', promoteBlankStart);
+const promoteBlankScript = cardEditorScript.slice(promoteBlankStart, promoteBlankEnd);
+const svgReadIndex = svgImportScript.indexOf('await file.text()');
+const stripFocusSnapshotIndex = svgImportScript.indexOf('const restoreStripFocus = strip.contains(document.activeElement);');
+const stripRenderIndex = svgImportScript.indexOf('renderStrip();', stripFocusSnapshotIndex);
+const stripFocusRestoreIndex = svgImportScript.indexOf('if (restoreStripFocus) focusSelectedStripOption();', stripRenderIndex);
+if (svgImportStart < 0
+    || svgImportEnd < 0
+    || promoteBlankStart < 0
+    || promoteBlankEnd < 0
+    || svgReadIndex < 0
+    || stripFocusSnapshotIndex < svgReadIndex
+    || stripRenderIndex < stripFocusSnapshotIndex
+    || stripFocusRestoreIndex < stripRenderIndex) {
+    throw new Error('Delayed SVG imports must restore focus only when the replaced strip owned focus at redraw time.');
+}
+const validationFeedbackStart = cardEditorScript.indexOf('function serverValidationFeedback(error) {');
+const validationFeedbackEnd = cardEditorScript.indexOf('\n\nexport function initializeCardEditor', validationFeedbackStart);
+const validationFeedbackScript = cardEditorScript.slice(validationFeedbackStart, validationFeedbackEnd);
+const badRequestStart = cardEditorScript.indexOf('            if (error.status === 400) {');
+const badRequestEnd = cardEditorScript.indexOf("            console.warn('保存卡片失败。'", badRequestStart);
+const badRequestScript = cardEditorScript.slice(badRequestStart, badRequestEnd);
+const badRequestEnableIndex = badRequestScript.indexOf('setBusy(false);');
+const badRequestSelectIndex = badRequestScript.indexOf('selectCard(feedback.cardId);');
+const badRequestStatusIndex = badRequestScript.indexOf("setStatus(feedback.message, 'error');");
+const badRequestFocusIndex = badRequestScript.indexOf('focusValidationField(feedback.field);');
+if (!validationFeedbackScript.includes('CARD_ID_PATTERN.test(error.payload.cardId)')
+    || !validationFeedbackScript.includes('({ ...feedback, cardId })')
+    || badRequestEnableIndex < 0
+    || badRequestSelectIndex < badRequestEnableIndex
+    || badRequestStatusIndex < badRequestSelectIndex
+    || badRequestFocusIndex < badRequestStatusIndex) {
+    throw new Error('PATCH validation errors must select a safe server-identified draft card before focusing its field.');
+}
+async function verifyBadRequestCardTarget(cardId, expectedSelectedId, expectedSelectCount) {
+    let selectedId = 'card-b';
+    let selectCount = 0;
+    const events = [];
+    const context = vm.createContext({
+        CARD_ID_PATTERN: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/,
+        draftCards: [{ id: 'card-a' }, { id: 'card-b' }],
+        setBusy: (value) => events.push(`busy:${value}`),
+        selectCard: (id) => {
+            selectCount += 1;
+            selectedId = id;
+            events.push(`select:${id}`);
+        },
+        setStatus: () => events.push('status'),
+        focusValidationField: (field) => events.push(`focus:${selectedId}:${field}`)
+    });
+    const executableFeedback = validationFeedbackScript;
+    const executableBadRequest = badRequestScript.replace(/^ {12}/gm, '    ');
+    new vm.Script(
+        `${executableFeedback}\nasync function handleBadRequest(error) {\n${executableBadRequest}\n}\n`
+        + 'globalThis.handleBadRequest = handleBadRequest;'
+    ).runInContext(context);
+    await context.handleBadRequest({
+        status: 400,
+        payload: {
+            error: 'effective service probe URL is not allowed by the configured probe policy',
+            ...(cardId === undefined ? {} : { cardId })
+        }
+    });
+    if (selectedId !== expectedSelectedId
+        || selectCount !== expectedSelectCount
+        || events[0] !== 'busy:false'
+        || events.at(-1) !== `focus:${expectedSelectedId}:probeUrl`) {
+        throw new Error(`PATCH cardId targeting regression: ${events.join(',')}.`);
+    }
+}
+await verifyBadRequestCardTarget('card-a', 'card-a', 1);
+await verifyBadRequestCardTarget('missing', 'card-b', 0);
+await verifyBadRequestCardTarget('../card-a', 'card-b', 0);
+await verifyBadRequestCardTarget(undefined, 'card-b', 0);
+
+async function verifyDelayedSvgImportFocus(activeAtStart, activeAtRedraw, expectedFocusRestores) {
+    let resolveRead;
+    const delayedMarkup = new Promise((resolve) => { resolveRead = resolve; });
+    const stripButton = { location: 'strip' };
+    const formInput = { location: 'form' };
+    const documentState = { activeElement: activeAtStart === 'strip' ? stripButton : formInput };
+    const targetCard = { id: 'service-test', iconSvg: '', name: 'Test' };
+    let focusRestores = 0;
+    let renders = 0;
+    const context = vm.createContext({
+        BLANK_CARD_ID: '__new_card__',
+        cardSvgLimits: { rawBytes: 64 * 1024 },
+        iconInput: { files: [{ size: 16, text: () => delayedMarkup }], value: 'test.svg' },
+        selectedId: targetCard.id,
+        currentCard: () => targetCard,
+        blankCard: {},
+        draftCards: [targetCard],
+        strip: { contains: (element) => element === stripButton },
+        document: documentState,
+        sanitizeSvgMarkup: () => '<svg><path /></svg>',
+        iconSelect: { removeAttribute: () => {} },
+        renderPreview: () => {},
+        renderStrip: () => {
+            renders += 1;
+            if (documentState.activeElement === stripButton) documentState.activeElement = null;
+        },
+        computeDirty: () => {},
+        setStatus: () => {},
+        promoteBlankIfComplete: () => {},
+        focusSelectedStripOption: () => {
+            focusRestores += 1;
+            documentState.activeElement = stripButton;
+        },
+        focusValidationField: () => {},
+        console
+    });
+    const executableImport = svgImportScript.replace(/^    /gm, '');
+    new vm.Script(`${executableImport}\nglobalThis.importSvgFile = importSvgFile;`).runInContext(context);
+    const operation = context.importSvgFile();
+    documentState.activeElement = activeAtRedraw === 'strip' ? stripButton : formInput;
+    resolveRead('<svg><path /></svg>');
+    await operation;
+    if (renders !== 1 || focusRestores !== expectedFocusRestores) {
+        throw new Error(`Delayed SVG focus regression: renders=${renders}, restores=${focusRestores}.`);
+    }
+    if (activeAtRedraw === 'form' && documentState.activeElement !== formInput) {
+        throw new Error('Delayed SVG import stole focus from a form field.');
+    }
+}
+await verifyDelayedSvgImportFocus('strip', 'form', 0);
+await verifyDelayedSvgImportFocus('form', 'strip', 1);
+
+async function verifyBlankPromotionRestoresThePromotedCard() {
+    let resolveRead;
+    const delayedMarkup = new Promise((resolve) => { resolveRead = resolve; });
+    const stripButton = { location: 'strip' };
+    const documentState = { activeElement: stripButton };
+    const originalBlank = {
+        id: null,
+        iconSvg: '',
+        name: 'New card',
+        description: 'Description',
+        url: 'https://new.home.example.test/',
+        probeUrl: ''
+    };
+    let renders = 0;
+    let focusedId = null;
+    const runtime = {
+        BLANK_CARD_ID: '__new_card__',
+        MAX_CARDS: 32,
+        cardSvgLimits: { rawBytes: 64 * 1024 },
+        iconInput: { files: [{ size: 16, text: () => delayedMarkup }], value: 'new.svg' },
+        selectedId: '__new_card__',
+        currentCard: () => runtime.blankCard,
+        blankCard: originalBlank,
+        draftCards: [],
+        strip: { contains: (element) => element === stripButton },
+        document: documentState,
+        sanitizeSvgMarkup: () => '<svg><path /></svg>',
+        iconSelect: { removeAttribute: () => {} },
+        renderPreview: () => {},
+        renderStrip: () => {
+            renders += 1;
+            if (documentState.activeElement === stripButton) documentState.activeElement = null;
+        },
+        renderSelectionFields: () => {},
+        computeDirty: () => {},
+        setStatus: () => {},
+        normalizeDraftCard: (card) => ({ ...card }),
+        generateCardId: () => 'card-promoted',
+        makeBlankCard: () => ({ id: null, iconSvg: '', name: '', description: '', url: '', probeUrl: '' }),
+        channel: 'services',
+        focusSelectedStripOption: () => { focusedId = runtime.selectedId; },
+        focusValidationField: () => {},
+        console
+    };
+    const context = vm.createContext(runtime);
+    const executablePromote = promoteBlankScript.replace(/^    /gm, '');
+    const executableImport = svgImportScript.replace(/^    /gm, '');
+    new vm.Script(
+        `${executablePromote}\n${executableImport}\n`
+        + 'globalThis.importSvgFile = importSvgFile;'
+    ).runInContext(context);
+    const operation = context.importSvgFile();
+    resolveRead('<svg><path /></svg>');
+    await operation;
+    if (renders !== 2
+        || context.draftCards.map((card) => card.id).join(',') !== 'card-promoted'
+        || context.selectedId !== 'card-promoted'
+        || focusedId !== 'card-promoted') {
+        throw new Error('Blank-card SVG promotion did not restore focus to the promoted card.');
+    }
+}
+await verifyBlankPromotionRestoresThePromotedCard();
+
+function verifyCardCacheCase(raw, normalizeCardsResponse, expectedRemoval, expectedResult) {
+    let stored = raw;
+    let removals = 0;
+    const context = vm.createContext({
+        CARD_CACHE_KEY: 'test-card-cache',
+        MAX_CACHE_BYTES: 1024,
+        utf8ByteLength: (value) => Buffer.byteLength(value, 'utf8'),
+        normalizeCardsResponse,
+        localStorage: {
+            getItem: () => stored,
+            removeItem: () => {
+                removals += 1;
+                stored = null;
+            }
+        }
+    });
+    const executableCache = readCacheScript.replace(/^    /gm, '');
+    new vm.Script(`${executableCache}\nglobalThis.readCache = readCache;`).runInContext(context);
+    const result = context.readCache();
+    if (removals !== expectedRemoval || result !== expectedResult) {
+        throw new Error(`Invalid cache cleanup regression: removals=${removals}.`);
+    }
+}
+verifyCardCacheCase('{', () => { throw new Error('unreachable'); }, 1, null);
+verifyCardCacheCase('', () => { throw new Error('unreachable'); }, 1, null);
+verifyCardCacheCase(null, () => { throw new Error('unreachable'); }, 0, null);
+verifyCardCacheCase('{}', () => { throw new Error('invalid SVG or structure'); }, 1, null);
+verifyCardCacheCase('{}', () => ({ initialized: false }), 1, null);
+const validCachedCards = { initialized: true };
+verifyCardCacheCase('{}', () => validCachedCards, 0, validCachedCards);
+if (!cardSvgScript.includes("new DOMParser().parseFromString(svgMarkup, 'image/svg+xml')")
+    || !cardSvgScript.includes('document.createElementNS(SVG_NAMESPACE')
+    || !cardSvgScript.includes('/<!DOCTYPE|<!ENTITY/i')
+    || !cardSvgScript.includes('MAX_SVG_ELEMENTS = 256')
+    || !cardSvgScript.includes('MAX_SVG_DEPTH = 16')
+    || !cardSvgScript.includes('MAX_CLEAN_SVG_BYTES = 24 * 1024')) {
+    throw new Error('Frontend SVG handling lost its parser, namespace reconstruction, declaration rejection, or resource budgets.');
+}
+const svgAllowedElementsStart = cardSvgScript.indexOf('const ALLOWED_ELEMENTS = new Set([');
+const svgAllowedElementsEnd = cardSvgScript.indexOf('\n]);', svgAllowedElementsStart);
+const svgAllowedElementsScript = cardSvgScript.slice(svgAllowedElementsStart, svgAllowedElementsEnd);
+const svgInputHelpersStart = cardSvgScript.indexOf('function isXmlnsDeclaration(attribute) {');
+const svgTitleHelpersStart = cardSvgScript.indexOf('function validateTitleText(value) {');
+const svgCollectStart = cardSvgScript.indexOf('function collectIdsAndCheckShape(root) {');
+const svgValueValidationStart = cardSvgScript.indexOf('function validateAttributeValue(name, value, ids) {');
+const svgCopyStart = cardSvgScript.indexOf('function copyElement(source, ids, depth = 1) {');
+const svgSanitizeStart = cardSvgScript.indexOf('function sanitizeToElement(svgMarkup) {');
+const svgTitleHelpersScript = cardSvgScript.slice(svgInputHelpersStart, svgCollectStart);
+const svgCollectScript = cardSvgScript.slice(svgCollectStart, svgCopyStart);
+const svgValueValidationScript = cardSvgScript.slice(svgValueValidationStart, svgCopyStart);
+const svgCopyScript = cardSvgScript.slice(svgCopyStart, svgSanitizeStart);
+const svgElementBudgetIndex = svgCollectScript.indexOf('elementCount += 1;');
+const svgDepthBudgetIndex = svgCollectScript.indexOf('if (depth > MAX_SVG_DEPTH)');
+const svgTitleBranchIndex = svgCollectScript.indexOf("if (element.localName === 'title') {");
+const svgNormalizeAttributeIndex = svgCopyScript.indexOf('const normalized = normalizeInputAttribute(attribute);');
+const svgStyleDropIndex = svgCopyScript.indexOf("if (attribute.localName === 'style') return;");
+if (!cardSvgScript.includes('const MAX_SVG_TITLE_BYTES = 256;')
+    || !cardSvgScript.includes("const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';")
+    || !cardSvgScript.includes("const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';")
+    || svgAllowedElementsStart < 0
+    || svgAllowedElementsEnd < 0
+    || /['"](?:title|style)['"]/.test(svgAllowedElementsScript)
+    || svgInputHelpersStart < 0
+    || svgTitleHelpersStart < 0
+    || svgCollectStart < 0
+    || svgValueValidationStart < 0
+    || svgCopyStart < 0
+    || svgSanitizeStart < 0
+    || !svgTitleHelpersScript.includes('attribute.namespaceURI === XMLNS_NAMESPACE')
+    || !svgTitleHelpersScript.includes("attribute.name === 'xmlns'")
+    || !svgTitleHelpersScript.includes("attribute.namespaceURI !== XLINK_NAMESPACE || attribute.localName !== 'href'")
+    || !svgTitleHelpersScript.includes("return { name: 'href', outputName: 'href' };")
+    || !svgTitleHelpersScript.includes('element.parentElement !== root')
+    || !svgTitleHelpersScript.includes('!isXmlnsDeclaration(attribute)')
+    || !svgTitleHelpersScript.includes('element.children.length !== 0')
+    || !svgTitleHelpersScript.includes('Node.CDATA_SECTION_NODE')
+    || !svgTitleHelpersScript.includes('Node.COMMENT_NODE')
+    || !svgTitleHelpersScript.includes('!supportedNodeTypes.has(child.nodeType)')
+    || !svgTitleHelpersScript.includes("validateTitleText(element.textContent || '')")
+    || !svgCollectScript.includes('let titleCount = 0;')
+    || !svgCollectScript.includes('titleCount > 1')
+    || svgElementBudgetIndex < 0
+    || svgDepthBudgetIndex < svgElementBudgetIndex
+    || svgTitleBranchIndex < svgDepthBudgetIndex
+    || svgNormalizeAttributeIndex < 0
+    || svgStyleDropIndex < svgNormalizeAttributeIndex
+    || !svgCopyScript.includes('if (normalized === null) return;')
+    || !svgCopyScript.includes('document.createElementNS(SVG_NAMESPACE, source.localName)')
+    || !svgCopyScript.includes('ATTRIBUTE_CASE.get(name) || outputName')
+    || !svgCopyScript.includes("if (name === 'class' || name.startsWith('on'))")
+    || !svgCopyScript.includes("if (child.localName === 'title') return;")) {
+    throw new Error('Frontend SVG namespace/title/style compatibility lost its strict validation or canonical dropping contract.');
+}
+
+const svgTitleContext = vm.createContext({
+    XLINK_NAMESPACE: 'http://www.w3.org/1999/xlink',
+    XMLNS_NAMESPACE: 'http://www.w3.org/2000/xmlns/',
+    MAX_SVG_TITLE_BYTES: 256,
+    CONTROL_CHARACTER_PATTERN: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/,
+    utf8ByteLength: (value) => Buffer.byteLength(value, 'utf8'),
+    svgError: (message) => {
+        const error = new Error(message);
+        error.name = 'CardSvgError';
+        return error;
+    },
+    Node: { TEXT_NODE: 3, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8 }
+});
+new vm.Script(
+    `${svgTitleHelpersScript}\n`
+    + 'globalThis.isXmlnsDeclaration = isXmlnsDeclaration;\n'
+    + 'globalThis.normalizeInputAttribute = normalizeInputAttribute;\n'
+    + 'globalThis.validateTitleText = validateTitleText;\n'
+    + 'globalThis.validateTitleElement = validateTitleElement;'
+).runInContext(svgTitleContext);
+const titleRoot = {};
+function svgTitleElement(text, overrides = {}) {
+    return {
+        parentElement: titleRoot,
+        attributes: [],
+        children: { length: 0 },
+        childNodes: [{ nodeType: 3 }],
+        textContent: text,
+        ...overrides
+    };
+}
+function expectInvalidSvgTitle(element, label) {
+    let rejected = false;
+    try {
+        svgTitleContext.validateTitleElement(element, titleRoot);
+    } catch (error) {
+        rejected = error?.name === 'CardSvgError';
+    }
+    if (!rejected) throw new Error(`Invalid SVG title was accepted: ${label}.`);
+}
+svgTitleContext.validateTitleElement(svgTitleElement('Claude'), titleRoot);
+svgTitleContext.validateTitleElement(svgTitleElement('a'.repeat(256)), titleRoot);
+svgTitleContext.validateTitleElement(svgTitleElement('\u754c'.repeat(85)), titleRoot);
+svgTitleContext.validateTitleElement(svgTitleElement('Claude', {
+    attributes: [{
+        namespaceURI: 'http://www.w3.org/2000/xmlns/',
+        name: 'xmlns:svg',
+        localName: 'svg'
+    }]
+}), titleRoot);
+expectInvalidSvgTitle(svgTitleElement('   '), 'blank text');
+expectInvalidSvgTitle(svgTitleElement('bad\u0001title'), 'control character');
+expectInvalidSvgTitle(svgTitleElement('a'.repeat(257)), '257 ASCII bytes');
+expectInvalidSvgTitle(svgTitleElement('\u754c'.repeat(86)), '258 UTF-8 bytes');
+expectInvalidSvgTitle(svgTitleElement('Claude', { parentElement: {} }), 'nested title');
+expectInvalidSvgTitle(svgTitleElement('Claude', {
+    attributes: [{ namespaceURI: null, name: 'lang', localName: 'lang' }]
+}), 'title attribute');
+expectInvalidSvgTitle(svgTitleElement('Claude', { children: { length: 1 }, childNodes: [{ nodeType: 1 }] }), 'title element child');
+for (const nodeType of [2, 5, 7]) {
+    expectInvalidSvgTitle(svgTitleElement('Claude', { childNodes: [{ nodeType }] }), `non-text node ${nodeType}`);
+}
+svgTitleContext.validateTitleElement(svgTitleElement('Claude', { childNodes: [{ nodeType: 4 }] }), titleRoot);
+svgTitleContext.validateTitleElement(svgTitleElement('Claude', { childNodes: [{ nodeType: 8 }, { nodeType: 3 }] }), titleRoot);
+
+function svgInputAttribute(namespaceURI, name, localName, value) {
+    return { namespaceURI, name, localName, value };
+}
+for (const declaration of [
+    svgInputAttribute('http://www.w3.org/2000/xmlns/', 'xmlns', 'xmlns', 'http://www.w3.org/2000/svg'),
+    svgInputAttribute('http://www.w3.org/2000/xmlns/', 'xmlns:xlink', 'xlink', 'http://www.w3.org/1999/xlink'),
+    svgInputAttribute('http://www.w3.org/2000/xmlns/', 'xmlns:svg', 'svg', 'http://www.w3.org/2000/svg')
+]) {
+    if (svgTitleContext.normalizeInputAttribute(declaration) !== null) {
+        throw new Error(`Frontend SVG retained input-only namespace declaration ${declaration.name}.`);
+    }
+}
+const normalizedXlinkHref = svgTitleContext.normalizeInputAttribute(
+    svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:href', 'href', '#base')
+);
+if (normalizedXlinkHref.name !== 'href' || normalizedXlinkHref.outputName !== 'href') {
+    throw new Error('Frontend SVG did not normalize XLink href to a plain href attribute.');
+}
+function expectInvalidSvgNamespace(attribute, label) {
+    let rejected = false;
+    try {
+        svgTitleContext.normalizeInputAttribute(attribute);
+    } catch (error) {
+        rejected = error?.name === 'CardSvgError';
+    }
+    if (!rejected) throw new Error(`Invalid SVG namespace attribute was accepted: ${label}.`);
+}
+expectInvalidSvgNamespace(
+    svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:style', 'style', 'fill:red'),
+    'xlink:style'
+);
+expectInvalidSvgNamespace(
+    svgInputAttribute('https://evil.example/ns', 'unsafe:href', 'href', '#base'),
+    'non-XLink href namespace'
+);
+
+const copiedSvgElements = [];
+const svgCopyContext = vm.createContext({
+    SVG_NAMESPACE: 'http://www.w3.org/2000/svg',
+    XLINK_NAMESPACE: 'http://www.w3.org/1999/xlink',
+    XMLNS_NAMESPACE: 'http://www.w3.org/2000/xmlns/',
+    GLOBAL_ATTRIBUTES: new Set(),
+    ELEMENT_ATTRIBUTES: new Map([
+        ['lineargradient', new Set(['href'])],
+        ['radialgradient', new Set(['href'])],
+        ['path', new Set(['href'])]
+    ]),
+    ATTRIBUTE_CASE: new Map(),
+    CONTROL_CHARACTER_PATTERN: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/,
+    SAFE_ID_PATTERN: /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/,
+    LOCAL_REFERENCE_ATTRIBUTES: new Set(['fill', 'stroke', 'clip-path', 'mask']),
+    LOCAL_URL_PATTERN: /^url\(\s*#([A-Za-z_][A-Za-z0-9_.:-]{0,127})\s*\)$/i,
+    COLOR_ATTRIBUTES: new Set(['fill', 'stroke', 'color', 'stop-color']),
+    SAFE_COLOR_PATTERN: /^(?:none|currentColor|transparent|inherit|[A-Za-z]+|#[0-9A-Fa-f]{3,8}|(?:rgb|rgba|hsl|hsla)\([0-9eE+.,%\s-]+\))$/,
+    svgError: (message) => {
+        const error = new Error(message);
+        error.name = 'CardSvgError';
+        return error;
+    },
+    Node: { ELEMENT_NODE: 1, TEXT_NODE: 3, COMMENT_NODE: 8 },
+    document: {
+        createElementNS: (namespaceURI, localName) => {
+            const element = {
+                namespaceURI,
+                localName,
+                attributes: [],
+                children: [],
+                setAttribute(name, value) { this.attributes.push({ name, value }); },
+                append(child) { this.children.push(child); }
+            };
+            copiedSvgElements.push(element);
+            return element;
+        }
+    }
+});
+new vm.Script(
+    `${svgTitleHelpersScript}\n${svgValueValidationScript}\n${svgCopyScript}\n`
+    + 'globalThis.copyElement = copyElement;'
+).runInContext(svgCopyContext);
+const xlinkGradientSource = {
+    localName: 'linearGradient',
+    nodeName: 'svg:linearGradient',
+    attributes: [
+        svgInputAttribute('http://www.w3.org/2000/xmlns/', 'xmlns:svg', 'svg', 'http://www.w3.org/2000/svg'),
+        svgInputAttribute('http://www.w3.org/2000/xmlns/', 'xmlns:xlink', 'xlink', 'http://www.w3.org/1999/xlink'),
+        svgInputAttribute(null, 'style', 'style', 'fill:url(https://evil.example/paint.svg)'),
+        svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:href', 'href', '#base')
+    ],
+    childNodes: []
+};
+const copiedGradient = svgCopyContext.copyElement(xlinkGradientSource, new Set(['base']));
+if (copiedGradient.namespaceURI !== 'http://www.w3.org/2000/svg'
+    || copiedGradient.localName !== 'linearGradient'
+    || copiedGradient.attributes.length !== 1
+    || copiedGradient.attributes[0].name !== 'href'
+    || copiedGradient.attributes[0].value !== '#base') {
+    throw new Error(`Frontend SVG XLink canonicalization regression: ${JSON.stringify(copiedGradient)}.`);
+}
+function expectSvgCopyRejected(attribute, localName, label) {
+    let rejected = false;
+    try {
+        svgCopyContext.copyElement({ localName, attributes: [attribute], childNodes: [] }, new Set(['base']));
+    } catch (error) {
+        rejected = error?.name === 'CardSvgError';
+    }
+    if (!rejected) throw new Error(`Unsafe SVG copy input was accepted: ${label}.`);
+}
+expectSvgCopyRejected(
+    svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:href', 'href', 'https://evil.example/gradient.svg'),
+    'linearGradient',
+    'external XLink href'
+);
+expectSvgCopyRejected(
+    svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:href', 'href', '#missing'),
+    'linearGradient',
+    'missing local XLink href target'
+);
+expectSvgCopyRejected(
+    svgInputAttribute('http://www.w3.org/1999/xlink', 'xlink:href', 'href', '#base'),
+    'path',
+    'XLink href outside a gradient'
+);
+if (!serviceScript.includes('let requestGeneration = 0;')
+    || !serviceScript.includes('if (activeController) activeController.abort();')
+    || !serviceScript.includes('if (requestCards.length === 0)')
+    || !serviceScript.includes('if (generation !== requestGeneration) return;')
+    || !channelScript.includes('function resyncCards()')
+    || !channelScript.includes("quickLinksGrid.style.removeProperty('--quick-links-width')")) {
+    throw new Error('Dynamic card replacement must invalidate probes and resynchronize empty-channel layout.');
+}
+const managerInitialization = appScript.indexOf('await initializeCardManager()');
+const channelInitialization = appScript.indexOf("initializeFeature('双频道预览', initializeChannelSwitch)");
+const statusInitialization = appScript.indexOf("initializeFeature('服务状态', initializeServiceStatus)");
+if (managerInitialization < 0
+    || channelInitialization < managerInitialization
+    || statusInitialization < managerInitialization
+    || !appScript.includes('cardManager.subscribe(() => {')) {
+    throw new Error('Card data must settle before channel/status controllers and notify both controllers after replacement.');
 }
 const channelSwitchTag = html.match(/<button\b[^>]*\bid="channel-switch"[^>]*>/);
 if (!channelSwitchTag
@@ -2920,6 +3670,20 @@ if (channelContext.channelSwitch.disabled
     || channelContext.quickLinks[4].style.properties['--channel-card-index'] !== '4') {
     throw new Error('Stage 2R channel switch did not initialize its settled Services state.');
 }
+channelContext.quickLinksGrid.getBoundingClientRect = () => ({ height: 310 });
+channelContext.__channelHelpers.configureChannelMotion();
+if (channelContext.channelPanelStage.style.properties['--channel-panel-height'] !== '310px'
+    || channelContext.servicesPanel.hidden
+    || !channelContext.quickLinksPanel.hidden) {
+    throw new Error('Stage 2R layout did not size the stage to the taller hidden Quick Links grid.');
+}
+channelContext.quickLinksGrid.getBoundingClientRect = () => ({ height: 90 });
+channelContext.__channelHelpers.configureChannelMotion();
+if (channelContext.channelPanelStage.style.properties['--channel-panel-height'] !== '190px'
+    || channelContext.servicesPanel.hidden
+    || !channelContext.quickLinksPanel.hidden) {
+    throw new Error('Stage 2R layout did not restore the Services-dominant stage height after remeasurement.');
+}
 channelContext.channelSwitch.clickHandler();
 if (channelContext.dashboard.dataset.activeChannel !== 'services'
     || channelContext.servicesPanel.hidden
@@ -3172,18 +3936,18 @@ if (!channelContext.channelSwitch.disabled
 }
 
 const serviceHelperStart = serviceScript.indexOf('function setCardState(');
-const serviceHelperEnd = serviceScript.indexOf('initializeServiceCards();', serviceHelperStart);
+const serviceHelperEnd = serviceScript.indexOf("refreshButton.addEventListener('click', refreshStatuses);", serviceHelperStart);
 if (serviceHelperStart < 0 || serviceHelperEnd < 0) {
     throw new Error('Unable to extract service status helpers for behavior checks.');
 }
 const serviceHelperSource = serviceScript.slice(serviceHelperStart, serviceHelperEnd);
-if (!/const targets = cards\.map\(\(card\) => card\.dataset\.probeUrl \|\| card\.href\);/.test(serviceHelperSource)
+if (!/const targets = requestCards\.map\(\(card\) => card\.dataset\.probeUrl \|\| card\.href\);/.test(serviceHelperSource)
     || /\bquickLinks\b/.test(serviceHelperSource)) {
     throw new Error('Service probing must continue to derive its batch exclusively from service cards.');
 }
 vm.runInContext(
     serviceHelperSource
-        + '\nglobalThis.__serviceHelpers = { initializeServiceCards, classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses };',
+        + '\nglobalThis.__serviceHelpers = { initializeServiceCards, classifyServiceStatus, serviceStatusLabel, normalizeServiceStatusResult, refreshStatuses, resync };',
     context
 );
 
@@ -3210,6 +3974,7 @@ function makeCard(href, probeUrl = null) {
     const stateElement = { dataset: {}, label: { textContent: '' }, querySelector() { return this.label; } };
     return {
         href,
+        isConnected: true,
         dataset: probeUrl ? { probeUrl } : {},
         stateElement,
         style: {
@@ -3223,6 +3988,15 @@ context.cards = [
     makeCard('https://one.home.example.test/'),
     makeCard('https://two.home.example.test/', 'https://two.home.example.test/status')
 ];
+context.document = {
+    querySelectorAll(selector) {
+        if (selector !== '#service-grid .service-card') throw new Error(`Unexpected service card selector: ${selector}`);
+        return context.cards;
+    }
+};
+context.dashboard = { dataset: { activeChannel: 'services' } };
+context.requestGeneration = 0;
+context.activeController = null;
 context.serviceCountLabel = { textContent: '' };
 context.refreshButton = { disabled: false, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
 context.lastChecked = { textContent: '' };
@@ -3239,6 +4013,8 @@ if (context.cards[0].style.properties['--card-index'] !== '0'
 let requestCount = 0;
 let observedResource = null;
 let observedOptions = null;
+let serviceWarning = null;
+context.console.warn = (...values) => { serviceWarning = values; };
 context.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
     requestCount += 1;
     observedResource = resource;
@@ -3246,7 +4022,9 @@ context.fetchWithTimeout = async (resource, options, timeout, controller, transf
     if (context.lastChecked.textContent !== '\u6b63\u5728\u68c0\u6d4b \u0032 \u4e2a\u5165\u53e3\u2026') {
         throw new Error('In-progress service count label mismatch.');
     }
-    if (timeout !== 8000 || controller !== null) throw new Error('Unexpected service API timeout contract.');
+    if (timeout !== 8000 || !controller || typeof controller.abort !== 'function') {
+        throw new Error('Unexpected service API timeout contract.');
+    }
     return transform({ ok: true, json: async () => ({ results: [
         { target: 'https://one.home.example.test/', status: 200, latencyMs: 5, error: null },
         { target: 'https://two.home.example.test/status', status: null, latencyMs: 5000, error: 'timeout' }
@@ -3260,7 +4038,7 @@ if (observedOptions.method !== 'POST' || observedOptions.credentials !== 'same-o
 const requestBody = JSON.parse(observedOptions.body);
 if (requestBody.targets[1] !== context.cards[1].dataset.probeUrl) throw new Error('Probe URL override was not used.');
 if (context.cards[0].stateElement.dataset.state !== 'online' || context.cards[1].stateElement.dataset.state !== 'offline') {
-    throw new Error('Batch results were not rendered correctly.');
+    throw new Error(`Batch results were not rendered correctly: ${context.cards.map((card) => card.stateElement.dataset.state).join(', ')}; ${serviceWarning?.[1]?.message || 'no warning'}.`);
 }
 
 context.fetchWithTimeout = async () => { throw new Error('simulated API failure'); };
@@ -3270,7 +4048,22 @@ if (context.cards.some((card) => card.stateElement.dataset.state !== 'unknown')
     throw new Error('API failure did not restore controls and render unknown states.');
 }
 
-console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, 9 external assets, ${cards.length} cards, ${ids.length} unique ids.`);
+context.cards = [];
+let emptyServiceRequestCount = 0;
+context.fetchWithTimeout = async () => {
+    emptyServiceRequestCount += 1;
+    throw new Error('An empty Services channel must not issue a request.');
+};
+context.__serviceHelpers.resync({ refresh: false });
+await context.__serviceHelpers.refreshStatuses();
+if (emptyServiceRequestCount !== 0
+    || !context.refreshButton.disabled
+    || context.refreshButton.attributes['aria-busy'] !== 'false'
+    || context.lastChecked.textContent !== '\u6682\u65e0\u670d\u52a1\u5165\u53e3') {
+    throw new Error('Empty Services did not stay request-free with a disabled refresh control.');
+}
+
+console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, ${moduleEntries.length + 1} external assets, ${cards.length} cards, ${ids.length} unique ids.`);
 })().catch((error) => {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
@@ -3322,10 +4115,15 @@ try {
         'state.json.bak',
         'state.json.corrupt-verify',
         '.state-verify.tmp',
+        'DashboardCards.json',
+        'DashboardCards.json.bak',
+        'DashboardCards.json.corrupt-verify',
+        '.DashboardCards.json.verify.tmp',
         'service.log',
         'service.log.1',
         'HomeLabWallpaperState.json',
         'HomeLabWallpaperState-data/state.json',
+        'HomeLabWallpaperState-data/DashboardCards.json',
         'temp/verify-probe.svg'
     )
     foreach ($probe in $ignoreProbes) {
@@ -3359,11 +4157,16 @@ try {
             $null = New-Item -ItemType Directory -Path $forcedDirectory
             [IO.File]::WriteAllBytes((Join-Path $forcedDirectory 'forced.pyc'), [byte[]](1, 2, 3))
             [IO.File]::WriteAllText(
+                (Join-Path $resolvedProbe 'DashboardCards.json'),
+                '{"version":1}',
+                [Text.UTF8Encoding]::new($false)
+            )
+            [IO.File]::WriteAllText(
                 (Join-Path $resolvedProbe 'staged-only.txt'),
                 "trailing whitespace `n",
                 [Text.UTF8Encoding]::new($false)
             )
-            & $git.Source add -f -- '.venv/forced.pyc' 'staged-only.txt'
+            & $git.Source add -f -- '.venv/forced.pyc' 'DashboardCards.json' 'staged-only.txt'
             if ($LASTEXITCODE -ne 0) {
                 throw 'Unable to stage temporary Git policy probes.'
             }

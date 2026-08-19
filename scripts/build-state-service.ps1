@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 6
+$expectedServiceVersion = 7
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -228,6 +228,123 @@ try {
             throw 'Packaged executable failed the PATCH compatibility smoke test.'
         }
 
+        $initialCards = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/cards" `
+            -TimeoutSec 2
+        if ($initialCards.version -ne 1 -or
+            $initialCards.initialized -ne $false -or
+            $null -ne $initialCards.channels) {
+            throw 'Packaged executable returned an invalid uninitialized card state.'
+        }
+
+        $smokeIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
+        $initializeCardsBody = [ordered]@{
+            version    = 1
+            services   = @([ordered]@{
+                id          = 'service-smoke'
+                iconSvg     = $smokeIcon
+                name        = 'Smoke Service'
+                description = 'Packaged card API'
+                url         = 'https://smoke.home.example.test/'
+                probeUrl    = $null
+            })
+            quickLinks = @([ordered]@{
+                id      = 'quick-smoke'
+                iconSvg = $smokeIcon
+                name    = 'Smoke Link'
+                url     = 'https://example.test/'
+            })
+        } | ConvertTo-Json -Depth 8 -Compress
+        $initializeCardsResponse = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/api/cards/initialize" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $initializeCardsBody `
+            -TimeoutSec 2
+        if ($initializeCardsResponse.StatusCode -ne 201) {
+            throw "Packaged executable returned HTTP $($initializeCardsResponse.StatusCode) for card initialization."
+        }
+        $initializedCards = $initializeCardsResponse.Content | ConvertFrom-Json
+        if ($initializedCards.initialized -ne $true -or
+            $initializedCards.channels.services.revision -ne 1 -or
+            $initializedCards.channels.quickLinks.revision -ne 1 -or
+            $initializedCards.channels.services.cards.Count -ne 1 -or
+            $initializedCards.channels.quickLinks.cards.Count -ne 1) {
+            throw 'Packaged executable returned an invalid initialized card state.'
+        }
+
+        $patchCardsBody = [ordered]@{
+            version          = 1
+            channel          = 'services'
+            expectedRevision = 1
+            cards            = @([ordered]@{
+                id          = 'service-smoke'
+                iconSvg     = $initializedCards.channels.services.cards[0].iconSvg
+                name        = 'Updated Smoke Service'
+                description = 'Packaged card API'
+                url         = 'https://smoke.home.example.test/'
+                probeUrl    = $null
+            })
+        } | ConvertTo-Json -Depth 8 -Compress
+        $patchedCards = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Patch `
+            -Uri "http://127.0.0.1:$smokePort/api/cards" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $patchCardsBody `
+            -TimeoutSec 2
+        if ($patchedCards.channels.services.revision -ne 2 -or
+            $patchedCards.channels.services.cards[0].name -ne 'Updated Smoke Service' -or
+            $patchedCards.channels.services.cards[0].iconSvg -ne $initializedCards.channels.services.cards[0].iconSvg -or
+            $patchedCards.channels.quickLinks.revision -ne 1) {
+            throw 'Packaged executable failed the card PATCH smoke test.'
+        }
+        try {
+            $null = Invoke-WebRequest `
+                -UseBasicParsing `
+                -Method Patch `
+                -Uri "http://127.0.0.1:$smokePort/api/cards" `
+                -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+                -ContentType 'application/json' `
+                -Body $patchCardsBody `
+                -TimeoutSec 2
+            throw 'Packaged executable accepted a stale card revision.'
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response -or [int]$response.StatusCode -ne 409) {
+                throw
+            }
+            $conflictPayload = $null
+            if (-not [string]::IsNullOrWhiteSpace($_.ErrorDetails.Message)) {
+                try {
+                    $conflictPayload = $_.ErrorDetails.Message | ConvertFrom-Json
+                } catch {
+                    $conflictPayload = $null
+                }
+            }
+            if ($null -eq $conflictPayload -and
+                $response.PSObject.Methods.Name -contains 'GetResponseStream') {
+                $responseReader = [IO.StreamReader]::new($response.GetResponseStream())
+                try {
+                    $conflictPayload = $responseReader.ReadToEnd() | ConvertFrom-Json
+                } finally {
+                    $responseReader.Dispose()
+                }
+            }
+            if ($null -eq $conflictPayload -or
+                $conflictPayload.error -ne 'revision_conflict' -or
+                $conflictPayload.currentRevision -ne 2) {
+                throw 'Packaged executable returned an invalid stale card revision conflict.'
+            }
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $smokeState 'DashboardCards.json') -PathType Leaf)) {
+            throw 'Packaged executable initialized cards without persisting DashboardCards.json.'
+        }
+
         $smokePngBytes = [Convert]::FromBase64String(
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
         )
@@ -326,12 +443,60 @@ try {
         if ($smokeProcess.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($smokeProcess.ExitCode)."
         }
-    } finally {
-        if (-not $smokeProcess.HasExited) {
-            Stop-Process -Id $smokeProcess.Id -Force -ErrorAction SilentlyContinue
-            $smokeProcess.WaitForExit()
-        }
         $smokeProcess.Dispose()
+        $smokeProcess = $null
+        $smokeProcess = Start-Process `
+            -FilePath $temporaryArtifactPath `
+            -ArgumentList @('serve', '--config', ('"' + $smokeConfig + '"')) `
+            -WorkingDirectory $smokeRoot `
+            -WindowStyle Hidden `
+            -PassThru
+        $restartDeadline = (Get-Date).AddSeconds(20)
+        $restartHealth = $null
+        do {
+            try {
+                $restartHealth = Invoke-RestMethod -UseBasicParsing -Uri $healthUri -TimeoutSec 2
+            } catch {
+                Start-Sleep -Milliseconds 250
+            }
+        } while (($null -eq $restartHealth -or $restartHealth.status -ne 'ok') -and (Get-Date) -lt $restartDeadline)
+        if ($null -eq $restartHealth -or $restartHealth.version -ne $expectedServiceVersion) {
+            throw 'Packaged executable did not become healthy after restart.'
+        }
+        $persistedCards = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/cards" `
+            -TimeoutSec 2
+        if ($persistedCards.initialized -ne $true -or
+            $persistedCards.channels.services.revision -ne 2 -or
+            $persistedCards.channels.services.cards[0].name -ne 'Updated Smoke Service' -or
+            $persistedCards.channels.services.cards[0].iconSvg -ne $initializedCards.channels.services.cards[0].iconSvg -or
+            $persistedCards.channels.quickLinks.revision -ne 1) {
+            throw 'Packaged executable did not preserve card state across restart.'
+        }
+        $null = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "http://127.0.0.1:$smokePort/_control/shutdown" `
+            -Headers @{ 'X-Control-Token' = $smokeToken } `
+            -TimeoutSec 2
+        if (-not $smokeProcess.WaitForExit(10000)) {
+            throw 'Restarted packaged executable did not stop after the control request.'
+        }
+        if ($smokeProcess.ExitCode -ne 0) {
+            throw "Restarted packaged executable exited with code $($smokeProcess.ExitCode)."
+        }
+    } finally {
+        if ($null -ne $smokeProcess) {
+            try {
+                if (-not $smokeProcess.HasExited) {
+                    Stop-BuildProcessTree -Process $smokeProcess -ConfirmTimeoutMilliseconds 5000
+                }
+            } catch {
+                Write-Warning "Failed to clean up packaged smoke process: $($_.Exception.Message)"
+            }
+            $smokeProcess.Dispose()
+        }
     }
 
     $temporaryHash = Get-FileHash -LiteralPath $temporaryArtifactPath -Algorithm SHA256

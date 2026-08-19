@@ -2,6 +2,7 @@ import { initializeBackgroundManager } from './background-manager.js';
 import { initializeSearch } from './search.js';
 import { initializeChannelSwitch } from './channel-switch.js';
 import { initializeServiceStatus } from './service-status.js';
+import { initializeCardManager } from './card-manager.js';
 
 function initializeIntro() {
     const root = document.documentElement;
@@ -54,5 +55,24 @@ function initializeFeature(label, initializer) {
 initializeFeature('页面入场', initializeIntro);
 initializeFeature('背景管理', initializeBackgroundManager);
 initializeFeature('搜索栏增强', initializeSearch);
-initializeFeature('双频道预览', initializeChannelSwitch);
-initializeFeature('服务状态', initializeServiceStatus);
+
+async function initializeDashboardNavigation() {
+    let cardManager = null;
+    try {
+        // Card data must settle before channel sizing and service probes capture the DOM.
+        cardManager = await initializeCardManager();
+    } catch (error) {
+        console.warn('卡片数据初始化失败，已保留静态卡片降级。', error);
+    }
+
+    const channelController = initializeFeature('双频道预览', initializeChannelSwitch);
+    const serviceStatusController = initializeFeature('服务状态', initializeServiceStatus);
+    if (cardManager) {
+        cardManager.subscribe(() => {
+            channelController?.resync();
+            serviceStatusController?.resync();
+        });
+    }
+}
+
+initializeDashboardNavigation();

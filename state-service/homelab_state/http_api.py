@@ -36,6 +36,15 @@ from homelab_state.bestdori import (
     BestdoriPoolExhausted,
     BestdoriUnavailable,
 )
+from homelab_state.cards import (
+    MAX_CARDS_REQUEST_BODY,
+    CardsAlreadyInitialized,
+    CardsNotInitialized,
+    CardsRevisionConflict,
+    CardsStateUnavailable,
+    CardsStore,
+    InvalidCards,
+)
 from homelab_state.config import AppConfig, normalize_origin
 from homelab_state.core import (
     SERVICE_NAME,
@@ -54,6 +63,8 @@ BESTDORI_CHARACTERS_PATH = "/api/bestdori/characters"
 BESTDORI_DRAW_PATH = "/api/background-files/draw"
 BESTDORI_RECONCILE_PATH = "/api/bestdori/history/reconcile"
 BESTDORI_RESET_PATH = "/api/bestdori/history/reset"
+CARDS_PATH = "/api/cards"
+CARDS_INITIALIZE_PATH = "/api/cards/initialize"
 HEALTH_PATH = "/healthz"
 CONTROL_PATH = "/_control/shutdown"
 MAX_PATCH_BODY = 4 * 1024
@@ -86,6 +97,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         logger: logging.Logger,
         probe_client: ProbeClient | None = None,
         bestdori_manager: BestdoriDrawManager | None = None,
+        cards_store: CardsStore | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -94,6 +106,10 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.bestdori_manager = bestdori_manager or BestdoriDrawManager(
             store,
             config.state_dir / "BestdoriCardDraws.json",
+        )
+        self.cards_store = cards_store or CardsStore.for_state_directory(
+            config.state_dir,
+            config.probe_domain_suffix,
         )
         owns_probe_client = probe_client is None
         self.probe_client = probe_client or ProbeClient(config)
@@ -221,7 +237,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
 
     def _route_accepts_body(self) -> bool:
         if self.command == "PATCH":
-            return self.path == API_PATH
+            return self.path in {API_PATH, CARDS_PATH}
         if self.command != "POST":
             return False
         if urlsplit(self.path).path == BACKGROUND_UPLOAD_PATH:
@@ -232,6 +248,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             BESTDORI_DRAW_PATH,
             BESTDORI_RECONCILE_PATH,
             BESTDORI_RESET_PATH,
+            CARDS_INITIALIZE_PATH,
         }
 
     def _reject_request_framing(self, status: int, message: str) -> bool:
@@ -671,7 +688,70 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         self._write_json(HTTPStatus.OK, result)
 
+    def _handle_cards_initialize(self) -> None:
+        request = self._read_dashboard_json(MAX_CARDS_REQUEST_BODY)
+        if request is None:
+            return
+        try:
+            state = self.server.cards_store.initialize(request)
+        except InvalidCards as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        except CardsAlreadyInitialized:
+            self._error(HTTPStatus.CONFLICT, "already_initialized")
+            return
+        except CardsStateUnavailable:
+            self._error(HTTPStatus.SERVICE_UNAVAILABLE, "cards_state_unavailable")
+            return
+        except Exception:
+            self.server.logger.exception("POST %s failed", CARDS_INITIALIZE_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self._write_json(HTTPStatus.CREATED, state)
+
+    def _handle_cards_update(self) -> None:
+        request = self._read_dashboard_json(MAX_CARDS_REQUEST_BODY)
+        if request is None:
+            return
+        try:
+            state = self.server.cards_store.update(request)
+        except InvalidCards as error:
+            payload = {"error": str(error)}
+            if error.card_id is not None:
+                payload["cardId"] = error.card_id
+            self._write_json(HTTPStatus.BAD_REQUEST, payload)
+            return
+        except CardsRevisionConflict as error:
+            self._write_json(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "revision_conflict",
+                    "currentRevision": error.current_revision,
+                },
+            )
+            return
+        except CardsNotInitialized:
+            self._error(HTTPStatus.CONFLICT, "not_initialized")
+            return
+        except CardsStateUnavailable:
+            self._error(HTTPStatus.SERVICE_UNAVAILABLE, "cards_state_unavailable")
+            return
+        except Exception:
+            self.server.logger.exception("PATCH %s failed", CARDS_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self._write_json(HTTPStatus.OK, state)
+
     def do_GET(self) -> None:
+        if self.path == CARDS_PATH:
+            try:
+                self._write_json(HTTPStatus.OK, self.server.cards_store.get())
+            except CardsStateUnavailable:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "cards_state_unavailable")
+            except Exception:
+                self.server.logger.exception("GET %s failed", self.path)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
         if self.path == API_PATH:
             try:
                 self._write_json(HTTPStatus.OK, self.server.store.get())
@@ -721,6 +801,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == SERVICE_STATUS_PATH:
             self._allow("POST")
             return
+        if self.path == CARDS_INITIALIZE_PATH:
+            self._allow("POST")
+            return
         if urlsplit(self.path).path in {
             BACKGROUND_UPLOAD_PATH,
             BACKGROUND_REMOVE_PATH,
@@ -733,6 +816,12 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PATCH(self) -> None:
+        if self.path == CARDS_PATH:
+            self._handle_cards_update()
+            return
+        if self.path == CARDS_INITIALIZE_PATH:
+            self._allow("POST")
+            return
         if self.path == SERVICE_STATUS_PATH:
             self._allow("POST")
             return
@@ -782,6 +871,12 @@ class StateRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed_path = urlsplit(self.path)
+        if self.path == CARDS_INITIALIZE_PATH:
+            self._handle_cards_initialize()
+            return
+        if self.path == CARDS_PATH:
+            self._allow("GET, PATCH")
+            return
         if parsed_path.path == BACKGROUND_UPLOAD_PATH:
             self._handle_background_upload(parsed_path)
             return
@@ -846,6 +941,10 @@ class StateRequestHandler(BaseHTTPRequestHandler):
     def _method_not_allowed(self) -> None:
         if self.path == API_PATH:
             self._allow("GET, PATCH")
+        elif self.path == CARDS_PATH:
+            self._allow("GET, PATCH")
+        elif self.path == CARDS_INITIALIZE_PATH:
+            self._allow("POST")
         elif self.path == BACKGROUND_FILES_PATH:
             self._allow("GET")
         elif self.path == BESTDORI_CHARACTERS_PATH:

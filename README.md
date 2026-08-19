@@ -1,6 +1,6 @@
 # Zoraxy HomeLab Service Dashboard
 
-这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步和管理壁纸，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
+这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步卡片与壁纸，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
 
 > [!IMPORTANT]
 > 本仓库是维护者基于真实 Zoraxy + Windows HomeLab 环境开发的参考实现，不是面向任意环境的一键安装产品。公开版使用保留示例域名 `*.home.example.com`，`D:\Zoraxy\...` 和服务卡片地址均为部署示例；使用前必须按“公开仓库定制清单”替换为自己的域名、路径、入口和认证策略。
@@ -11,14 +11,14 @@
 | --- | --- |
 | 页面入口 | `index.html` |
 | 背景图片 | `assets/default-background.svg` 导出为 `backgrounds/bg.jpg` 随仓库提供兜底；其余原图由部署机器本地保存，缩略图由后端生成 |
-| 服务入口 | 由 `index.html` 中的服务卡片定义，并由页面自动统计 |
-| 快捷入口 | Services / Quick Links 双频道；Quick Links 固定维护 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini |
+| 服务入口 | 首次升级从 `index.html` 原子导入现有卡片，之后可在网页中增删改、排序并跨设备同步 |
+| 快捷入口 | Services / Quick Links 双频道；Quick Links 与 Services 分频道独立保存和版本冲突保护 |
 | 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度、哔哩哔哩搜索；默认 Bing，无 JavaScript 时仍可提交 |
-| 状态服务 | Python 服务；提供壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
+| 状态服务 | Python 服务；提供卡片配置、壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
 | 自动启动 | 当前用户 `shell:startup` 快捷方式，登录后显示监视器 |
-| 配置与状态 | 严格 v2 JSON 配置；背景状态和独立抽卡去重记录位于 `HomeLabWallpaperState-data/` |
+| 配置与状态 | 严格 v2 JSON 配置；卡片、背景状态和独立抽卡去重记录位于 `HomeLabWallpaperState-data/` |
 | 前端依赖 | 无 CDN、无框架、浏览器原生 ES 模块、内联 SVG |
 
 ## 文件结构
@@ -36,7 +36,10 @@ zoraxy-homelab-dashboard/
 │       ├── bestdori.js
 │       ├── search.js
 │       ├── channel-switch.js
-│       └── service-status.js
+│       ├── service-status.js
+│       ├── card-svg.js          # SVG 双重校验所需的前端白名单与安全 DOM 导入
+│       ├── card-editor.js       # 当前频道卡片草稿、表单、删除和鼠标排序
+│       └── card-manager.js      # 首次导入、服务器/缓存降级和动态卡片渲染
 ├── backgrounds/
 │   ├── .gitignore               # 仅放行项目兜底导出图
 │   ├── bg.jpg                   # SVG 导出的默认占位壁纸
@@ -47,6 +50,7 @@ zoraxy-homelab-dashboard/
 │   │   ├── core.py              # 共享常量、异常、校验和原子 JSON 写入
 │   │   ├── config.py            # 严格 v2 配置模型、解析和路径边界
 │   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
+│   │   ├── cards.py             # 卡片模型、SVG 清洗、原子初始化和修订号存储
 │   │   ├── bestdori.py          # 固定源客户端、抽卡和去重历史
 │   │   ├── probe.py             # 回环固定的 HTTPS 批量入口探测
 │   │   ├── http_api.py          # HTTP 服务、请求安全边界和 API 路由
@@ -74,7 +78,7 @@ zoraxy-homelab-dashboard/
 
 历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
-仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、JSON 配置、状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用稳定路径，部署时直接覆盖完整的 `assets/` 与 `index.html`，然后使用 `Ctrl+F5` 强制刷新验收；版本和回滚由 Git Tag/Release 管理。
+仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、`DashboardCards.json`、其它 JSON 状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用稳定路径，部署时直接覆盖完整的 `assets/` 与 `index.html`，然后使用 `Ctrl+F5` 强制刷新验收；版本和回滚由 Git Tag/Release 管理。
 
 项目代码、文档和项目自有占位资产按 [MIT License](LICENSE) 发布。品牌标识、用户壁纸以及运行时获取的第三方卡面不属于本项目许可范围，详见 [ASSETS.md](ASSETS.md)；二进制依赖及完整许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `licenses/`。
 
@@ -93,6 +97,7 @@ GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者
 ├── GET /backgrounds/<文件名>              -> 应用或查看当前壁纸时传输原图
 ├── GET /backgrounds/                      -> Zoraxy 静态目录列表（旧后端降级）
 ├── GET/PATCH /api/background-preferences  -> Zoraxy Virtual Directory
+├── GET/POST/PATCH /api/cards              -> Python 状态服务原子初始化及按频道保存
 ├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
 ├── GET/POST /api/bestdori/...              -> Python 状态服务
 │                                               -> Bestdori 固定 HTTPS API/资源
@@ -129,13 +134,23 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、
 
 服务卡片区域默认显示 Services，不保存频道状态。标题式玻璃按钮可切换到 Quick Links；五个快捷入口依次为 Bilibili、GitHub、Gmail、ChatGPT 和 Gemini，均使用内联 SVG、官方主页以及带 `noopener noreferrer` 的新标签页链接。Quick Links 不包含状态、副标题或探测目标，切换频道也不会新增服务状态请求；批量探测始终只读取现有 `.service-card`。
 
-宽度不小于 768px 且未启用减少动态效果时，按钮先用 800ms 向左翻面，面板延迟 200ms 后执行同向 800ms 翻面，两面保持 Services 面板的固定尺寸。窄屏下不使用 3D：按钮先淡变，120ms 后旧网格整体淡出，新频道卡片再按 DOM 顺序以 25ms 间隔逐张淡入并轻微上移。切换期间按钮保持焦点，离场面立即停止接收焦点，入场完成后才恢复交互。
+宽度不小于 768px 且未启用减少动态效果时，按钮先用 800ms 向左翻面，面板延迟 200ms 后执行同向 800ms 翻面，两面按 Services 与 Quick Links 两个网格中较高者保持相同尺寸。窄屏下不使用 3D：按钮先淡变，120ms 后旧网格整体淡出，新频道卡片再按 DOM 顺序以 25ms 间隔逐张淡入并轻微上移。切换期间按钮保持焦点，离场面立即停止接收焦点，入场完成后才恢复交互。
 
 `prefers-reduced-motion` 下频道直接切换，不播放翻面、错峰或逐卡动画。静态 HTML 默认暴露可用的 Services 面并隐藏、隔离 Quick Links；JavaScript 不可用或频道初始化失败时仍可打开全部服务入口。
 
+### 卡片配置与首次导入
+
+“修改卡片”与“切换背景”并列显示，并按打开时所在频道编辑 Services 或 Quick Links。卡片选择区使用与主页相同思路的响应式网格：常规桌面宽度下，默认 11 张卡片和末尾新增卡排成 6 列 × 2 行；较窄窗口依次收缩列数，767px 以下两列、520px 以下一列，超出可见高度后只在选择区内纵向滚动，不再横向长距离滑动。编辑器会在内存中统一暂存连续新增、字段修改、删除和桌面鼠标拖动排序；将拖动卡放到任一目标卡片上时，会直接占用该卡片原本的位置，其间卡片依次顺移，不再区分目标卡片的左右半区。删除与最终保存分别确认，关闭或离开页面时会提醒放弃未保存草稿。每个频道最多 32 张，也允许明确清空；移动端可以增删改和保存，但排序需在桌面完成。
+
+新后端尚无 `DashboardCards.json` 时，`GET /api/cards` 会明确返回未初始化状态。配套新前端随后从静态 HTML 提取现有 11 张 Services 与 5 张 Quick Links，在前后端分别验证字段、HTTPS URL 和内联 SVG，再通过 `POST /api/cards/initialize` 一次性写入两个频道。该导入只允许成功一次；并发首次访问中失败的一方会重新读取服务器结果，后续发布不会用新的静态默认值覆盖用户数据。状态文件损坏或版本不兼容不会被当成首次运行，也不会被自动重置。
+
+正常加载以服务器为真源，并把最后一份完整有效配置缓存在当前浏览器。API 整体不可用时优先显示该缓存，无缓存时保留静态 HTML 卡片；缓存只负责导航降级，离线时不能保存。每个频道使用独立修订号，保存时若服务器已经被其它设备更新会返回冲突并要求重新载入，不会静默覆盖或自动合并。
+
+卡片图标通过本地 `.svg` 文件导入；浏览器只读取文件文本，不向公开目录单独上传图标。为兼容常见图标导出格式，前后端允许一个位于根 `<svg>` 下的简单纯文本 `<title>`，也接受无命名空间的行内 `style` 属性，但二者都会在清洗时移除，不会进入保存结果或页面 DOM。真正的 `<style>` 样式表、`class`、脚本、事件属性、外部资源、嵌入图片、动画、DTD 和实体仍会被拒绝；元素数量、嵌套、图标与请求体大小也继续受限。渲染不会把服务器字符串直接赋给 `innerHTML`，内部渐变、遮罩和裁剪 ID 会加上卡片级前缀以免不同图标互相引用。
+
 ### 服务入口状态
 
-每张 `.service-card` 提供一个导航入口，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。页面标题、检测中数量和卡片入场动画序号均根据实际卡片集合自动生成；每次刷新只发送一次同源批量请求。最终 HTTP 状态分类如下：
+每张动态或静态 `.service-card` 提供一个导航入口，`href` 与可选 `data-probe-url` 是服务端探测目标的唯一来源。页面标题、检测中数量和卡片入场动画序号均根据实际卡片集合自动生成；卡片保存后会作废旧请求、重新绑定当前集合并只发送一次新的同源批量请求。空 Services 频道不会发送非法的空目标请求。最终 HTTP 状态分类如下：
 
 - 2xx/3xx：绿色“服务端可达”；
 - 4xx：黄色“异常 · HTTP 状态码”；
@@ -268,6 +283,9 @@ Content-Type: application/json
 - `GET /api/background-files`：扫描第一层原图、核对缩略图缓存并返回结构化清单；
 - `GET /api/background-preferences`：读取并自愈状态；
 - `PATCH /api/background-preferences`：更新横屏或竖屏槽位；
+- `GET /api/cards`：读取卡片初始化状态、两个频道的数据和独立修订号；
+- `POST /api/cards/initialize`：只在状态文件缺失时一次性原子导入静态 Services 与 Quick Links；
+- `PATCH /api/cards`：携带预期修订号整批替换一个频道，冲突时拒绝静默覆盖；
 - `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
 - `POST /api/background-files/remove`：将图片移入回收站，必要时处理带短时令牌的永久删除；
 - `GET /api/bestdori/characters`：读取固定角色 ID 1–40 的显示名称；
@@ -284,6 +302,8 @@ Content-Type: application/json
 - HTTP/1.1 请求在路由前拒绝任何 `Transfer-Encoding`、重复/歧义 `Content-Length` 和不应携带的正文；正文必须按唯一长度完整读取后才允许复用连接；
 - 每条连接读取空闲时间最多 30 秒，请求行、请求头和正文的总读取时间最多 300 秒；最多同时处理 16 条持久连接，满载时返回 503；
 - 所有写入 API 校验精确 Origin 和请求标记；JSON 与上传接口分别校验 Content-Type、Content-Length 和正文上限；
+- 卡片每频道最多 32 张，只接受 HTTPS 跳转；Services 的有效探测 URL 继续服从现有回环探测目标限制；
+- 导入 SVG 在前后端分别执行标签、属性、命名空间、本地引用、元素数、深度和大小白名单校验；兼容输入中的简单根级 `<title>` 与行内 `style` 属性会被验证后丢弃，不信任浏览器缓存或客户端预检；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
 - 缩略图执行 EXIF 方向修正、居中裁切和 WebP 编码，经同目录临时文件、磁盘刷新和原子替换写入；缓存目录必须是真实目录而非符号链接；
 - Bestdori 目录和图片下载只访问代码中固定的 HTTPS API 与资源地址，不接受客户端提供远程 URL；下载图片沿用上传的大小、像素、格式和原子发布约束；
@@ -293,7 +313,7 @@ Content-Type: application/json
 - 探测只接受配置域后缀的单层 HTTPS 子域，禁止凭据、fragment、非 443 端口、IP、外部域和多层子域；
 - TCP 强制连接回环 Zoraxy，但 HTTP Host、TLS SNI 和证书 hostname 校验继续使用目标域名；不使用系统 DNS、代理或跳过 TLS 校验；
 - 最多 8 个全局并发、32 个目标和 5 次重定向；同一批次共享超时截止时间，每一跳重新执行目标校验；
-- 状态更新使用进程内互斥、`fsync` 和同目录 `os.replace`；
+- 状态更新使用进程内互斥、`fsync` 和同目录 `os.replace`；卡片初始化、按频道修订号比较和写入处于同一临界区；
 - EXE、配置和数据目录必须位于公开 Web 根之外；
 - Zoraxy 继续负责 HTTPS 和首页 Basic Auth。
 
@@ -410,26 +430,26 @@ py_compile
 -> dist/HomeLabWallpaperState.exe
 ```
 
-构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。上传和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理，不会请求 Bestdori 公网，也不会向系统回收站写入测试文件。
+构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。卡片初始化/修订冲突、上传和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理，不会请求 Bestdori 公网，也不会向系统回收站写入测试文件。
 
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
 ```powershell
-.\scripts\package-release.ps1 -Version V2.9.3
+.\scripts\package-release.ps1 -Version V3.0.0
 ```
 
-脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V2.9.3-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、完整的稳定路径 `assets/`、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
+脚本读取 `dist/HomeLabWallpaperState.exe`，输出 `dist/release/zoraxy-homelab-dashboard-V3.0.0-windows-x64.zip` 和压缩包自身的 `.sha256` 文件。压缩包包含 `index.html`、完整的 12 个前端运行资源、占位背景、项目许可证、资产边界、第三方声明、完整依赖许可证和包内文件的 `SHA256SUMS.txt`。
 
 ## 部署和迁移
 
-1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置。
+1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置；已经存在时单独备份 `HomeLabWallpaperState-data/DashboardCards.json`。
 2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，会自动回退旧目录列表并显示原图加载降级提示，不会获得新的资源边界。
-5. 首次打开背景选择器时等待已有原图生成缩略图，确认后续打开复用缓存；再检查每次刷新只发送一次同源批量状态请求，以及全部卡片、壁纸同步、上传、回收站删除和两种抽卡模式。
+4. 先验证卡片未初始化 GET、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，卡片与壁纸功能会各自进入静态或缓存降级，不会向旧后端写入初始化状态。
+5. 新部署第一次打开首页时，确认现有 11+5 张卡片一次性导入、`DashboardCards.json` 位于非公开状态目录，随后刷新不重复初始化；再打开背景选择器等待已有原图生成缩略图，并检查批量状态请求、卡片编辑、壁纸同步、上传、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层的原图和 `HomeLabWallpaperState-data/BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。回滚版本即使不读取去重记录，也不应因此删除它。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
+若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层原图、`HomeLabWallpaperState-data/DashboardCards.json` 和 `BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版本即使不读取卡片或去重记录，也不得删除它们。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -465,7 +485,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、至少一张服务卡片、动态数量与动画序号、五张 Quick Links 的顺序/URL/内联 SVG/安全属性、双向频道状态与动效锁、非活动面隔离、焦点保持、宽窄屏布局、减少动态效果降级、壁纸多选属性、单文件预检、严格串行上传、单项失败继续和全局错误停止、上传请求与进度契约、单次批量状态请求及其仅服务卡片目标、状态分类与故障降级、Python 探测和 API 测试、Git 忽略规则、强制跟踪私有/生成文件回归、暂存与未暂存空白差异以及维护契约。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 冒烟测试，控制台冒烟进程有 30 秒硬超时并会在超时后终止完整进程树。
+验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、现有 11+5 张静态卡片的稳定 ID/顺序/字段/SVG、一次性原子导入、服务器/缓存/静态三级来源、编辑草稿与必填阻塞、删除/保存确认、空频道、鼠标排序、动态频道重绑、陈旧状态探测隔离、SVG 白名单、双向频道状态与动效锁、宽窄屏与减少动态效果、壁纸批量上传、Python 卡片/探测/API 测试、Git 运行态文件排除以及暂存/未暂存空白差异。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 的卡片初始化、重启读取、PATCH/409 冲突及既有 API 冒烟测试。
 
 人工部署后还应检查：
 
@@ -475,6 +495,10 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - `shell:startup` 登录后显示监视器；
 - 网页可以读取和更新横竖屏背景；
 - Services / Quick Links 在桌面、平板和手机尺寸下均可双向切换；Quick Links 不触发额外状态请求，键盘焦点不会进入非活动面；
+- 第一次加载新版时现有 11+5 张卡片完整保留且只初始化一次；两台设备同时首次打开不会产生半份配置或互相覆盖；
+- Services 与 Quick Links 可以分别连续新增、修改、删除和保存；桌面鼠标排序可用，手机端隐藏排序但其它编辑可用；
+- 导入合法的单色和彩色 SVG 能正确预览，常见的简单根级 `<title>` 与行内 `style` 包装信息不会误杀且不会保留，脚本、事件、外链、嵌入图片和 `<style>` 样式表会被阻止；
+- 另一设备先保存同频道时当前草稿收到修订冲突并保留，确认重新载入前不会静默丢失或覆盖数据；
 - 系统启用减少动态效果后，频道切换应立即完成且保持可操作；
 - 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
 - Windows、Android 和 iOS 可以一次选择多张真实图片；队列逐张显示进度，非法文件被跳过、单项失败继续、全局错误停止，取消与重试可用，完成后只刷新一次列表且不会自动切换背景，重名时按顺序自动编号；
@@ -490,9 +514,10 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 ## 维护原则
 
 - 修改后先运行统一验证，不要跳过失败项。
-- 新增或删除服务卡片时只需维护卡片 HTML；页面数量文案、动画序号、README 概览和前端验证均不依赖手写数量。
+- 已初始化部署的卡片只通过网页编辑和 `DashboardCards.json` 持久化；静态卡片仅作为新安装首次导入、旧后端和无 JavaScript 降级，版本升级不得覆盖用户状态。
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它原图不进入 Git，应独立备份；`backgrounds/thumbnails/` 是可再生缓存，不备份、不手工管理。
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
+- `DashboardCards.json` 位于非公开状态目录并应独立备份；旧版本前端或 EXE 不读取它时也不得删除或覆盖。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
-- `state.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
+- `state.json`、`DashboardCards.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、稳定路径的前端 `assets/`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。

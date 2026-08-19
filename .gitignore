@@ -14,6 +14,10 @@ HomeLabWallpaperState-data/
 state.json
 state.json.bak
 state.json.corrupt-*
+DashboardCards.json
+DashboardCards.json.bak
+DashboardCards.json.corrupt-*
 service.log
 service.log.*
 .state-*.tmp
+.DashboardCards.json.*.tmp

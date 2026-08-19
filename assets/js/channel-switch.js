@@ -1,7 +1,7 @@
 // Services and Quick Links channel switching and transition handling.
 export function initializeChannelSwitch() {
-            const cards = Array.from(document.querySelectorAll('.service-card'));
-            const quickLinks = Array.from(document.querySelectorAll('.quick-link-card'));
+            let cards = Array.from(document.querySelectorAll('.service-card'));
+            let quickLinks = Array.from(document.querySelectorAll('.quick-link-card'));
             const serviceCountLabel = document.getElementById('service-count-label');
             const refreshButton = document.getElementById('refresh-status');
             const lastChecked = document.getElementById('last-checked');
@@ -86,25 +86,31 @@ export function initializeChannelSwitch() {
             let channelMobilePanelExitTimer = null;
             let channelMobilePanelSwapTimer = null;
             let channelMobileCompleteTimer = null;
+            let controllerReady = false;
 
             function syncQuickLinkDimensions() {
                 const firstServiceCard = cards[0];
-                if (!firstServiceCard || !serviceGrid || !quickLinksGrid || !channelPanelStage) return;
+                if (!serviceGrid || !quickLinksGrid || !channelPanelStage) return;
+                quickLinksGrid.style.removeProperty('--quick-card-width');
+                quickLinksGrid.style.removeProperty('--quick-links-width');
+                channelPanelStage.style.removeProperty('--services-panel-height');
                 const servicesWereHidden = servicesPanel.hidden;
                 servicesPanel.hidden = false;
                 try {
-                    const cardWidth = firstServiceCard.getBoundingClientRect().width;
                     const serviceGridHeight = serviceGrid.getBoundingClientRect().height;
+                    if (Number.isFinite(serviceGridHeight) && serviceGridHeight > 0) {
+                        channelPanelStage.style.setProperty('--services-panel-height', `${serviceGridHeight}px`);
+                    }
+                    if (!firstServiceCard || quickLinks.length === 0) return;
+                    const cardWidth = firstServiceCard.getBoundingClientRect().width;
                     const computedStyle = window.getComputedStyle(serviceGrid);
                     const columnGap = Number.parseFloat(computedStyle.columnGap);
                     if (!Number.isFinite(cardWidth) || cardWidth <= 0
-                        || !Number.isFinite(serviceGridHeight) || serviceGridHeight <= 0
                         || !Number.isFinite(columnGap) || columnGap < 0) return;
                     const quickLinkColumns = Math.min(5, quickLinks.length);
                     const quickLinksWidth = cardWidth * quickLinkColumns + columnGap * Math.max(0, quickLinkColumns - 1);
                     quickLinksGrid.style.setProperty('--quick-card-width', `${cardWidth}px`);
                     quickLinksGrid.style.setProperty('--quick-links-width', `${quickLinksWidth}px`);
-                    channelPanelStage.style.setProperty('--services-panel-height', `${serviceGridHeight}px`);
                 } finally {
                     servicesPanel.hidden = servicesWereHidden;
                 }
@@ -131,13 +137,24 @@ export function initializeChannelSwitch() {
             function syncChannelPanelHeight() {
                 if (!channelMotionEnabled()) return;
                 const servicesWereHidden = servicesPanel.hidden;
+                const quickLinksWereHidden = quickLinksPanel.hidden;
                 servicesPanel.hidden = false;
+                quickLinksPanel.hidden = false;
                 try {
                     const servicesHeight = serviceGrid.getBoundingClientRect().height;
-                    if (!Number.isFinite(servicesHeight) || servicesHeight <= 0) return;
-                    channelPanelStage.style.setProperty('--channel-panel-height', `${servicesHeight}px`);
+                    const quickLinksHeight = quickLinksGrid.getBoundingClientRect().height;
+                    const panelHeight = Math.max(
+                        Number.isFinite(servicesHeight) ? servicesHeight : 0,
+                        Number.isFinite(quickLinksHeight) ? quickLinksHeight : 0
+                    );
+                    if (panelHeight <= 0) {
+                        channelPanelStage.style.removeProperty('--channel-panel-height');
+                        return;
+                    }
+                    channelPanelStage.style.setProperty('--channel-panel-height', `${panelHeight}px`);
                 } finally {
                     servicesPanel.hidden = servicesWereHidden;
+                    quickLinksPanel.hidden = quickLinksWereHidden;
                 }
             }
 
@@ -615,8 +632,8 @@ export function initializeChannelSwitch() {
                     dashboardFooterBrand,
                     lastChecked
                 ];
-                if (requiredElements.some((element) => !element) || quickLinks.length !== 5) {
-                    throw new Error('双频道静态结构不完整');
+                if (requiredElements.some((element) => !element)) {
+                    throw new Error('双频道页面结构不完整');
                 }
                 cards.forEach((card, index) => {
                     card.style.setProperty('--channel-card-index', String(index));
@@ -663,10 +680,34 @@ export function initializeChannelSwitch() {
                 }
             }
 
+            function resyncCards() {
+                cards = Array.from(document.querySelectorAll('#service-grid .service-card'));
+                quickLinks = Array.from(document.querySelectorAll('#quick-links-grid .quick-link-card'));
+                cards.forEach((card, index) => {
+                    card.style.setProperty('--channel-card-index', String(index));
+                });
+                quickLinks.forEach((card, index) => {
+                    card.style.setProperty('--channel-card-index', String(index));
+                });
+                if (!controllerReady) return;
+                if (channelSwitchLocked) finishChannelSwitch();
+                serviceCountLabel.textContent = channelCountText(activeChannel);
+                window.requestAnimationFrame(() => {
+                    configureChannelMotion();
+                });
+            }
+
     try {
         initializeChannelSwitchController();
+        controllerReady = true;
     } catch (error) {
         console.warn('双频道预览初始化失败，已保留 Services 默认面。', error);
         restoreStaticServicesChannel();
     }
+    return {
+        resync: resyncCards,
+        getActiveChannel() {
+            return activeChannel;
+        }
+    };
 }
