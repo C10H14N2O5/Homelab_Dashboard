@@ -576,7 +576,7 @@ const requiredMarkers = [
     'fetchWithTimeout',
     'classifyServiceStatus',
     'data-state="warning"',
-    'data-probe-url="https://cliproxy.home.c10h14n2o5.com/management.html/"',
+    'data-probe-url="https://cliproxy.home.example.com/management.html/"',
     "credentials: 'same-origin'",
     "'Content-Type': 'application/json'",
     'data-state="unknown"',

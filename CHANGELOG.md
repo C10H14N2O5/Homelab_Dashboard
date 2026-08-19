@@ -259,7 +259,7 @@
 - 构建流程增加非缓存测试、`go vet`、Windows amd64 v1 最低 CPU 基线、临时产物大小及 SHA-256 验证，成功后才晋级最终 EXE。
 - Zoraxy 部署说明改用官方 Virtual Directory 字段，并补充任务 XML、状态和 EXE 哈希的升级回滚步骤。
 - 入口探测改为可读取最终 HTTP 状态的 CORS GET：2xx/3xx 显示绿色，4xx 显示黄色并保留状态码，5xx及请求失败显示红色；汇总同步统计三类结果。
-- 11 个服务 Host Rule 需要通过 `Client << Zoraxy` 精确添加 `Access-Control-Allow-Origin: https://home.c10h14n2o5.com`，并先于新版 `index.html` 配置。
+- 11 个服务 Host Rule 需要通过 `Client << Zoraxy` 精确添加 `Access-Control-Allow-Origin: https://home.example.com`，并先于新版 `index.html` 配置。
 
 ### Fixed
 

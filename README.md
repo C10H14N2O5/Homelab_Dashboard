@@ -3,7 +3,7 @@
 这是一个由 Zoraxy 静态网页服务器托管的 HomeLab 服务导航页。前端是无外部依赖的单页；仅监听回环地址的 Python Dashboard 状态服务负责跨设备同步和管理壁纸，并经本机 Zoraxy 批量检测服务入口。开发时直接运行 Python，生产环境通过 PyInstaller 分发单文件 `HomeLabWallpaperState.exe`，不需要安装 Python 或虚拟环境。
 
 > [!IMPORTANT]
-> 本仓库是维护者基于真实 Zoraxy + Windows HomeLab 环境开发的参考实现，不是面向任意环境的一键安装产品。仓库保留的 `*.home.c10h14n2o5.com`、`D:\Zoraxy\...` 和服务卡片地址均为维护者部署示例；使用前必须按“公开仓库定制清单”替换为自己的域名、路径、入口和认证策略。
+> 本仓库是维护者基于真实 Zoraxy + Windows HomeLab 环境开发的参考实现，不是面向任意环境的一键安装产品。公开版使用保留示例域名 `*.home.example.com`，`D:\Zoraxy\...` 和服务卡片地址均为部署示例；使用前必须按“公开仓库定制清单”替换为自己的域名、路径、入口和认证策略。
 
 ## 项目概览
 
@@ -163,7 +163,7 @@ CLIProxy 点击根地址，但使用 `data-probe-url` 指向 `/management.html/`
 
 ```http
 PATCH /api/background-preferences
-Origin: https://home.c10h14n2o5.com
+Origin: https://home.example.com
 X-Requested-With: homelab-dashboard
 Content-Type: application/json
 
@@ -187,7 +187,7 @@ Content-Type: application/json
 
 ```http
 POST /api/background-files/upload?name=wallpaper.png
-Origin: https://home.c10h14n2o5.com
+Origin: https://home.example.com
 X-Requested-With: homelab-dashboard
 Content-Type: application/octet-stream
 
@@ -198,7 +198,7 @@ Content-Type: application/octet-stream
 
 ```http
 POST /api/background-files/remove
-Origin: https://home.c10h14n2o5.com
+Origin: https://home.example.com
 X-Requested-With: homelab-dashboard
 Content-Type: application/json
 
@@ -220,7 +220,7 @@ Content-Type: application/json
 
 ```http
 POST /api/background-files/draw
-Origin: https://home.c10h14n2o5.com
+Origin: https://home.example.com
 X-Requested-With: homelab-dashboard
 Content-Type: application/json
 
@@ -292,12 +292,12 @@ Bestdori 是独立第三方服务，本项目与 Bestdori、Bushiroad 或 BanG D
 {
   "version": 2,
   "backgroundDir": "D:\\Zoraxy\\www\\html\\backgrounds",
-  "allowedOrigins": ["https://home.c10h14n2o5.com"],
+  "allowedOrigins": ["https://home.example.com"],
   "listen": "127.0.0.1:8787",
   "stateDir": "HomeLabWallpaperState-data",
   "controlToken": "由首次引导生成的随机令牌",
   "probeConnectAddress": "127.0.0.1:443",
-  "probeDomainSuffix": "home.c10h14n2o5.com",
+  "probeDomainSuffix": "home.example.com",
   "probeTimeoutSeconds": 5
 }
 ```
@@ -306,15 +306,15 @@ Bestdori 是独立第三方服务，本项目与 Bestdori、Bushiroad 或 BanG D
 
 ```http
 POST /api/service-status
-Origin: https://home.c10h14n2o5.com
+Origin: https://home.example.com
 X-Requested-With: homelab-dashboard
 Content-Type: application/json
 
-{"targets":["https://anon.home.c10h14n2o5.com/"]}
+{"targets":["https://anon.home.example.com/"]}
 ```
 
 ```json
-{"results":[{"target":"https://anon.home.c10h14n2o5.com/","status":200,"latencyMs":38,"error":null}]}
+{"results":[{"target":"https://anon.home.example.com/","status":200,"latencyMs":38,"error":null}]}
 ```
 
 稳定错误码为 `invalid_target`、`timeout`、`tls_error`、`redirect_rejected`、`connection_error` 和 `request_error`。重定向被拒绝时保留最后收到的真实 3xx，但前端显示红色失败状态。
@@ -421,7 +421,7 @@ Domain：       127.0.0.1:8787/api/
 服务端探测不依赖本机 DNS，可在部署机上用等价命令诊断 Zoraxy 回环链路：
 
 ```powershell
-curl.exe -sS -L --resolve "anon.home.c10h14n2o5.com:443:127.0.0.1" --connect-timeout 5 --max-time 10 -o NUL "https://anon.home.c10h14n2o5.com/"
+curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeout 5 --max-time 10 -o NUL "https://anon.home.example.com/"
 ```
 
 ### 卸载
