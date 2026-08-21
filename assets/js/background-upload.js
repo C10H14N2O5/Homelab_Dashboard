@@ -1,11 +1,12 @@
 // Batch wallpaper upload controller. Its queue state is private to this module.
 export function createBackgroundUploadController(context) {
     const {
-        focusBackgroundOption,
+        clearBackgroundResultPresentation,
         focusWithoutScroll,
         isManagerBusy,
         isManagerOnline,
         normalizeBackgroundName,
+        presentBackgroundResults,
         scanBackgroundDirectory,
         setManagerStatus,
         syncManagerControls,
@@ -23,9 +24,11 @@ export function createBackgroundUploadController(context) {
     const backgroundUploadStop = document.getElementById('background-upload-stop');
     const backgroundUploadRetry = document.getElementById('background-upload-retry');
     const backgroundUploadDone = document.getElementById('background-upload-done');
+    const successfulUploadAutoCloseMs = 1200;
     let backgroundUploadPending = false;
     let backgroundUploadSession = null;
     let backgroundUploadRequest = null;
+    let backgroundUploadAutoCloseTimer = 0;
 
             function formatBackgroundUploadBytes(value) {
                 if (!Number.isFinite(value) || value < 0) return '未知大小';
@@ -195,8 +198,16 @@ export function createBackgroundUploadController(context) {
                 });
             }
 
+            function clearBackgroundUploadAutoClose() {
+                if (!backgroundUploadAutoCloseTimer) return;
+                window.clearTimeout(backgroundUploadAutoCloseTimer);
+                backgroundUploadAutoCloseTimer = 0;
+            }
+
             function closeBackgroundUploadDialog(returnValue = '') {
                 if (!backgroundUploadDialogIsOpen() || backgroundUploadSession?.running) return false;
+                const uploadedNames = Array.from(backgroundUploadSession?.uploadedNames || []);
+                clearBackgroundUploadAutoClose();
                 backgroundUploadDialog.classList.remove('is-visible');
                 if (typeof backgroundUploadDialog.close === 'function' && backgroundUploadDialog.open) {
                     backgroundUploadDialog.close(returnValue);
@@ -204,7 +215,11 @@ export function createBackgroundUploadController(context) {
                     backgroundUploadDialog.removeAttribute('open');
                 }
                 backgroundUploadSession = null;
-                focusWithoutScroll(backgroundUploadButton);
+                if (uploadedNames.length > 0) {
+                    presentBackgroundResults({ createdNames: uploadedNames });
+                } else {
+                    focusWithoutScroll(backgroundUploadButton);
+                }
                 return true;
             }
 
@@ -370,7 +385,9 @@ export function createBackgroundUploadController(context) {
                             item.message = result.uploadedName === item.name
                                 ? result.uploadedName
                                 : `${item.name} → ${result.uploadedName}`;
-                            session.lastUploadedName = result.uploadedName;
+                            if (!session.uploadedNames.includes(result.uploadedName)) {
+                                session.uploadedNames.push(result.uploadedName);
+                            }
                             } else {
                                 console.warn(`背景图片上传失败：${item.name}`, error);
                                 item.status = error.isCancelled ? 'cancelled' : 'failed';
@@ -418,8 +435,22 @@ export function createBackgroundUploadController(context) {
                         `已上传 ${counts.success || 0} 张，跳过 ${counts.skipped || 0} 张，失败 ${counts.failed || 0} 张，取消 ${counts.cancelled || 0} 张。`,
                         kind
                     );
-                    if (session.lastUploadedName) focusBackgroundOption(session.lastUploadedName);
-                    focusWithoutScroll(backgroundUploadRetry.hidden ? backgroundUploadDone : backgroundUploadRetry);
+                    const allSucceeded = session.items.length > 0
+                        && session.items.every((item) => item.status === 'success');
+                    if (allSucceeded) {
+                        setBackgroundUploadStatus(
+                            `已上传 ${counts.success || 0} 张，全部成功；即将返回背景选择器。`,
+                            'success'
+                        );
+                        focusWithoutScroll(backgroundUploadDone);
+                        clearBackgroundUploadAutoClose();
+                        backgroundUploadAutoCloseTimer = window.setTimeout(() => {
+                            backgroundUploadAutoCloseTimer = 0;
+                            closeBackgroundUploadDialog('success');
+                        }, successfulUploadAutoCloseMs);
+                    } else {
+                        focusWithoutScroll(backgroundUploadRetry.hidden ? backgroundUploadDone : backgroundUploadRetry);
+                    }
                 }
                 return true;
             }
@@ -431,6 +462,9 @@ export function createBackgroundUploadController(context) {
                     return false;
                 }
 
+                clearBackgroundResultPresentation();
+                clearBackgroundUploadAutoClose();
+
                 const items = files.map(createBackgroundUploadItem);
                 backgroundUploadSession = {
                     items,
@@ -439,7 +473,7 @@ export function createBackgroundUploadController(context) {
                     stopRequested: false,
                     stopReason: '',
                     stopRetryable: false,
-                    lastUploadedName: ''
+                    uploadedNames: []
                 };
                 renderBackgroundUploadItems(items);
                 setBackgroundUploadStatus('正在准备上传队列…');
@@ -512,6 +546,7 @@ export function createBackgroundUploadController(context) {
                 }
             });
             backgroundUploadDialog.addEventListener('close', () => {
+                clearBackgroundUploadAutoClose();
                 backgroundUploadDialog.classList.remove('is-visible');
             });
 

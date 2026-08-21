@@ -41,6 +41,8 @@ export function initializeBackgroundManager() {
             };
             const backgroundSectionTransitionFallbackMs = 400;
             const backgroundSectionTransitionCleanups = new Map();
+            const highlightedBackgroundNames = new Set();
+            let backgroundPresentationToken = 0;
             const orientationQuery = window.matchMedia('(orientation: portrait)');
             const backgroundLayer = document.querySelector('.background-layer');
             const backgroundPickerButton = document.getElementById('background-picker-button');
@@ -491,10 +493,15 @@ export function initializeBackgroundManager() {
                 const selectedUrl = backgroundUrlForMode(editingBackgroundMode);
                 backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
                     const isSelected = option.dataset.url === selectedUrl.href;
+                    const fileName = backgroundFileName(new URL(option.dataset.url));
+                    const isNewlyAdded = highlightedBackgroundNames.has(fileName);
                     option.setAttribute('aria-pressed', String(isSelected));
+                    option.classList.toggle('is-newly-added', isNewlyAdded);
+                    const newBadge = option.querySelector('.background-option-new-badge');
+                    if (newBadge) newBadge.hidden = !isNewlyAdded;
                     option.setAttribute(
                         'aria-label',
-                        `将 ${backgroundFileName(new URL(option.dataset.url))} 设置为${backgroundModeLabels[editingBackgroundMode]}背景${isSelected ? '，当前已选' : ''}`
+                        `将 ${fileName} 设置为${backgroundModeLabels[editingBackgroundMode]}背景${isSelected ? '，当前已选' : ''}${isNewlyAdded ? '，本次新增' : ''}`
                     );
                 });
                 syncBackgroundControlsBusy();
@@ -799,12 +806,18 @@ export function initializeBackgroundManager() {
                         label.className = 'background-option-label';
                         label.textContent = backgroundFileName(url);
 
+                        const newBadge = document.createElement('span');
+                        newBadge.className = 'background-option-new-badge';
+                        newBadge.setAttribute('aria-hidden', 'true');
+                        newBadge.hidden = true;
+                        newBadge.textContent = '新增';
+
                         const check = document.createElement('span');
                         check.className = 'background-option-check';
                         check.setAttribute('aria-hidden', 'true');
                         check.textContent = '✓';
 
-                        option.append(thumbnail, label);
+                        option.append(thumbnail, label, newBadge);
                         if (source === 'bestdori') {
                             const sourceBadge = document.createElement('span');
                             sourceBadge.className = 'background-option-source';
@@ -917,22 +930,97 @@ export function initializeBackgroundManager() {
             }
 
             function focusBackgroundOption(fileName) {
-                const candidate = backgroundUrlFromName(fileName);
-                if (!candidate) return false;
-                const option = Array.from(backgroundGrid.querySelectorAll('.background-option'))
-                    .find((item) => item.dataset.url === candidate.href && !item.disabled);
-                if (!option) return false;
+                return presentBackgroundResults({ locateNames: [fileName] });
+            }
 
-                const focusOption = () => {
-                    if (!option.isConnected || option.closest('[inert]')) return;
-                    if (typeof option.scrollIntoView === 'function') {
-                        option.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                    }
-                    focusWithoutScroll(option);
-                };
-                return setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {
-                    afterTransition: focusOption
+            function normalizeBackgroundResultNames(values) {
+                const normalized = [];
+                const seen = new Set();
+                (Array.isArray(values) ? values : []).forEach((value) => {
+                    const fileName = normalizeBackgroundName(value);
+                    if (!fileName || seen.has(fileName)) return;
+                    seen.add(fileName);
+                    normalized.push(fileName);
                 });
+                return normalized;
+            }
+
+            function backgroundOptionForName(fileName) {
+                const candidate = backgroundUrlFromName(fileName);
+                if (!candidate) return null;
+                return Array.from(backgroundGrid.querySelectorAll('.background-option'))
+                    .find((option) => option.dataset.url === candidate.href) || null;
+            }
+
+            function clearBackgroundResultPresentation() {
+                backgroundPresentationToken += 1;
+                highlightedBackgroundNames.clear();
+                backgroundGrid.querySelectorAll('.background-option').forEach((option) => {
+                    option.classList.remove('is-newly-added', 'is-newly-added-entering');
+                    const newBadge = option.querySelector('.background-option-new-badge');
+                    if (newBadge) newBadge.hidden = true;
+                });
+                updateBackgroundSelection();
+            }
+
+            function presentBackgroundResults({ createdNames = [], locateNames = [] } = {}) {
+                const presentationToken = ++backgroundPresentationToken;
+                const created = normalizeBackgroundResultNames(createdNames);
+                const createdSet = new Set(created);
+                const locate = normalizeBackgroundResultNames(locateNames)
+                    .filter((fileName) => !createdSet.has(fileName));
+
+                highlightedBackgroundNames.clear();
+                created.forEach((fileName) => highlightedBackgroundNames.add(fileName));
+                updateBackgroundSelection();
+
+                const targets = [...created, ...locate]
+                    .map((fileName) => ({ fileName, option: backgroundOptionForName(fileName) }))
+                    .filter(({ option }) => option && !option.disabled);
+                if (targets.length === 0) return false;
+
+                const createdOptions = targets
+                    .filter(({ fileName }) => createdSet.has(fileName))
+                    .map(({ option }) => option);
+                const focusTarget = targets[0].option;
+                const sources = Array.from(new Set(targets.map(({ option }) => option.dataset.backgroundSource)))
+                    .filter((source) => backgroundLibrarySources.includes(source));
+                if (sources.length === 0) return false;
+
+                const reveal = () => {
+                    if (
+                        presentationToken !== backgroundPresentationToken
+                        || !backgroundDialogIsOpen()
+                        || !focusTarget.isConnected
+                        || focusTarget.closest('[inert]')
+                    ) return;
+                    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                        createdOptions.forEach((option) => {
+                            option.classList.remove('is-newly-added-entering');
+                            void option.offsetWidth;
+                            option.classList.add('is-newly-added-entering');
+                            option.addEventListener('animationend', () => {
+                                option.classList.remove('is-newly-added-entering');
+                            }, { once: true });
+                        });
+                    }
+                    if (typeof focusTarget.scrollIntoView === 'function') {
+                        focusTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                    }
+                    focusWithoutScroll(focusTarget);
+                };
+
+                let remaining = sources.length;
+                const sectionReady = () => {
+                    remaining -= 1;
+                    if (remaining === 0) reveal();
+                };
+                sources.forEach((source) => {
+                    if (!setBackgroundSectionExpanded(source, true, { afterTransition: sectionReady })) {
+                        sectionReady();
+                    }
+                });
+                return true;
             }
 
             function backgroundDeleteDialogIsOpen() {
@@ -1381,6 +1469,7 @@ export function initializeBackgroundManager() {
                 window.clearTimeout(backgroundDialogCloseTimer);
                 backgroundDialogCloseTimer = 0;
                 backgroundDialog.classList.remove('is-visible', 'is-closing');
+                clearBackgroundResultPresentation();
 
                 if (typeof backgroundDialog.close === 'function' && backgroundDialog.open) {
                     backgroundDialog.close(returnValue);
@@ -1464,6 +1553,7 @@ export function initializeBackgroundManager() {
                 window.clearTimeout(backgroundDialogCloseTimer);
                 backgroundDialogCloseTimer = 0;
                 backgroundDialog.classList.remove('is-visible', 'is-closing');
+                clearBackgroundResultPresentation();
             });
 
             function handleOrientationChange() {
@@ -1488,11 +1578,13 @@ export function initializeBackgroundManager() {
 
 
     const featureContext = {
+        clearBackgroundResultPresentation,
         focusBackgroundOption,
         focusWithoutScroll,
         isManagerBusy: backgroundManagerIsBusy,
         isManagerOnline: () => backgroundPreferencesConnection === 'online',
         normalizeBackgroundName,
+        presentBackgroundResults,
         scanBackgroundDirectory,
         setManagerStatus: setBackgroundStatus,
         syncManagerControls: syncBackgroundControlsBusy,

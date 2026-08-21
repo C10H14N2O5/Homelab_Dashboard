@@ -3,11 +3,12 @@ import { fetchWithTimeout } from './core-http.js';
 // Bestdori card draw and draw-history maintenance controller.
 export function createBestdoriController(context) {
     const {
-        focusBackgroundOption,
+        clearBackgroundResultPresentation,
         focusWithoutScroll,
         isManagerBusy,
         isManagerOnline,
         normalizeBackgroundName,
+        presentBackgroundResults,
         scanBackgroundDirectory,
         setManagerStatus,
         syncManagerControls
@@ -296,6 +297,7 @@ export function createBestdoriController(context) {
                 let drawnName = '';
                 let succeeded = false;
                 backgroundDrawPending = true;
+                clearBackgroundResultPresentation();
                 syncManagerControls();
                 syncCardDrawControls();
                 setCardDrawStatus('正在从 Bestdori 抽取并下载卡面，请稍候…');
@@ -327,7 +329,7 @@ export function createBestdoriController(context) {
                     syncCardDrawControls();
                     if (succeeded) {
                         closeCardDrawDialog('drawn', false);
-                        focusBackgroundOption(drawnName);
+                        presentBackgroundResults({ createdNames: [drawnName] });
                     }
                 }
             }

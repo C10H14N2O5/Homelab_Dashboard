@@ -3,10 +3,11 @@ import { fetchWithTimeout } from './core-http.js';
 // One-click Bing China + international daily-image download controller.
 export function createBingDailyController(context) {
     const {
-        focusBackgroundOption,
+        clearBackgroundResultPresentation,
         isManagerBusy,
         isManagerOnline,
         normalizeBackgroundName,
+        presentBackgroundResults,
         scanBackgroundDirectory,
         setManagerStatus,
         syncManagerControls
@@ -116,10 +117,12 @@ export function createBingDailyController(context) {
         }
 
         bingDailyPending = true;
+        clearBackgroundResultPresentation();
         syncManagerControls();
         syncAvailability(true, true);
         setManagerStatus('正在获取 Bing 中国版与国际版每日一图，请稍候…');
-        let focusName = '';
+        let createdNames = [];
+        let existingNames = [];
         try {
             const results = await requestBingDaily();
             const fulfilled = results.filter((result) => result.status === 'created' || result.status === 'existing');
@@ -128,7 +131,12 @@ export function createBingDailyController(context) {
                 setManagerStatus(`每日一图获取失败：${messages.join('；')}。`, 'error');
                 return false;
             }
-            focusName = (fulfilled.find((result) => result.status === 'created') || fulfilled[0]).background;
+            createdNames = fulfilled
+                .filter((result) => result.status === 'created')
+                .map((result) => result.background);
+            existingNames = fulfilled
+                .filter((result) => result.status === 'existing')
+                .map((result) => result.background);
             const prefix = fulfilled.length === results.length ? '每日一图处理完成' : '每日一图部分完成';
             await scanBackgroundDirectory({
                 successMessage: `${prefix}：${messages.join('；')}；当前背景未更改。`
@@ -142,7 +150,12 @@ export function createBingDailyController(context) {
             bingDailyPending = false;
             syncManagerControls();
             syncAvailability(false, isManagerOnline());
-            if (focusName) focusBackgroundOption(focusName);
+            if (createdNames.length > 0 || existingNames.length > 0) {
+                presentBackgroundResults({
+                    createdNames,
+                    locateNames: existingNames
+                });
+            }
         }
     }
 

@@ -1778,9 +1778,13 @@ const requiredMarkers = [
     "sectionContent.toggleAttribute('inert'",
     'runAfterBackgroundSectionTransition',
     'window.setTimeout(finish, backgroundSectionTransitionFallbackMs)',
-    'afterTransition: focusOption',
+    "newBadge.className = 'background-option-new-badge'",
+    "presentBackgroundResults({ locateNames: [fileName] })",
+    "option.classList.add('is-newly-added-entering')",
+    'background-newly-added-wiggle 600ms',
+    '.background-option-new-badge[hidden]',
     "className = 'background-section-empty'",
-    'setBackgroundSectionExpanded(backgroundSourceForName(fileName), true, {',
+    'setBackgroundSectionExpanded(source, true, { afterTransition: sectionReady })',
     'const inventorySummary =',
     "request.setRequestHeader('Content-Type', 'application/octet-stream')",
     "errorCode === 'trash_unavailable'",
@@ -2428,6 +2432,150 @@ if (completedBackgroundFocus !== 2
     throw new Error('Reduced-motion background expansion did not complete immediately.');
 }
 
+const presentationHelperStart = backgroundManagerScript.indexOf('function focusBackgroundOption(');
+const presentationHelperEnd = backgroundManagerScript.indexOf('function backgroundDeleteDialogIsOpen(', presentationHelperStart);
+if (presentationHelperStart < 0 || presentationHelperEnd < 0) {
+    throw new Error('Unable to extract the batch background result presenter.');
+}
+function makePresentationOption(fileName, source) {
+    const classes = new Set();
+    const badge = { hidden: true };
+    return {
+        fileName,
+        dataset: {
+            url: new URL(encodeURIComponent(fileName), 'https://home.example.test/backgrounds/').href,
+            backgroundSource: source
+        },
+        disabled: false,
+        isConnected: true,
+        offsetWidth: 160,
+        scrollCalls: 0,
+        classList: {
+            add: (...names) => names.forEach((name) => classes.add(name)),
+            remove: (...names) => names.forEach((name) => classes.delete(name)),
+            toggle(name, force) {
+                if (force) classes.add(name);
+                else classes.delete(name);
+            },
+            contains: (name) => classes.has(name)
+        },
+        querySelector(selector) {
+            return selector === '.background-option-new-badge' ? badge : null;
+        },
+        closest() { return null; },
+        scrollIntoView() { this.scrollCalls += 1; },
+        addEventListener(type, callback) {
+            if (type === 'animationend') this.animationEnd = callback;
+        },
+        badge
+    };
+}
+const presentationOptions = [
+    makePresentationOption('bing_cn_20260821_OHR.Test_ZH-CN100.jpg', 'bing'),
+    makePresentationOption('holiday.png', 'ordinary'),
+    makePresentationOption('existing-bestdori.png', 'bestdori')
+];
+const presentationHighlights = new Set();
+const normalizePresentationName = (value) => (
+    typeof value === 'string' && /^[^/\\]+\.(?:jpe?g|png|webp|avif)$/i.test(value) ? value : null
+);
+const expandedPresentationSources = [];
+let focusedPresentationOption = null;
+let reducePresentationMotion = false;
+let deferPresentationReveal = false;
+let deferredPresentationReveal = null;
+const presentationContext = vm.createContext({
+    URL,
+    Set,
+    Array,
+    highlightedBackgroundNames: presentationHighlights,
+    backgroundPresentationToken: 0,
+    backgroundLibrarySources: ['ordinary', 'bing', 'bestdori'],
+    backgroundGrid: {
+        querySelectorAll(selector) {
+            return selector === '.background-option' ? presentationOptions : [];
+        }
+    },
+    normalizeBackgroundName: normalizePresentationName,
+    backgroundUrlFromName(value) {
+        const fileName = normalizePresentationName(value);
+        return fileName ? new URL(encodeURIComponent(fileName), 'https://home.example.test/backgrounds/') : null;
+    },
+    updateBackgroundSelection() {
+        presentationOptions.forEach((option) => {
+            const isNew = presentationHighlights.has(option.fileName);
+            option.classList.toggle('is-newly-added', isNew);
+            option.badge.hidden = !isNew;
+        });
+    },
+    backgroundDialogIsOpen: () => true,
+    focusWithoutScroll(option) {
+        focusedPresentationOption = option;
+    },
+    setBackgroundSectionExpanded(source, expanded, options) {
+        expandedPresentationSources.push(source);
+        if (deferPresentationReveal) deferredPresentationReveal = options.afterTransition;
+        else options.afterTransition();
+        return true;
+    },
+    window: {
+        matchMedia() {
+            return { matches: reducePresentationMotion };
+        }
+    }
+});
+vm.runInContext(
+    backgroundManagerScript.slice(presentationHelperStart, presentationHelperEnd)
+        + '\nglobalThis.__backgroundPresentation = { focusBackgroundOption, clearBackgroundResultPresentation, presentBackgroundResults };',
+    presentationContext
+);
+if (!presentationContext.__backgroundPresentation.presentBackgroundResults({
+    createdNames: [
+        'bing_cn_20260821_OHR.Test_ZH-CN100.jpg',
+        'holiday.png',
+        'bing_cn_20260821_OHR.Test_ZH-CN100.jpg',
+        '../unsafe.png'
+    ],
+    locateNames: ['existing-bestdori.png']
+})
+    || JSON.stringify(expandedPresentationSources) !== JSON.stringify(['bing', 'ordinary', 'bestdori'])
+    || focusedPresentationOption !== presentationOptions[0]
+    || presentationOptions[0].scrollCalls !== 1
+    || !presentationOptions[0].classList.contains('is-newly-added')
+    || !presentationOptions[1].classList.contains('is-newly-added')
+    || presentationOptions[2].classList.contains('is-newly-added')
+    || !presentationOptions[0].classList.contains('is-newly-added-entering')
+    || presentationOptions[0].badge.hidden
+    || presentationOptions[2].badge.hidden === false) {
+    throw new Error('Batch background results did not expand, highlight, animate, scroll, and focus in operation order.');
+}
+presentationContext.__backgroundPresentation.clearBackgroundResultPresentation();
+if (presentationContext.highlightedBackgroundNames.size !== 0
+    || presentationOptions.some((option) => option.classList.contains('is-newly-added') || !option.badge.hidden)) {
+    throw new Error('Closing or replacing a background result batch did not clear its persistent markers.');
+}
+reducePresentationMotion = true;
+expandedPresentationSources.length = 0;
+if (!presentationContext.__backgroundPresentation.presentBackgroundResults({
+    locateNames: ['existing-bestdori.png']
+})
+    || focusedPresentationOption !== presentationOptions[2]
+    || presentationOptions[2].classList.contains('is-newly-added')
+    || presentationOptions[2].classList.contains('is-newly-added-entering')) {
+    throw new Error('Existing-only or reduced-motion background presentation applied an incorrect new-item effect.');
+}
+presentationContext.__backgroundPresentation.clearBackgroundResultPresentation();
+reducePresentationMotion = false;
+deferPresentationReveal = true;
+focusedPresentationOption = null;
+presentationContext.__backgroundPresentation.presentBackgroundResults({ createdNames: ['holiday.png'] });
+presentationContext.__backgroundPresentation.clearBackgroundResultPresentation();
+deferredPresentationReveal();
+if (focusedPresentationOption !== null
+    || presentationOptions[1].classList.contains('is-newly-added-entering')) {
+    throw new Error('A stale background expansion callback restored focus or animation after its batch was cleared.');
+}
+
 const bestdoriHelperStart = bestdoriRequestScript.indexOf('function backgroundManagerIsBusy(');
 const bestdoriHelperEnd = bestdoriRequestScript.length;
 if (bestdoriHelperStart < 0 || bestdoriHelperEnd < 0) {
@@ -2760,9 +2908,13 @@ bingContext.scanBackgroundDirectory = async (options) => {
     bingScanCount += 1;
     bingScanMessage = options.successMessage;
 };
-let focusedBingBackground = '';
-bingContext.focusBackgroundOption = (name) => {
-    focusedBingBackground = name;
+let clearedBingPresentation = 0;
+let presentedBingResults = null;
+bingContext.clearBackgroundResultPresentation = () => {
+    clearedBingPresentation += 1;
+};
+bingContext.presentBackgroundResults = (results) => {
+    presentedBingResults = results;
     return true;
 };
 bingContext.resultMessage = bingContext.__bingHelpers.resultMessage;
@@ -2770,9 +2922,41 @@ if (!await bingContext.__fetchBingDaily()
     || bingScanCount !== 1
     || !bingScanMessage.includes('\u6bcf\u65e5\u4e00\u56fe\u90e8\u5206\u5b8c\u6210')
     || !bingScanMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
-    || focusedBingBackground !== 'bing_cn_20260820_OHR.China_ZH-CN100.jpg'
+    || clearedBingPresentation !== 1
+    || JSON.stringify(presentedBingResults) !== JSON.stringify({
+        createdNames: ['bing_cn_20260820_OHR.China_ZH-CN100.jpg'],
+        locateNames: []
+    })
     || bingContext.bingDailyPending) {
-    throw new Error('Partial Bing daily success did not refresh once, focus the created image, and preserve preferences.');
+    throw new Error('Partial Bing daily success did not refresh once, present all created images, and preserve preferences.');
+}
+bingContext.requestBingDaily = async () => [
+    {
+        slot: 'cn',
+        market: 'zh-CN',
+        fallback: false,
+        status: 'existing',
+        background: 'bing_cn_20260820_OHR.China_ZH-CN100.jpg'
+    },
+    {
+        slot: 'international',
+        market: 'ROW',
+        fallback: false,
+        status: 'existing',
+        background: 'bing_row_20260820_OHR.World_ROW200.jpg'
+    }
+];
+presentedBingResults = null;
+if (!await bingContext.__fetchBingDaily()
+    || clearedBingPresentation !== 2
+    || JSON.stringify(presentedBingResults) !== JSON.stringify({
+        createdNames: [],
+        locateNames: [
+            'bing_cn_20260820_OHR.China_ZH-CN100.jpg',
+            'bing_row_20260820_OHR.World_ROW200.jpg'
+        ]
+    })) {
+    throw new Error('Existing-only Bing daily results were marked as new instead of being located without highlights.');
 }
 
 const bestdoriErrorCases = [
@@ -2877,13 +3061,14 @@ context.scanBackgroundDirectory = async (options) => {
     scanSuccessMessage = options.successMessage;
 };
 let closedAfterDraw = false;
-let focusedAfterDraw = '';
+let presentedAfterDraw = null;
 let patchCallCount = 0;
 context.closeCardDrawDialog = (returnValue, restoreFocus) => {
     closedAfterDraw = returnValue === 'drawn' && restoreFocus === false;
 };
-context.focusBackgroundOption = (name) => {
-    focusedAfterDraw = name;
+context.clearBackgroundResultPresentation = () => {};
+context.presentBackgroundResults = (results) => {
+    presentedAfterDraw = results;
     return true;
 };
 context.requestBackgroundPreferences = async () => {
@@ -2898,9 +3083,11 @@ if (!await context.__drawBestdoriCard()
     || JSON.stringify(observedDrawCall.body) !== JSON.stringify({ mode: 'character', rarities: [3, 5], characterId: 4 })
     || !scanSuccessMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
     || !closedAfterDraw
-    || focusedAfterDraw !== '\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123_after_training.png'
+    || JSON.stringify(presentedAfterDraw) !== JSON.stringify({
+        createdNames: ['\u7c73\u6b47\u5c14_\u4e94\u661f_\u6d4b\u8bd5_123_after_training.png']
+    })
     || patchCallCount !== 0) {
-    throw new Error('Successful Bestdori draw did not refresh/focus without applying the background.');
+    throw new Error('Successful Bestdori draw did not refresh/present the new image without applying the background.');
 }
 
 let drawErrorStatus = '';
@@ -2973,6 +3160,71 @@ context.requestBestdoriJson = async (endpoint, body, timeout) => {
 };
 if (!await context.__resetBestdoriHistory() || resetRequestCount !== 1 || !resetClosed) {
     throw new Error('Confirmed Bestdori history reset did not complete exactly once.');
+}
+
+if (!backgroundUploadScript.includes('const successfulUploadAutoCloseMs = 1200;')
+    || !backgroundUploadScript.includes("session.items.every((item) => item.status === 'success')")
+    || !backgroundUploadScript.includes("closeBackgroundUploadDialog('success')")
+    || !backgroundUploadScript.includes('presentBackgroundResults({ createdNames: uploadedNames })')
+    || !backgroundUploadScript.includes('uploadedNames: []')
+    || !backgroundUploadScript.includes('session.uploadedNames.push(result.uploadedName)')
+    || !backgroundUploadScript.includes('clearBackgroundResultPresentation()')
+    || backgroundUploadScript.includes('lastUploadedName')) {
+    throw new Error('Background upload completion is missing batch presentation, aggregation, or delayed all-success close behavior.');
+}
+
+const uploadCloseStart = backgroundUploadScript.indexOf('function clearBackgroundUploadAutoClose(');
+const uploadCloseEnd = backgroundUploadScript.indexOf('function requestBackgroundUpload(', uploadCloseStart);
+if (uploadCloseStart < 0 || uploadCloseEnd < 0) {
+    throw new Error('Unable to extract the completed upload dialog close workflow.');
+}
+let clearedUploadTimer = 0;
+let closedUploadValue = '';
+let presentedUploadNames = null;
+let uploadFallbackFocus = 0;
+const uploadCloseDialog = {
+    open: true,
+    classList: { remove() {} },
+    close(value) {
+        this.open = false;
+        closedUploadValue = value;
+    },
+    removeAttribute() {}
+};
+const uploadCloseContext = vm.createContext({
+    Array,
+    backgroundUploadAutoCloseTimer: 77,
+    backgroundUploadSession: {
+        running: false,
+        uploadedNames: ['first.png', 'second.png']
+    },
+    backgroundUploadDialog: uploadCloseDialog,
+    backgroundUploadDialogIsOpen: () => uploadCloseDialog.open,
+    backgroundUploadButton: {},
+    focusWithoutScroll() {
+        uploadFallbackFocus += 1;
+    },
+    presentBackgroundResults(results) {
+        presentedUploadNames = results;
+    },
+    window: {
+        clearTimeout(timer) {
+            clearedUploadTimer = timer;
+        }
+    }
+});
+vm.runInContext(
+    backgroundUploadScript.slice(uploadCloseStart, uploadCloseEnd)
+        + '\nglobalThis.__closeCompletedUpload = closeBackgroundUploadDialog;',
+    uploadCloseContext
+);
+if (!uploadCloseContext.__closeCompletedUpload('success')
+    || clearedUploadTimer !== 77
+    || closedUploadValue !== 'success'
+    || JSON.stringify(presentedUploadNames) !== JSON.stringify({ createdNames: ['first.png', 'second.png'] })
+    || uploadFallbackFocus !== 0
+    || uploadCloseContext.backgroundUploadSession !== null) {
+    throw new Error('Closing a completed upload did not reveal the full successful batch exactly once.');
 }
 
 const uploadFunctionStart = backgroundUploadScript.indexOf('function requestBackgroundUpload(');
