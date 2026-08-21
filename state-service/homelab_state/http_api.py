@@ -36,6 +36,7 @@ from homelab_state.bestdori import (
     BestdoriPoolExhausted,
     BestdoriUnavailable,
 )
+from homelab_state.bing import BingDailyBusy, BingDailyManager
 from homelab_state.cards import (
     MAX_CARDS_REQUEST_BODY,
     CardsAlreadyInitialized,
@@ -63,6 +64,7 @@ BESTDORI_CHARACTERS_PATH = "/api/bestdori/characters"
 BESTDORI_DRAW_PATH = "/api/background-files/draw"
 BESTDORI_RECONCILE_PATH = "/api/bestdori/history/reconcile"
 BESTDORI_RESET_PATH = "/api/bestdori/history/reset"
+BING_DAILY_PATH = "/api/background-files/bing-daily"
 CARDS_PATH = "/api/cards"
 CARDS_INITIALIZE_PATH = "/api/cards/initialize"
 HEALTH_PATH = "/healthz"
@@ -71,6 +73,7 @@ MAX_PATCH_BODY = 4 * 1024
 MAX_SERVICE_STATUS_BODY = 16 * 1024
 MAX_BACKGROUND_REMOVE_BODY = 4 * 1024
 MAX_BESTDORI_REQUEST_BODY = 4 * 1024
+MAX_BING_DAILY_REQUEST_BODY = 4 * 1024
 HTTP_IDLE_TIMEOUT_SECONDS = 30.0
 HTTP_REQUEST_READ_DEADLINE_SECONDS = 300.0
 HTTP_ERROR_WRITE_TIMEOUT_SECONDS = 1.0
@@ -98,6 +101,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         probe_client: ProbeClient | None = None,
         bestdori_manager: BestdoriDrawManager | None = None,
         cards_store: CardsStore | None = None,
+        bing_manager: BingDailyManager | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -107,6 +111,7 @@ class StateHTTPServer(ThreadingHTTPServer):
             store,
             config.state_dir / "BestdoriCardDraws.json",
         )
+        self.bing_manager = bing_manager or BingDailyManager(store)
         self.cards_store = cards_store or CardsStore.for_state_directory(
             config.state_dir,
             config.probe_domain_suffix,
@@ -248,6 +253,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             BESTDORI_DRAW_PATH,
             BESTDORI_RECONCILE_PATH,
             BESTDORI_RESET_PATH,
+            BING_DAILY_PATH,
             CARDS_INITIALIZE_PATH,
         }
 
@@ -688,6 +694,39 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         self._write_json(HTTPStatus.OK, result)
 
+    def _handle_bing_daily(self) -> None:
+        request = self._read_dashboard_json(MAX_BING_DAILY_REQUEST_BODY)
+        if request is None:
+            return
+        if not isinstance(request, dict) or request:
+            self._error(HTTPStatus.BAD_REQUEST, "request must be an empty JSON object")
+            return
+        try:
+            result = self.server.bing_manager.fetch_daily()
+        except BingDailyBusy:
+            self._error(HTTPStatus.CONFLICT, "bing_operation_in_progress")
+            return
+        except Exception:
+            self.server.logger.exception("POST %s failed", BING_DAILY_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+
+        results = result.get("results") if isinstance(result, dict) else None
+        if not isinstance(results, list) or len(results) != 2:
+            self.server.logger.error("Bing daily manager returned an invalid result")
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        if any(isinstance(item, dict) and item.get("status") in {"created", "existing"} for item in results):
+            status = HTTPStatus.OK
+        elif any(
+            isinstance(item, dict) and item.get("error") == "background_file_quota_exceeded"
+            for item in results
+        ):
+            status = HTTPStatus.CONFLICT
+        else:
+            status = HTTPStatus.BAD_GATEWAY
+        self._write_json(status, result)
+
     def _handle_cards_initialize(self) -> None:
         request = self._read_dashboard_json(MAX_CARDS_REQUEST_BODY)
         if request is None:
@@ -810,6 +849,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             BESTDORI_DRAW_PATH,
             BESTDORI_RECONCILE_PATH,
             BESTDORI_RESET_PATH,
+            BING_DAILY_PATH,
         }:
             self._allow("POST")
             return
@@ -831,6 +871,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             BESTDORI_DRAW_PATH,
             BESTDORI_RECONCILE_PATH,
             BESTDORI_RESET_PATH,
+            BING_DAILY_PATH,
         }:
             self._allow("POST")
             return
@@ -891,6 +932,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == BESTDORI_RESET_PATH:
             self._handle_bestdori_history("reset")
+            return
+        if self.path == BING_DAILY_PATH:
+            self._handle_bing_daily()
             return
         if self.path == BESTDORI_CHARACTERS_PATH:
             self._allow("GET")
@@ -957,6 +1001,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             BESTDORI_DRAW_PATH,
             BESTDORI_RECONCILE_PATH,
             BESTDORI_RESET_PATH,
+            BING_DAILY_PATH,
         }:
             self._allow("POST")
         else:

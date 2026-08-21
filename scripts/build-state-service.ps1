@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 7
+$expectedServiceVersion = 8
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -414,6 +414,35 @@ try {
             $bestdoriReconcile.removed -lt 0 -or
             $bestdoriReconcile.remaining -lt 0) {
             throw 'Packaged executable failed the offline Bestdori history reconciliation smoke test.'
+        }
+
+        try {
+            $null = Invoke-WebRequest `
+                -UseBasicParsing `
+                -Method Post `
+                -Uri "http://127.0.0.1:$smokePort/api/background-files/bing-daily" `
+                -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+                -ContentType 'application/json' `
+                -Body '{"unexpected":true}' `
+                -TimeoutSec 2
+            throw 'Packaged executable accepted an invalid Bing daily request.'
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response -or [int]$response.StatusCode -ne 400) {
+                throw
+            }
+            $bingErrorPayload = $null
+            if (-not [string]::IsNullOrWhiteSpace($_.ErrorDetails.Message)) {
+                try {
+                    $bingErrorPayload = $_.ErrorDetails.Message | ConvertFrom-Json
+                } catch {
+                    $bingErrorPayload = $null
+                }
+            }
+            if ($null -eq $bingErrorPayload -or
+                $bingErrorPayload.error -ne 'request must be an empty JSON object') {
+                throw 'Packaged executable did not expose the Bing daily API validation route.'
+            }
         }
 
         $serviceStatusBody = @{ targets = @('https://outside.example.test/') } | ConvertTo-Json -Compress

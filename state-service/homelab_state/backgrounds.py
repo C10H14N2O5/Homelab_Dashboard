@@ -431,6 +431,14 @@ class StateStore:
                 "truncated": truncated,
             }
 
+    def background_names(self) -> tuple[str, ...]:
+        """Return a complete, validated first-level background filename snapshot."""
+        with self._lock:
+            backgrounds, _, scan_complete = self._scan_background_directory()
+        if not scan_complete:
+            raise BackgroundQuotaExceeded("background directory scan limit exceeded")
+        return tuple(backgrounds)
+
     def _require_background(self, name: str) -> None:
         validate_background_name(name)
         path = self.background_dir / name

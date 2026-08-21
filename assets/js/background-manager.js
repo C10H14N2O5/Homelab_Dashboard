@@ -1,11 +1,13 @@
 import { fetchWithTimeout } from './core-http.js';
 import { createBackgroundUploadController } from './background-upload.js';
+import { createBingDailyController } from './bing-daily.js';
 import { createBestdoriController } from './bestdori.js';
 
 // Background inventory, preferences, selection, deletion, and shared coordination.
 export function initializeBackgroundManager() {
     const root = document.documentElement;
     let backgroundUploadController = { isBusy: () => false, syncAvailability() {} };
+    let bingDailyController = { isBusy: () => false, syncAvailability() {} };
     let bestdoriController = { isBusy: () => false, syncAvailability() {} };
             const pageBase = new URL('.', document.baseURI);
             const backgroundDirectory = new URL('backgrounds/', pageBase);
@@ -26,13 +28,15 @@ export function initializeBackgroundManager() {
                 landscape: '横屏',
                 portrait: '竖屏'
             };
-            const backgroundLibrarySources = ['ordinary', 'bestdori'];
+            const backgroundLibrarySources = ['ordinary', 'bing', 'bestdori'];
             const backgroundLibraryLabels = {
                 ordinary: '普通壁纸',
+                bing: 'Bing 每日一图',
                 bestdori: 'Bestdori 抽卡'
             };
             const backgroundLibraryExpanded = {
                 ordinary: true,
+                bing: true,
                 bestdori: true
             };
             const backgroundSectionTransitionFallbackMs = 400;
@@ -294,8 +298,18 @@ export function initializeBackgroundManager() {
                 );
             }
 
+            function isBingBackgroundName(value) {
+                const fileName = normalizeBackgroundName(value);
+                if (!fileName) return false;
+                const match = /^bing_(cn|row|us)_\d{8}_OHR\.[A-Za-z0-9][A-Za-z0-9._-]{0,179}_(ZH-CN|ROW|EN-US)\d+(?: \((?:[2-9]|[1-9]\d+)\))?\.jpg$/i.exec(fileName);
+                if (!match) return false;
+                return { cn: 'zh-cn', row: 'row', us: 'en-us' }[match[1].toLowerCase()] === match[2].toLowerCase();
+            }
+
             function backgroundSourceForName(value) {
-                return isBestdoriBackgroundName(value) ? 'bestdori' : 'ordinary';
+                if (isBestdoriBackgroundName(value)) return 'bestdori';
+                if (isBingBackgroundName(value)) return 'bing';
+                return 'ordinary';
             }
 
             function backgroundUrlFromName(value) {
@@ -417,6 +431,7 @@ export function initializeBackgroundManager() {
                     || backgroundWritePending
                     || backgroundUploadController.isBusy()
                     || backgroundDeletePending
+                    || bingDailyController.isBusy()
                     || bestdoriController.isBusy();
             }
 
@@ -455,6 +470,7 @@ export function initializeBackgroundManager() {
                     option.disabled = isBusy;
                 });
                 backgroundUploadController.syncAvailability(isBusy, managerOnline);
+                bingDailyController.syncAvailability(isBusy, managerOnline);
                 bestdoriController.syncAvailability(isBusy, managerOnline);
                 backgroundDeleteButton.disabled = !canDelete;
 
@@ -709,6 +725,7 @@ export function initializeBackgroundManager() {
                 const fragment = document.createDocumentFragment();
                 const groupedBackgrounds = {
                     ordinary: [],
+                    bing: [],
                     bestdori: []
                 };
 
@@ -804,7 +821,9 @@ export function initializeBackgroundManager() {
                         empty.className = 'background-section-empty';
                         empty.textContent = source === 'bestdori'
                             ? '还没有通过 Bestdori 抽取卡面。'
-                            : '还没有普通壁纸。';
+                            : source === 'bing'
+                                ? '还没有获取 Bing 每日一图。'
+                                : '还没有普通壁纸。';
                         sectionGrid.append(empty);
                     }
 
@@ -823,6 +842,7 @@ export function initializeBackgroundManager() {
                 return {
                     total: backgrounds.length,
                     ordinary: groupedBackgrounds.ordinary.length,
+                    bing: groupedBackgrounds.bing.length,
                     bestdori: groupedBackgrounds.bestdori.length
                 };
             }
@@ -1256,7 +1276,7 @@ export function initializeBackgroundManager() {
                             if (scanId !== backgroundScanSequence) return;
                             const backgrounds = mergeAndSortBackgrounds(legacyBackgrounds);
                             const counts = renderBackgroundOptions(backgrounds);
-                            const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
+                            const inventorySummary = `共 ${counts.total} 张：普通壁纸 ${counts.ordinary} 张，Bing 每日一图 ${counts.bing} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
                             const prefix = options.successMessage ? `${options.successMessage} ` : '';
                             setBackgroundStatus(
                                 `${prefix}已进入原图加载降级模式；${inventorySummary}。`,
@@ -1268,7 +1288,7 @@ export function initializeBackgroundManager() {
                             console.warn('原图目录列表降级也失败。', listingError);
                             const counts = renderKnownBackgroundFallback();
                             setBackgroundStatus(
-                                `已进入原图加载降级模式，但无法读取目录列表；仅保留 ${counts.total} 张已知背景（普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张）。请确认 Zoraxy 已开启 directory listing。`,
+                                `已进入原图加载降级模式，但无法读取目录列表；仅保留 ${counts.total} 张已知背景（普通壁纸 ${counts.ordinary} 张，Bing 每日一图 ${counts.bing} 张，Bestdori 抽卡 ${counts.bestdori} 张）。请确认 Zoraxy 已开启 directory listing。`,
                                 'error'
                             );
                             return;
@@ -1285,7 +1305,7 @@ export function initializeBackgroundManager() {
                                 : `显示 ${counts.total}/${inventory.total} 张`
                         )
                         : `共 ${counts.total} 张`;
-                    const inventorySummary = `${inventoryScope}：普通壁纸 ${counts.ordinary} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
+                    const inventorySummary = `${inventoryScope}：普通壁纸 ${counts.ordinary} 张，Bing 每日一图 ${counts.bing} 张，Bestdori 抽卡 ${counts.bestdori} 张`;
                     const originalFallbackCount = backgrounds.filter(
                         (background) => !background.thumbnailUrl
                     ).length;
@@ -1482,6 +1502,11 @@ export function initializeBackgroundManager() {
         backgroundUploadController = createBackgroundUploadController(featureContext);
     } catch (error) {
         console.warn('批量壁纸上传初始化失败，背景选择与删除仍可使用。', error);
+    }
+    try {
+        bingDailyController = createBingDailyController(featureContext);
+    } catch (error) {
+        console.warn('Bing 每日一图初始化失败，普通壁纸管理仍可使用。', error);
     }
     try {
         bestdoriController = createBestdoriController(featureContext);

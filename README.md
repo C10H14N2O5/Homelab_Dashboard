@@ -14,7 +14,7 @@
 | 服务入口 | 首次升级从 `index.html` 原子导入现有卡片，之后可在网页中增删改、排序并跨设备同步 |
 | 快捷入口 | Services / Quick Links 双频道；Quick Links 与 Services 分频道独立保存和版本冲突保护 |
 | 联网搜索 | 纯前端 Bing、Google、DuckDuckGo、百度、哔哩哔哩搜索；默认 Bing，无 JavaScript 时仍可提交 |
-| 状态服务 | Python 服务；提供卡片配置、壁纸偏好、图片管理、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
+| 状态服务 | Python 服务；提供卡片配置、壁纸偏好、图片管理、Bing 每日一图、Bestdori 卡面抽取与批量入口探测，生产为 Windows x64 单文件 EXE |
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
 | 自动启动 | 当前用户 `shell:startup` 快捷方式，登录后显示监视器 |
@@ -33,6 +33,7 @@ zoraxy-homelab-dashboard/
 │       ├── core-http.js        # 共用超时请求
 │       ├── background-manager.js
 │       ├── background-upload.js
+│       ├── bing-daily.js
 │       ├── bestdori.js
 │       ├── search.js
 │       ├── channel-switch.js
@@ -51,6 +52,7 @@ zoraxy-homelab-dashboard/
 │   │   ├── config.py            # 严格 v2 配置模型、解析和路径边界
 │   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
 │   │   ├── cards.py             # 卡片模型、SVG 清洗、原子初始化和修订号存储
+│   │   ├── bing.py              # Bing 固定源客户端、市场回退和每日图保存
 │   │   ├── bestdori.py          # 固定源客户端、抽卡和去重历史
 │   │   ├── probe.py             # 回环固定的 HTTPS 批量入口探测
 │   │   ├── http_api.py          # HTTP 服务、请求安全边界和 API 路由
@@ -99,6 +101,7 @@ GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者
 ├── GET/PATCH /api/background-preferences  -> Zoraxy Virtual Directory
 ├── GET/POST/PATCH /api/cards              -> Python 状态服务原子初始化及按频道保存
 ├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
+│                                               -> Bing 固定 HTTPS 首页图端点
 ├── GET/POST /api/bestdori/...              -> Python 状态服务
 │                                               -> Bestdori 固定 HTTPS API/资源
 └── POST /api/service-status               -> Python 状态服务
@@ -192,9 +195,9 @@ CLIProxy 点击根地址，但使用 `data-probe-url` 指向 `/management.html/`
 
 右键背景卡片时浏览器打开或保存的是 WebP 缩略图；需要原文件时，使用操作栏中的“查看原图”，页面会在新标签页打开当前横屏或竖屏标签已保存的同源原图，再通过浏览器右键保存。该入口不依赖壁纸 API 在线状态，也不会改变当前设置或发送偏好更新请求；如果原图已被外部删除，新标签页会显示静态资源的正常 404。
 
-选择器按“普通壁纸”和“Bestdori 抽卡”分成两个可折叠栏目，两个栏目首次打开都展开，折叠状态只在当前页面会话中保留；状态文案同时显示总数及各栏目数量。
+选择器按“普通壁纸”、“Bing 每日一图”和“Bestdori 抽卡”分成三个可折叠栏目，三个栏目首次打开都展开，折叠状态只在当前页面会话中保留；状态文案同时显示总数及各栏目数量。
 
-分类只发生在浏览器界面中，原图仍平铺保存在 `backgrounds/` 第一层；`thumbnails/` 子目录只承载后端缓存，不参与分类。前端通过抽卡服务生成的稳定文件名结构（角色、三星/四星/五星、标题、数字卡面 ID、`after_training`/`normal`，以及可选的重名序号）识别抽卡壁纸；`bg.jpg` 和其它名称都归入普通壁纸。手动重命名导致文件名不再符合该结构时，图片会显示在普通壁纸栏目。该分类不读取 `BestdoriCardDraws.json`，因此清理或重置去重记录不会改变已有图片所在的栏目。
+分类只发生在浏览器界面中，原图仍平铺保存在 `backgrounds/` 第一层；`thumbnails/` 子目录只承载后端缓存，不参与分类。Bing 图片通过 `bing_cn_<YYYYMMDD>_<OHR..._ZH-CN...>.jpg`、`bing_row_..._ROW...jpg` 或 `bing_us_..._EN-US...jpg` 的前缀与市场标记配对识别；抽卡壁纸则通过角色、三星/四星/五星、标题、数字卡面 ID、`after_training`/`normal` 及可选重名序号识别。`bg.jpg` 和其它名称都归入普通壁纸；手动重命名导致结构失配时也会回到普通壁纸栏目。分类不读取额外状态文件。
 
 选择图片后，前端发送现有请求：
 
@@ -218,7 +221,7 @@ Content-Type: application/json
 }
 ```
 
-本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好与清单 API 不传输图片，只同步文件名和缓存地址；缩略图及选中的原图由 Zoraxy 静态服务传输。其它设备刷新后读取共享设置，没有实时推送；新原图只在用户主动使用上传或抽卡 API 时写入。
+本地 `homelab-background-state-cache-v1` 仅用于首次绘制和 API 故障降级。背景偏好与清单 API 不传输图片，只同步文件名和缓存地址；缩略图及选中的原图由 Zoraxy 静态服务传输。其它设备刷新后读取共享设置，没有实时推送；新原图只在用户主动使用上传、Bing 每日一图或抽卡 API 时写入。
 
 弹窗中的“上传图片”允许 Windows、Android 和 iOS 文件选择器一次选择一张或多张 JPEG、PNG、WebP 或 AVIF，并按选择顺序逐张将原始字节发送到现有单文件状态服务接口。单个文件最多 50 MiB、解码后最多 100MP，背景目录最多保存 512 张合法原图；服务端校验真实图片格式和扩展名，不转码。重名文件自动使用 `名称 (2).png`、`名称 (3).png` 等可用名称，不会覆盖现有图片或 `bg.jpg`；串行队列保证重名编号稳定，并避免并发争用目录配额和缩略图生成资源。
 
@@ -247,6 +250,23 @@ Content-Type: application/json
 ```
 
 回收站失败后的永久删除请求增加 `confirmationToken` 字段。成功响应会说明删除方式并返回更新后的完整背景偏好；直接伪造永久删除参数不能绕过首次回收站尝试。
+
+#### Bing 每日一图
+
+操作栏中的“每日一图”位于“查看原图”和“我的回合，抽卡！”之间。点击一次后，本地状态服务分别读取 Bing 中国版当前首页图（`zh-CN`）和国际版当前首页图；国际版优先要求 ROW（`en-WW`），ROW 不可用、返回错误市场或图片无效时回退 US（`en-US`）。图片优先下载 UHD，只有该资源明确返回 404 时才回退 1920×1080；请求不携带 Bing 的 `rf=LaDigue...` 默认图参数。
+
+```http
+POST /api/background-files/bing-daily
+Origin: https://home.example.com
+X-Requested-With: homelab-dashboard
+Content-Type: application/json
+
+{}
+```
+
+接口独立返回 CN 与 international 两项结果，因此某一市场失败不会撤销另一市场已保存的图片。文件名使用 Bing 元数据中的 `startdate` 和图片 ID，不使用服务器本地日期；同日期、同 ID 重复触发时复用已有文件，US 回退成功后视为当天国际槽位已满足。中国版与国际版即使字节相同也各自保留。图片沿用 50 MiB、100MP、512 张目录配额、真实格式校验和原子发布约束，历史图片只由用户手动删除。
+
+操作完成后前端只刷新一次清单，展开“Bing 每日一图”栏目并聚焦新增项；不会自动更改横屏或竖屏当前背景。功能不保存标题、版权文本或 Bing 元数据状态文件。旧版后端返回 400、404 或 405 的已知不兼容结果时，页面会提示先升级后端。
 
 #### Bestdori 卡面抽取
 
@@ -288,6 +308,7 @@ Content-Type: application/json
 - `PATCH /api/cards`：携带预期修订号整批替换一个频道，冲突时拒绝静默覆盖；
 - `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
 - `POST /api/background-files/remove`：将图片移入回收站，必要时处理带短时令牌的永久删除；
+- `POST /api/background-files/bing-daily`：获取、验证并分别保存 Bing 中国版与国际版当前首页图；
 - `GET /api/bestdori/characters`：读取固定角色 ID 1–40 的显示名称；
 - `POST /api/background-files/draw`：按角色/星级或全随机参数抽取、验证并保存一张未记录卡面；
 - `POST /api/bestdori/history/reconcile`：移除文件缺失或哈希不匹配的失效去重记录，不删除图片；
@@ -306,6 +327,7 @@ Content-Type: application/json
 - 导入 SVG 在前后端分别执行标签、属性、命名空间、本地引用、元素数、深度和大小白名单校验；兼容输入中的简单根级 `<title>` 与行内 `style` 属性会被验证后丢弃，不信任浏览器缓存或客户端预检；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
 - 缩略图执行 EXIF 方向修正、居中裁切和 WebP 编码，经同目录临时文件、磁盘刷新和原子替换写入；缓存目录必须是真实目录而非符号链接；
+- Bing 元数据与图片只访问代码中固定的 `https://www.bing.com` 路径，拒绝重定向、其它主机/端口、额外查询参数、市场标记不匹配、异常响应类型与超限正文；两市场操作共享 90 秒总截止时间；
 - Bestdori 目录和图片下载只访问代码中固定的 HTTPS API 与资源地址，不接受客户端提供远程 URL；下载图片沿用上传的大小、像素、格式和原子发布约束；
 - 抽卡使用独立的非阻塞互斥锁；永久去重记录只在卡面验证并发布成功后原子写入，符合条件的未记录池耗尽时不会回退到重复卡面；
 - 拒绝未知字段、路径穿越、不支持的扩展名、符号链接和不存在文件；
@@ -409,7 +431,7 @@ D:/Zoraxy/www/html/backgrounds/
 
 ## 构建
 
-当前开发环境使用 Python 3.14；依赖及其固定版本以 `requirements.txt` 为准。Bestdori HTTPS 请求使用 Python 标准库，不新增第三方依赖。构建依赖会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
+当前开发环境使用 Python 3.14；依赖及其固定版本以 `requirements.txt` 为准。Bing 与 Bestdori HTTPS 请求使用 Python 标准库，不新增第三方依赖。构建依赖会打包进生产 EXE，部署机器仍不需要安装 Python 或虚拟环境。可以使用现有 Python，也可以创建仓库本地 `.venv`：
 
 ```powershell
 python -m venv .venv
@@ -425,12 +447,12 @@ py_compile
 -> 依赖导入与 JPEG/PNG/WebP/AVIF 编解码能力预检
 -> PyInstaller --onefile --console --noupx
 -> 临时端口 EXE 冒烟测试
--> 健康检查、GET、PATCH、真实 PNG 上传与缩略图清单、离线抽卡历史维护、批量状态 API、控制关闭
+-> 健康检查、GET、PATCH、真实 PNG 上传与缩略图清单、Bing 路由离线校验、离线抽卡历史维护、批量状态 API、控制关闭
 -> SHA-256
 -> dist/HomeLabWallpaperState.exe
 ```
 
-构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。卡片初始化/修订冲突、上传和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理，不会请求 Bestdori 公网，也不会向系统回收站写入测试文件。
+构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。卡片初始化/修订冲突、上传、Bing 路由和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理；Bing 烟测使用非法空对象字段确认路由存在，不请求 Bing 或 Bestdori 公网，也不会向系统回收站写入测试文件。
 
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
@@ -445,8 +467,8 @@ py_compile
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置；已经存在时单独备份 `HomeLabWallpaperState-data/DashboardCards.json`。
 2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证卡片未初始化 GET、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，卡片与壁纸功能会各自进入静态或缓存降级，不会向旧后端写入初始化状态。
-5. 新部署第一次打开首页时，确认现有 11+5 张卡片一次性导入、`DashboardCards.json` 位于非公开状态目录，随后刷新不重复初始化；再打开背景选择器等待已有原图生成缩略图，并检查批量状态请求、卡片编辑、壁纸同步、上传、回收站删除和两种抽卡模式。
+4. 先验证卡片未初始化 GET、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、Bing 路由、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，卡片与壁纸功能会各自进入静态或缓存降级，不会向旧后端写入初始化状态。
+5. 新部署第一次打开首页时，确认现有 11+5 张卡片一次性导入、`DashboardCards.json` 位于非公开状态目录，随后刷新不重复初始化；再打开背景选择器等待已有原图生成缩略图，并检查批量状态请求、卡片编辑、壁纸同步、上传、Bing 中国版/国际版每日图、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
 若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层原图、`HomeLabWallpaperState-data/DashboardCards.json` 和 `BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版本即使不读取卡片或去重记录，也不得删除它们。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
@@ -485,7 +507,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、现有 11+5 张静态卡片的稳定 ID/顺序/字段/SVG、一次性原子导入、服务器/缓存/静态三级来源、编辑草稿与必填阻塞、删除/保存确认、空频道、鼠标排序、动态频道重绑、陈旧状态探测隔离、SVG 白名单、双向频道状态与动效锁、宽窄屏与减少动态效果、壁纸批量上传、Python 卡片/探测/API 测试、Git 运行态文件排除以及暂存/未暂存空白差异。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 的卡片初始化、重启读取、PATCH/409 冲突及既有 API 冒烟测试。
+验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、现有 11+5 张静态卡片的稳定 ID/顺序/字段/SVG、一次性原子导入、服务器/缓存/静态三级来源、编辑草稿与必填阻塞、删除/保存确认、空频道、鼠标排序、动态频道重绑、陈旧状态探测隔离、SVG 白名单、双向频道状态与动效锁、宽窄屏与减少动态效果、壁纸批量上传、Bing 每日一图的固定源/市场/回退/幂等/部分失败契约、Python 卡片/探测/API 测试、Git 运行态文件排除以及暂存/未暂存空白差异。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 的卡片初始化、重启读取、PATCH/409 冲突及既有 API 冒烟测试。
 
 人工部署后还应检查：
 
@@ -502,6 +524,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - 系统启用减少动态效果后，频道切换应立即完成且保持可操作；
 - 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
 - Windows、Android 和 iOS 可以一次选择多张真实图片；队列逐张显示进度，非法文件被跳过、单项失败继续、全局错误停止，取消与重试可用，完成后只刷新一次列表且不会自动切换背景，重名时按顺序自动编号；
+- “每日一图”按钮位于“查看原图”和抽卡按钮之间；首次点击保存中国版与 ROW（必要时 US）图片，再次点击显示已存在，均只刷新一次且不自动切换当前背景；
 - 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；
 - 角色模式和全随机模式只接受 3–5 星，抽卡成功会新增并聚焦图片但不会自动切换背景；
 - 重复卡面不会再次抽取；清理失效记录和清空全部记录不删除背景图片，清空前会二次确认；

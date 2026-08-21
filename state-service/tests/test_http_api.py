@@ -10,7 +10,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest import mock
 
-from homelab_state import backgrounds, bestdori, cards, core, http_api, probe
+from homelab_state import backgrounds, bestdori, bing, cards, core, http_api, probe
 from tests.helpers import (
     FIXED_TIME,
     TEST_ORIGIN,
@@ -66,6 +66,37 @@ class FakeBestdoriManager:
         return {"removed": 3, "remaining": 0}
 
 
+class FakeBingManager:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def fetch_daily(self) -> dict[str, object]:
+        self.calls += 1
+        return {
+            "version": 1,
+            "results": [
+                {
+                    "slot": "cn",
+                    "market": "zh-CN",
+                    "status": "created",
+                    "startdate": "20260820",
+                    "imageId": "OHR.China_ZH-CN100",
+                    "variant": "UHD",
+                    "background": "bing_cn_20260820_OHR.China_ZH-CN100.jpg",
+                },
+                {
+                    "slot": "international",
+                    "market": "ROW",
+                    "fallback": False,
+                    "status": "existing",
+                    "startdate": "20260820",
+                    "imageId": "OHR.World_ROW200",
+                    "background": "bing_row_20260820_OHR.World_ROW200.jpg",
+                },
+            ],
+        }
+
+
 def card_initialize_request() -> dict[str, object]:
     icon = '<svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg>'
     return {
@@ -114,6 +145,7 @@ class APITests(unittest.TestCase):
             FakeProbeClient(),
             FakeBestdoriManager(),
             self.cards_store,
+            FakeBingManager(),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -245,6 +277,25 @@ class APITests(unittest.TestCase):
         if headers:
             request_headers.update(headers)
         return self.request("POST", path, json.dumps(value).encode(), request_headers)
+
+    def bing_post(
+        self,
+        value: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request(
+            "POST",
+            http_api.BING_DAILY_PATH,
+            json.dumps(value).encode(),
+            request_headers,
+        )
 
     def test_health_and_get_contract(self) -> None:
         status, health = self.request("GET", http_api.HEALTH_PATH)
@@ -934,6 +985,77 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(reset, {"removed": 3, "remaining": 0})
 
+    def test_bing_daily_contract_partial_results_and_methods(self) -> None:
+        status, payload = self.bing_post({})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["results"][0]["status"], "created")
+        self.assertEqual(payload["results"][1]["status"], "existing")
+        self.assertEqual(self.server.bing_manager.calls, 1)
+
+        status, _ = self.request("GET", http_api.BING_DAILY_PATH)
+        self.assertEqual(status, 405)
+        status, _ = self.request("PATCH", http_api.BING_DAILY_PATH)
+        self.assertEqual(status, 405)
+
+    def test_bing_daily_validation_and_aggregate_statuses(self) -> None:
+        cases = (
+            ({}, {"Origin": "https://evil.test"}, 403),
+            ({}, {"X-Requested-With": "wrong"}, 403),
+            ({}, {"Content-Type": "text/plain"}, 415),
+            ({"unexpected": True}, None, 400),
+        )
+        for value, headers, expected in cases:
+            with self.subTest(value=value, headers=headers):
+                status, _ = self.bing_post(value, headers)
+                self.assertEqual(status, expected)
+
+        failed_upstream = {
+            "version": 1,
+            "results": [
+                {"slot": "cn", "status": "failed", "error": "bing_unavailable"},
+                {"slot": "international", "status": "failed", "error": "bing_unavailable"},
+            ],
+        }
+        failed_quota = {
+            "version": 1,
+            "results": [
+                {"slot": "cn", "status": "failed", "error": "background_file_quota_exceeded"},
+                {"slot": "international", "status": "failed", "error": "background_file_quota_exceeded"},
+            ],
+        }
+        with mock.patch.object(self.server.bing_manager, "fetch_daily", return_value=failed_upstream):
+            status, payload = self.bing_post({})
+        self.assertEqual(status, 502)
+        self.assertEqual(payload, failed_upstream)
+        with mock.patch.object(self.server.bing_manager, "fetch_daily", return_value=failed_quota):
+            status, payload = self.bing_post({})
+        self.assertEqual(status, 409)
+        self.assertEqual(payload, failed_quota)
+        mixed_failures = {
+            "version": 1,
+            "results": [
+                {"slot": "cn", "status": "failed", "error": "bing_unavailable"},
+                {
+                    "slot": "international",
+                    "status": "failed",
+                    "error": "background_file_quota_exceeded",
+                },
+            ],
+        }
+        with mock.patch.object(self.server.bing_manager, "fetch_daily", return_value=mixed_failures):
+            status, payload = self.bing_post({})
+        self.assertEqual(status, 409)
+        self.assertEqual(payload, mixed_failures)
+        with mock.patch.object(
+            self.server.bing_manager,
+            "fetch_daily",
+            side_effect=bing.BingDailyBusy("busy"),
+        ):
+            status, payload = self.bing_post({})
+        self.assertEqual(status, 409)
+        self.assertEqual(payload["error"], "bing_operation_in_progress")
+
     def test_bestdori_request_validation_and_security(self) -> None:
         valid_random = {"mode": "random", "rarities": [4, 5]}
         cases = (
@@ -980,6 +1102,7 @@ class APITests(unittest.TestCase):
             ("POST", http_api.BESTDORI_DRAW_PATH),
             ("POST", http_api.BESTDORI_RECONCILE_PATH),
             ("POST", http_api.BESTDORI_RESET_PATH),
+            ("POST", http_api.BING_DAILY_PATH),
         )
         for method, path in endpoints:
             with self.subTest(method=method, path=path):

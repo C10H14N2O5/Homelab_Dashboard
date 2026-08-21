@@ -26,6 +26,7 @@ $frontendModulePaths = @(
     'core-http.js',
     'background-manager.js',
     'background-upload.js',
+    'bing-daily.js',
     'bestdori.js',
     'search.js',
     'channel-switch.js',
@@ -131,6 +132,7 @@ $requiredFiles = @(
     'assets\js\core-http.js',
     'assets\js\background-manager.js',
     'assets\js\background-upload.js',
+    'assets\js\bing-daily.js',
     'assets\js\bestdori.js',
     'assets\js\search.js',
     'assets\js\channel-switch.js',
@@ -162,6 +164,7 @@ $requiredFiles = @(
     'state-service\homelab_state\backgrounds.py',
     'state-service\homelab_state\cards.py',
     'state-service\homelab_state\bestdori.py',
+    'state-service\homelab_state\bing.py',
     'state-service\homelab_state\probe.py',
     'state-service\homelab_state\http_api.py',
     'state-service\homelab_state\launcher.py',
@@ -171,6 +174,7 @@ $requiredFiles = @(
     'state-service\tests\test_backgrounds.py',
     'state-service\tests\test_cards.py',
     'state-service\tests\test_bestdori.py',
+    'state-service\tests\test_bing.py',
     'state-service\tests\test_probe.py',
     'state-service\tests\test_http_api.py',
     'state-service\tests\test_launcher.py',
@@ -354,6 +358,7 @@ const expectedModuleNames = [
     'core-http.js',
     'background-manager.js',
     'background-upload.js',
+    'bing-daily.js',
     'bestdori.js',
     'search.js',
     'channel-switch.js',
@@ -378,6 +383,7 @@ for (const [name, source] of moduleEntries) {
 const coreScript = moduleSources['core-http.js'];
 const backgroundManagerScript = moduleSources['background-manager.js'];
 const backgroundUploadScript = moduleSources['background-upload.js'];
+const bingDailyScript = moduleSources['bing-daily.js'];
 const bestdoriScript = moduleSources['bestdori.js'];
 const searchScript = moduleSources['search.js'];
 const channelScript = moduleSources['channel-switch.js'];
@@ -1582,8 +1588,14 @@ if (!originalLinkRelTokens.includes('noopener') || !originalLinkRelTokens.includ
 if (/\bdownload(?:\s|=|>)/.test(originalLinkTag) || /\bhref=/.test(originalLinkTag)) {
     throw new Error('The original-background link must render in-browser and receive its validated href from JavaScript.');
 }
-if (html.indexOf('id="background-original-link"') > html.indexOf('id="background-draw-button"')) {
-    throw new Error('The original-background link must remain to the left of the Bestdori draw button.');
+const originalLinkIndex = html.indexOf('id="background-original-link"');
+const bingDailyButtonIndex = html.indexOf('id="background-bing-daily-button"');
+const bestdoriDrawButtonIndex = html.indexOf('id="background-draw-button"');
+if (originalLinkIndex < 0
+    || bingDailyButtonIndex < 0
+    || bestdoriDrawButtonIndex < 0
+    || !(originalLinkIndex < bingDailyButtonIndex && bingDailyButtonIndex < bestdoriDrawButtonIndex)) {
+    throw new Error('The Bing daily button must remain between the original link and Bestdori draw button.');
 }
 
 const searchFormMatch = html.match(/<form\b[^>]*\bid="homepage-search-form"[^>]*>/);
@@ -1711,6 +1723,7 @@ const requiredMarkers = [
     '/api/background-files/draw',
     '/api/bestdori/history/reconcile',
     '/api/bestdori/history/reset',
+    '/api/background-files/bing-daily',
     '/api/service-status',
     'homelab-background-state-cache-v1',
     'data-background-mode="landscape"',
@@ -1724,6 +1737,7 @@ const requiredMarkers = [
     '.background-upload-actions .background-action-button[hidden]',
     'id="background-delete-button"',
     'id="background-original-link"',
+    'id="background-bing-daily-button"',
     'id="background-delete-dialog"',
     'id="background-draw-button"',
     'id="card-draw-dialog"',
@@ -1737,6 +1751,7 @@ const requiredMarkers = [
     'data-state="unknown"',
     'backgroundScanPending',
     'backgroundDrawPending',
+    'bingDailyPending',
     'buildBestdoriDrawRequest',
     'payload.background && payload.background.background',
     'reconcileSharedBackgroundPreference',
@@ -1751,7 +1766,8 @@ const requiredMarkers = [
     'requestBackgroundInventory',
     'requestLegacyBackgroundListing',
     'isBestdoriBackgroundName',
-    "const backgroundLibrarySources = ['ordinary', 'bestdori']",
+    'isBingBackgroundName',
+    "const backgroundLibrarySources = ['ordinary', 'bing', 'bestdori']",
     'const backgroundSectionTransitionFallbackMs = 400',
     'section.dataset.backgroundSection = source',
     'option.dataset.backgroundSource = source',
@@ -1863,7 +1879,7 @@ if (backgroundManagerHelperStart < 0 || backgroundManagerHelperEnd < 0) {
 }
 vm.runInContext(
     backgroundManagerScript.slice(backgroundManagerHelperStart, backgroundManagerHelperEnd)
-        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, readBoundedResponseText, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, backgroundSourceForName };',
+        + '\nglobalThis.__backgroundManagerHelpers = { normalizeBackgroundName, normalizeBackgroundThumbnailUrl, readBoundedResponseText, normalizeBackgroundInventory, validateBackgroundUploadFile, backgroundModesUsingFile, isBestdoriBackgroundName, isBingBackgroundName, backgroundSourceForName };',
     context
 );
 context.backgroundExtensionPattern = /\.(?:jpe?g|png|webp|avif)$/i;
@@ -2030,6 +2046,18 @@ bestdoriBackgroundNames.forEach((fileName) => {
     }
 });
 
+const bingBackgroundNames = [
+    'bing_cn_20260820_OHR.China_ZH-CN100.jpg',
+    'bing_row_20260820_OHR.World_ROW200.jpg',
+    'bing_us_20260820_OHR.America_EN-US300 (2).jpg'
+];
+bingBackgroundNames.forEach((fileName) => {
+    if (!context.__backgroundManagerHelpers.isBingBackgroundName(fileName)
+        || context.__backgroundManagerHelpers.backgroundSourceForName(fileName) !== 'bing') {
+        throw new Error(`Bing-generated background name was not classified correctly: ${fileName}`);
+    }
+});
+
 const ordinaryBackgroundNames = [
     'bg.jpg',
     'vacation.png',
@@ -2037,12 +2065,15 @@ const ordinaryBackgroundNames = [
     '\u89d2\u8272_\u516d\u661f_\u6807\u9898_123_normal.png',
     '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_normal.png',
     '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_unknown.png',
-    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_normal (1).png'
+    '\u89d2\u8272_\u4e94\u661f_\u6807\u9898_123_normal (1).png',
+    'bing_row_20260820_OHR.World_EN-US200.jpg',
+    'bing_unknown_20260820_OHR.World_ROW200.jpg'
 ];
 ordinaryBackgroundNames.forEach((fileName) => {
     if (context.__backgroundManagerHelpers.isBestdoriBackgroundName(fileName)
+        || context.__backgroundManagerHelpers.isBingBackgroundName(fileName)
         || context.__backgroundManagerHelpers.backgroundSourceForName(fileName) !== 'ordinary') {
-        throw new Error(`Ordinary background name was misclassified as Bestdori: ${fileName}`);
+        throw new Error(`Ordinary background name was misclassified: ${fileName}`);
     }
 });
 
@@ -2134,6 +2165,7 @@ const groupedRendererSource = backgroundManagerScript.slice(renderFunctionStart,
 if (!groupedRendererSource.includes('backgroundLibrarySources.forEach')
     || !groupedRendererSource.includes('backgroundLibraryExpanded[source]')
     || !groupedRendererSource.includes('groupedBackgrounds.ordinary.length')
+    || !groupedRendererSource.includes('groupedBackgrounds.bing.length')
     || !groupedRendererSource.includes('groupedBackgrounds.bestdori.length')
     || !groupedRendererSource.includes('setBackgroundSectionExpanded(source')
     || !groupedRendererSource.includes("sectionContent.setAttribute('aria-hidden'")
@@ -2223,8 +2255,8 @@ context.requestLegacyBackgroundListing = async () => {
     return [{ url: new URL('https://home.example.test/backgrounds/bg.jpg'), thumbnailUrl: null }];
 };
 context.mergeAndSortBackgrounds = (backgrounds) => backgrounds;
-context.renderBackgroundOptions = () => ({ total: 1, ordinary: 1, bestdori: 0 });
-context.renderKnownBackgroundFallback = () => ({ total: 1, ordinary: 1, bestdori: 0 });
+context.renderBackgroundOptions = () => ({ total: 1, ordinary: 1, bing: 0, bestdori: 0 });
+context.renderKnownBackgroundFallback = () => ({ total: 1, ordinary: 1, bing: 0, bestdori: 0 });
 await context.__scanBackgroundDirectory();
 if (legacyListingRequestCount !== 1
     || !observedBackgroundStatuses.some(
@@ -2278,8 +2310,8 @@ const transitionSection = {
     }
 };
 const transitionContext = vm.createContext({
-    backgroundLibrarySources: ['ordinary', 'bestdori'],
-    backgroundLibraryExpanded: { ordinary: true, bestdori: true },
+    backgroundLibrarySources: ['ordinary', 'bing', 'bestdori'],
+    backgroundLibraryExpanded: { ordinary: true, bing: true, bestdori: true },
     backgroundSectionTransitionFallbackMs: 400,
     backgroundSectionTransitionCleanups: new Map(),
     backgroundGrid: {
@@ -2411,6 +2443,7 @@ context.backgroundScanPending = false;
 context.backgroundWritePending = false;
 context.backgroundDeletePending = false;
 context.backgroundUploadController = { isBusy: () => false };
+context.bingDailyController = { isBusy: () => false };
 context.bestdoriController = { isBusy: () => false };
 if (context.__bestdoriHelpers.backgroundManagerIsBusy()) {
     throw new Error('Idle background manager was reported as busy.');
@@ -2420,6 +2453,11 @@ if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
     throw new Error('Bestdori work was not included in the shared background-manager busy state.');
 }
 context.bestdoriController = { isBusy: () => false };
+context.bingDailyController = { isBusy: () => true };
+if (!context.__bestdoriHelpers.backgroundManagerIsBusy()) {
+    throw new Error('Bing daily work was not included in the shared background-manager busy state.');
+}
+context.bingDailyController = { isBusy: () => false };
 
 const cardDrawStatusHelperStart = bestdoriScript.indexOf('function setCardDrawStatus(');
 const cardDrawStatusHelperEnd = bestdoriScript.indexOf('function syncCardDrawControls(', cardDrawStatusHelperStart);
@@ -2602,6 +2640,139 @@ originalLinkContext.backgroundPreferences.portrait = '../unsafe.png';
 originalLinkContext.__syncBackgroundOriginalLink();
 if (originalLinkAttributes.has('href') || originalLinkAttributes.get('aria-disabled') !== 'true') {
     throw new Error('An invalid original-background name did not disable the link.');
+}
+
+const bingHelperStart = bingDailyScript.indexOf('function bingDailyErrorMessage(');
+const bingHelperEnd = bingDailyScript.indexOf('async function fetchBingDaily(', bingHelperStart);
+if (bingHelperStart < 0 || bingHelperEnd < 0) {
+    throw new Error('Unable to extract Bing daily response helpers.');
+}
+const bingContext = vm.createContext({
+    URL,
+    Error,
+    Promise,
+    console: { warn() {} },
+    normalizeBackgroundName: (value) => typeof value === 'string' && /\.jpg$/i.test(value) ? value : null
+});
+vm.runInContext(
+    bingDailyScript.slice(bingHelperStart, bingHelperEnd)
+        + '\nglobalThis.__bingHelpers = { bingDailyErrorMessage, normalizeBingDailyPayload, requestBingDaily, resultMessage };',
+    bingContext
+);
+bingContext.bingDailyEndpoint = { href: 'https://home.example.test/api/background-files/bing-daily' };
+let observedBingRequest = null;
+const validBingPayload = {
+    version: 1,
+    results: [
+        {
+            slot: 'cn',
+            market: 'zh-CN',
+            status: 'created',
+            background: 'bing_cn_20260820_OHR.China_ZH-CN100.jpg'
+        },
+        {
+            slot: 'international',
+            market: 'en-US',
+            fallback: true,
+            status: 'existing',
+            background: 'bing_us_20260820_OHR.America_EN-US300.jpg'
+        }
+    ]
+};
+bingContext.fetchWithTimeout = async (resource, options, timeout, controller, transform) => {
+    observedBingRequest = { resource, options, timeout, controller };
+    return transform({ ok: true, status: 200, json: async () => validBingPayload });
+};
+const normalizedBingResults = await bingContext.__bingHelpers.requestBingDaily();
+if (normalizedBingResults.length !== 2
+    || normalizedBingResults[0].slot !== 'cn'
+    || normalizedBingResults[1].market !== 'en-US'
+    || !normalizedBingResults[1].fallback
+    || observedBingRequest.resource !== bingContext.bingDailyEndpoint.href
+    || observedBingRequest.options.method !== 'POST'
+    || observedBingRequest.options.credentials !== 'same-origin'
+    || observedBingRequest.options.headers['X-Requested-With'] !== 'homelab-dashboard'
+    || observedBingRequest.options.headers['Content-Type'] !== 'application/json'
+    || observedBingRequest.options.body !== '{}'
+    || observedBingRequest.timeout !== 120000
+    || observedBingRequest.controller !== null) {
+    throw new Error('Bing daily JSON request or response normalization contract mismatch.');
+}
+if (!bingContext.__bingHelpers.resultMessage(normalizedBingResults[1]).includes('\u5df2\u56de\u9000 US')) {
+    throw new Error('Bing US fallback was not exposed in the user-facing result message.');
+}
+bingContext.fetchWithTimeout = async (resource, options, timeout, controller, transform) => transform({
+    ok: false,
+    status: 404,
+    json: async () => ({ error: 'not found' })
+});
+await expectRejection(bingContext.__bingHelpers.requestBingDaily(), 'Old-backend Bing daily rejection');
+if (!bingContext.__bingHelpers.bingDailyErrorMessage({}, 404).includes('\u8bf7\u5148\u5347\u7ea7\u540e\u7aef')) {
+    throw new Error('Old backend Bing daily failure was not mapped to an upgrade message.');
+}
+if (!bingContext.__bingHelpers.bingDailyErrorMessage(
+    { error: 'request body is not allowed for this route' },
+    400
+).includes('\u8bf7\u5148\u5347\u7ea7\u540e\u7aef')) {
+    throw new Error('Old backend body rejection was not mapped to an upgrade message.');
+}
+
+const bingWorkflowStart = bingDailyScript.indexOf('async function fetchBingDaily(');
+const bingWorkflowEnd = bingDailyScript.indexOf('function syncAvailability(', bingWorkflowStart);
+if (bingWorkflowStart < 0 || bingWorkflowEnd < 0) {
+    throw new Error('Unable to extract the Bing daily workflow.');
+}
+const bingWorkflowSource = bingDailyScript.slice(bingWorkflowStart, bingWorkflowEnd);
+if (bingWorkflowSource.includes("requestBackgroundPreferences('PATCH'")
+    || bingWorkflowSource.includes('requestBackgroundPreferences(')) {
+    throw new Error('Bing daily download must not automatically apply a background preference.');
+}
+vm.runInContext(
+    bingWorkflowSource + '\nglobalThis.__fetchBingDaily = fetchBingDaily;',
+    bingContext
+);
+bingContext.isManagerBusy = () => false;
+bingContext.isManagerOnline = () => true;
+bingContext.bingDailyPending = false;
+bingContext.syncManagerControls = () => {};
+bingContext.syncAvailability = () => {};
+const bingStatuses = [];
+bingContext.setManagerStatus = (message, state) => bingStatuses.push({ message, state });
+bingContext.requestBingDaily = async () => [
+    {
+        slot: 'cn',
+        market: 'zh-CN',
+        fallback: false,
+        status: 'created',
+        background: 'bing_cn_20260820_OHR.China_ZH-CN100.jpg'
+    },
+    {
+        slot: 'international',
+        market: 'en-US',
+        fallback: true,
+        status: 'failed',
+        error: 'bing_unavailable'
+    }
+];
+let bingScanCount = 0;
+let bingScanMessage = '';
+bingContext.scanBackgroundDirectory = async (options) => {
+    bingScanCount += 1;
+    bingScanMessage = options.successMessage;
+};
+let focusedBingBackground = '';
+bingContext.focusBackgroundOption = (name) => {
+    focusedBingBackground = name;
+    return true;
+};
+bingContext.resultMessage = bingContext.__bingHelpers.resultMessage;
+if (!await bingContext.__fetchBingDaily()
+    || bingScanCount !== 1
+    || !bingScanMessage.includes('\u6bcf\u65e5\u4e00\u56fe\u90e8\u5206\u5b8c\u6210')
+    || !bingScanMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
+    || focusedBingBackground !== 'bing_cn_20260820_OHR.China_ZH-CN100.jpg'
+    || bingContext.bingDailyPending) {
+    throw new Error('Partial Bing daily success did not refresh once, focus the created image, and preserve preferences.');
 }
 
 const bestdoriErrorCases = [
