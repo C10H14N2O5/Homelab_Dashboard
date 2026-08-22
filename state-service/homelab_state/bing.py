@@ -12,7 +12,13 @@ from http import HTTPStatus
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 from homelab_state.backgrounds import (
     MAX_BACKGROUND_UPLOAD_BODY,
@@ -59,6 +65,10 @@ class BingUnavailable(RuntimeError):
     pass
 
 
+class BingProxyUnavailable(BingUnavailable):
+    pass
+
+
 class BingAssetMissing(BingUnavailable):
     pass
 
@@ -84,10 +94,24 @@ class BingImage:
 
 
 class BingClient:
-    def __init__(self, *, timeout: float = BING_TIMEOUT_SECONDS, opener=None, monotonic=time.monotonic) -> None:
+    def __init__(
+        self,
+        international_proxy_url: str,
+        *,
+        timeout: float = BING_TIMEOUT_SECONDS,
+        direct_opener=None,
+        international_opener=None,
+        monotonic=time.monotonic,
+    ) -> None:
         self.timeout = timeout
         self.monotonic = monotonic
-        self.opener = opener or build_opener(
+        self.direct_opener = direct_opener or build_opener(
+            ProxyHandler({}),
+            _RejectBingRedirects(),
+            HTTPSHandler(context=ssl.create_default_context()),
+        )
+        self.international_opener = international_opener or build_opener(
+            ProxyHandler({"https": international_proxy_url}),
             _RejectBingRedirects(),
             HTTPSHandler(context=ssl.create_default_context()),
         )
@@ -151,6 +175,8 @@ class BingClient:
         maximum_body: int,
         accepted_types: frozenset[str],
         *,
+        opener,
+        proxied: bool,
         missing_is_distinct: bool = False,
         deadline: float | None = None,
     ) -> bytes:
@@ -164,7 +190,7 @@ class BingClient:
         )
         try:
             request_timeout = self._remaining_timeout(deadline)
-            with self.opener.open(request, timeout=request_timeout) as response:
+            with opener.open(request, timeout=request_timeout) as response:
                 self._validate_url(response.geturl())
                 content_type = response.headers.get_content_type().lower()
                 if content_type not in accepted_types:
@@ -188,10 +214,16 @@ class BingClient:
         except HTTPError as error:
             if missing_is_distinct and error.code == HTTPStatus.NOT_FOUND:
                 raise BingAssetMissing("Bing image variant is unavailable") from None
+            if proxied and error.code == HTTPStatus.PROXY_AUTHENTICATION_REQUIRED:
+                raise BingProxyUnavailable("Bing proxy authentication is required") from None
             raise BingUnavailable(f"Bing request failed with HTTP {error.code}") from None
         except BingUnavailable:
             raise
         except (OSError, URLError, ssl.SSLError, TimeoutError):
+            if proxied:
+                raise BingProxyUnavailable(
+                    "unable to reach Bing through the configured proxy"
+                ) from None
             raise BingUnavailable("unable to reach Bing") from None
         if len(payload) > maximum_body:
             raise BingUnavailable("Bing response is too large")
@@ -212,10 +244,16 @@ class BingClient:
             socket_object.settimeout(timeout)
 
     def daily_image(self, market: str, *, deadline: float | None = None) -> BingImage:
+        if market not in BING_MARKETS:
+            raise BingUnavailable("unsupported Bing market")
+        source, marker = BING_MARKET_MARKERS[market]
+        proxied = source != "cn"
         payload = self._read(
             self._metadata_url(market),
             MAX_BING_METADATA_BODY,
             frozenset({"application/json", "text/json"}),
+            opener=self.international_opener if proxied else self.direct_opener,
+            proxied=proxied,
             deadline=deadline,
         )
         try:
@@ -251,18 +289,23 @@ class BingClient:
         image_id = base_query[0][1]
         if not BING_IMAGE_ID_PATTERN.fullmatch(image_id):
             raise BingUnavailable("Bing returned an invalid image identifier")
-        source, marker = BING_MARKET_MARKERS[market]
         if not re.search(rf"_{re.escape(marker)}[0-9]+$", image_id):
             raise BingMarketMismatch(f"Bing did not return the requested {source} market")
         return BingImage(startdate=startdate, image_id=image_id, source=source)
 
     def download_image(self, image: BingImage, *, deadline: float | None = None) -> tuple[bytes, str]:
+        if image.source not in {"cn", "row", "us"}:
+            raise BingUnavailable("invalid Bing image source")
+        proxied = image.source != "cn"
+        opener = self.international_opener if proxied else self.direct_opener
         try:
             return (
                 self._read(
                     self._image_url(image.image_id, "UHD"),
                     MAX_BACKGROUND_UPLOAD_BODY,
                     frozenset({"image/jpeg"}),
+                    opener=opener,
+                    proxied=proxied,
                     missing_is_distinct=True,
                     deadline=deadline,
                 ),
@@ -274,6 +317,8 @@ class BingClient:
                     self._image_url(image.image_id, "1920x1080"),
                     MAX_BACKGROUND_UPLOAD_BODY,
                     frozenset({"image/jpeg"}),
+                    opener=opener,
+                    proxied=proxied,
                     missing_is_distinct=True,
                     deadline=deadline,
                 ),
@@ -286,12 +331,12 @@ class BingDailyManager:
         self,
         store: StateStore,
         *,
-        client: BingClient | None = None,
+        client: BingClient,
         operation_timeout: float = BING_OPERATION_TIMEOUT_SECONDS,
         monotonic=time.monotonic,
     ) -> None:
         self.store = store
-        self.client = client or BingClient()
+        self.client = client
         self.operation_timeout = operation_timeout
         self.monotonic = monotonic
         self._operation_lock = threading.Lock()
@@ -428,6 +473,12 @@ class BingDailyManager:
                     "background": name,
                 }
             return self._save("international", row_image, deadline=deadline)
+        except BingProxyUnavailable:
+            return self._failed(
+                "international",
+                "bing_unavailable",
+                market="ROW",
+            )
         except BackgroundQuotaExceeded:
             return self._failed(
                 "international",
@@ -452,6 +503,13 @@ class BingDailyManager:
                     "background": name,
                 }
             return self._save("international", us_image, fallback=True, deadline=deadline)
+        except BingProxyUnavailable:
+            return self._failed(
+                "international",
+                "bing_unavailable",
+                market="en-US",
+                fallback=True,
+            )
         except BackgroundQuotaExceeded:
             return self._failed(
                 "international",

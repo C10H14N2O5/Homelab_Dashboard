@@ -22,10 +22,11 @@ DEFAULT_DATA_DIRECTORY = "HomeLabWallpaperState-data"
 DEFAULT_BACKGROUND_DIRECTORY = r"D:\Zoraxy\www\html\backgrounds"
 DEFAULT_ORIGIN = "https://home.example.com"
 DEFAULT_LISTEN = "127.0.0.1:8787"
+DEFAULT_BING_INTERNATIONAL_PROXY = "127.0.0.1:7890"
 DEFAULT_PROBE_CONNECT_ADDRESS = "127.0.0.1:443"
 DEFAULT_PROBE_DOMAIN_SUFFIX = "home.example.com"
 DEFAULT_PROBE_TIMEOUT_SECONDS = 5.0
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 DOMAIN_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -84,6 +85,47 @@ def parse_probe_connect_address(value: str) -> tuple[str, int]:
     return str(address), port
 
 
+def parse_bing_international_proxy(value: str) -> tuple[str, int]:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigurationError("bingInternationalProxy must be a non-empty string")
+    text = value.strip()
+    try:
+        parsed = urlsplit(f"//{text}")
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise ConfigurationError(
+            "bingInternationalProxy must contain a loopback IP and port"
+        ) from error
+    if (
+        not host
+        or port is None
+        or parsed.username
+        or parsed.password
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError(
+            "bingInternationalProxy must contain a loopback IP and port"
+        )
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise ConfigurationError(
+            "bingInternationalProxy host must be a loopback IP address"
+        ) from error
+    if not address.is_loopback:
+        raise ConfigurationError(
+            "bingInternationalProxy host must be a loopback IP address"
+        )
+    if not 1 <= port <= 65535:
+        raise ConfigurationError(
+            "bingInternationalProxy port must be between 1 and 65535"
+        )
+    return str(address), port
+
+
 def normalize_probe_domain_suffix(value: str) -> str:
     if not isinstance(value, str) or value != value.strip() or not value:
         raise ConfigurationError("probeDomainSuffix must be a canonical domain name")
@@ -120,6 +162,8 @@ class AppConfig:
     listen_port: int
     state_dir: Path
     control_token: str
+    bing_international_proxy_host: str
+    bing_international_proxy_port: int
     probe_connect_host: str
     probe_connect_port: int
     probe_domain_suffix: str
@@ -146,6 +190,19 @@ class AppConfig:
         host = f"[{self.probe_connect_host}]" if ":" in self.probe_connect_host else self.probe_connect_host
         return f"{host}:{self.probe_connect_port}"
 
+    @property
+    def bing_international_proxy(self) -> str:
+        host = (
+            f"[{self.bing_international_proxy_host}]"
+            if ":" in self.bing_international_proxy_host
+            else self.bing_international_proxy_host
+        )
+        return f"{host}:{self.bing_international_proxy_port}"
+
+    @property
+    def bing_international_proxy_url(self) -> str:
+        return f"http://{self.bing_international_proxy}"
+
 
 def validate_application_location(config: AppConfig) -> None:
     if path_is_within(application_directory(), config.background_dir.parent):
@@ -168,6 +225,7 @@ def _parse_config_value(
         "listen",
         "stateDir",
         "controlToken",
+        "bingInternationalProxy",
         "probeConnectAddress",
         "probeDomainSuffix",
         "probeTimeoutSeconds",
@@ -200,6 +258,9 @@ def _parse_config_value(
     background_dir = resolve_config_path(raw["backgroundDir"], base)
     state_dir = resolve_config_path(raw["stateDir"], base)
     host, port = parse_listen(raw["listen"])
+    bing_proxy_host, bing_proxy_port = parse_bing_international_proxy(
+        raw["bingInternationalProxy"]
+    )
     probe_connect_host, probe_connect_port = parse_probe_connect_address(raw["probeConnectAddress"])
     probe_domain_suffix = normalize_probe_domain_suffix(raw["probeDomainSuffix"])
     probe_timeout_seconds = normalize_probe_timeout(raw["probeTimeoutSeconds"])
@@ -223,6 +284,8 @@ def _parse_config_value(
         listen_port=port,
         state_dir=state_dir,
         control_token=token,
+        bing_international_proxy_host=bing_proxy_host,
+        bing_international_proxy_port=bing_proxy_port,
         probe_connect_host=probe_connect_host,
         probe_connect_port=probe_connect_port,
         probe_domain_suffix=probe_domain_suffix,

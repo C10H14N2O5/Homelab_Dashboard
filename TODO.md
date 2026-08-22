@@ -48,7 +48,7 @@
 ### Python 后端拆分与模块化重构
 
 - [x] 将接近 3000 行的 `state-service/main.py` 按职责拆分，并保留稳定的薄入口。
-  - 模块边界：`core.py` 提供共享常量、异常和原子写入；`config.py` 负责严格 v2 配置；`backgrounds.py` 负责背景状态、缩略图、上传与删除；`bestdori.py` 负责固定源请求、抽卡和去重历史；`probe.py` 负责回环固定的 HTTPS 探测；`http_api.py` 集中保留 HTTP 请求安全边界与路由；`launcher.py` 负责首次引导、生命周期、日志和终端监视器。
+  - 模块边界：`core.py` 提供共享常量、异常和原子写入；`config.py` 负责严格 v3 配置；`backgrounds.py` 负责背景状态、缩略图、上传与删除；`bestdori.py` 负责固定源请求、抽卡和去重历史；`probe.py` 负责回环固定的 HTTPS 探测；`http_api.py` 集中保留 HTTP 请求安全边界与路由；`launcher.py` 负责首次引导、生命周期、日志和终端监视器。
   - 依赖方向：业务模块不反向导入 `main.py`，HTTP 层组合配置、存储、抽卡和探测，启动器负责装配并由薄入口调用，避免循环依赖。
   - 测试结构：原有单文件测试按模块迁入 `state-service/tests/`；`test_main.py` 只验证稳定入口，验证脚本会编译全部正式模块并运行完整测试发现。
   - 兼容边界：继续使用 `python state-service/main.py` 和同一 PyInstaller `main.py` 入口；单文件 EXE 名称、启动模式、配置与状态 JSON、Dashboard API、Zoraxy 代理契约和安全限制保持不变。

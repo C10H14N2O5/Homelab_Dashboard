@@ -278,7 +278,7 @@ $maintenanceContracts = @(
     @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\js\search.js' },
     @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\js\service-status.js' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
-    @{ Name = 'strict v2 configuration documentation'; Source = $readmeSource; Marker = '"version": 2' },
+    @{ Name = 'strict v3 configuration documentation'; Source = $readmeSource; Marker = '"version": 3' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
     @{ Name = 'dashboard cards deployment documentation'; Source = $readmeSource; Marker = 'DashboardCards.json' },
     @{ Name = 'CORS removal documentation'; Source = $readmeSource; Marker = 'AstrBot' }
@@ -349,7 +349,7 @@ const stylesheet = fs.readFileSync(process.argv[3], 'utf8');
 const modulePaths = process.argv.slice(4);
 const moduleEntries = modulePaths.map((modulePath) => [
     path.basename(modulePath),
-    fs.readFileSync(modulePath, 'utf8')
+    fs.readFileSync(modulePath, 'utf8').replace(/\r\n?/g, '\n')
 ]);
 const moduleSources = Object.fromEntries(
     moduleEntries.map(([name, source]) => [name, source.replace(/\r\n/g, '\n')])
@@ -2922,6 +2922,7 @@ if (!await bingContext.__fetchBingDaily()
     || bingScanCount !== 1
     || !bingScanMessage.includes('\u6bcf\u65e5\u4e00\u56fe\u90e8\u5206\u5b8c\u6210')
     || !bingScanMessage.includes('\u5f53\u524d\u80cc\u666f\u672a\u66f4\u6539')
+    || !bingScanMessage.includes('HTTP \u4ee3\u7406')
     || clearedBingPresentation !== 1
     || JSON.stringify(presentedBingResults) !== JSON.stringify({
         createdNames: ['bing_cn_20260820_OHR.China_ZH-CN100.jpg'],

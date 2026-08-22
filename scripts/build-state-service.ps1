@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 8
+$expectedServiceVersion = 9
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -128,12 +128,13 @@ try {
     $listener.Stop()
     $smokeToken = 'build-smoke-control-token-0123456789abcdef'
     $smokeSettings = [ordered]@{
-        version                 = 2
+        version                 = 3
         backgroundDir           = $smokeBackgrounds
         allowedOrigins          = @('https://home.example.test')
         listen                  = "127.0.0.1:$smokePort"
         stateDir                = $smokeState
         controlToken            = $smokeToken
+        bingInternationalProxy  = '127.0.0.1:7890'
         probeConnectAddress     = '127.0.0.1:443'
         probeDomainSuffix       = 'home.example.test'
         probeTimeoutSeconds     = 5
@@ -158,7 +159,7 @@ try {
         [Text.UTF8Encoding]::new($false)
     )
     $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
-    $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n" + "n`n")
+    $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n`n" + "n`n")
     $consoleResult = Invoke-BuildRedirectedProcess `
         -FilePath $temporaryArtifactPath `
         -Arguments ('configure --config "' + $consoleConfig + '"') `

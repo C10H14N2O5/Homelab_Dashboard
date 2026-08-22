@@ -107,6 +107,9 @@ export function createBingDailyController(context) {
         if (result.status === 'existing') return `${label}已存在：${result.background}`;
         if (result.error === 'background_file_quota_exceeded') return `${label}未保存：背景目录已达到 512 张上限`;
         if (result.error === 'bing_invalid_image') return `${label}未保存：Bing 返回的图片无效或不受支持`;
+        if (result.slot === 'international') {
+            return `${label}获取失败：请检查状态服务所在主机的国际版 HTTP 代理及其外网连通性`;
+        }
         return `${label}获取失败：暂时无法连接或识别 Bing 图片`;
     }
 

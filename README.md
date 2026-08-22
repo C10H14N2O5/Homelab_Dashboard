@@ -18,7 +18,7 @@
 | API 地址 | `127.0.0.1:8787`，只能监听本机回环地址 |
 | 运行角色 | 同一 EXE 提供隐藏 API 后端和可见终端监视器 |
 | 自动启动 | 当前用户 `shell:startup` 快捷方式，登录后显示监视器 |
-| 配置与状态 | 严格 v2 JSON 配置；卡片、背景状态和独立抽卡去重记录位于 `HomeLabWallpaperState-data/` |
+| 配置与状态 | 严格 v3 JSON 配置；卡片、背景状态和独立抽卡去重记录位于 `HomeLabWallpaperState-data/` |
 | 前端依赖 | 无 CDN、无框架、浏览器原生 ES 模块、内联 SVG |
 
 ## 文件结构
@@ -49,7 +49,7 @@ zoraxy-homelab-dashboard/
 │   ├── main.py                  # 稳定的薄入口；转交 homelab_state.launcher.main
 │   ├── homelab_state/
 │   │   ├── core.py              # 共享常量、异常、校验和原子 JSON 写入
-│   │   ├── config.py            # 严格 v2 配置模型、解析和路径边界
+│   │   ├── config.py            # 严格 v3 配置模型、解析和路径边界
 │   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
 │   │   ├── cards.py             # 卡片模型、SVG 清洗、原子初始化和修订号存储
 │   │   ├── bing.py              # Bing 固定源客户端、市场回退和每日图保存
@@ -255,6 +255,8 @@ Content-Type: application/json
 
 操作栏中的“每日一图”位于“查看原图”和“我的回合，抽卡！”之间。点击一次后，本地状态服务分别读取 Bing 中国版当前首页图（`zh-CN`）和国际版当前首页图；国际版优先要求 ROW（`en-WW`），ROW 不可用、返回错误市场或图片无效时回退 US（`en-US`）。图片优先下载 UHD，只有该资源明确返回 404 时才回退 1920×1080；请求不携带 Bing 的 `rf=LaDigue...` 默认图参数。
 
+中国版的元数据与图片显式直连，不读取系统代理环境变量；ROW 与 US 的元数据和图片只通过严格 v3 配置中的 `bingInternationalProxy` HTTP 代理建立 HTTPS CONNECT 隧道。ROW 内容或市场校验失败时，US 仍通过同一代理回退；代理本身无法连接或建立隧道时，international 立即失败且不会改走直连，已成功的中国版结果继续保留。
+
 ```http
 POST /api/background-files/bing-daily
 Origin: https://home.example.com
@@ -327,7 +329,7 @@ Content-Type: application/json
 - 导入 SVG 在前后端分别执行标签、属性、命名空间、本地引用、元素数、深度和大小白名单校验；兼容输入中的简单根级 `<title>` 与行内 `style` 属性会被验证后丢弃，不信任浏览器缓存或客户端预检；
 - 上传最多 50 MiB / 100MP，只接收真实 JPEG、PNG、WebP、AVIF，并以同目录临时文件验证后原子发布；
 - 缩略图执行 EXIF 方向修正、居中裁切和 WebP 编码，经同目录临时文件、磁盘刷新和原子替换写入；缓存目录必须是真实目录而非符号链接；
-- Bing 元数据与图片只访问代码中固定的 `https://www.bing.com` 路径，拒绝重定向、其它主机/端口、额外查询参数、市场标记不匹配、异常响应类型与超限正文；两市场操作共享 90 秒总截止时间；
+- Bing 元数据与图片只访问代码中固定的 `https://www.bing.com` 路径，拒绝重定向、其它主机/端口、额外查询参数、市场标记不匹配、异常响应类型与超限正文；中国版显式禁用代理，ROW/US 只使用配置的回环 HTTP 代理，TLS 仍端到端验证；两市场操作共享 90 秒总截止时间；
 - Bestdori 目录和图片下载只访问代码中固定的 HTTPS API 与资源地址，不接受客户端提供远程 URL；下载图片沿用上传的大小、像素、格式和原子发布约束；
 - 抽卡使用独立的非阻塞互斥锁；永久去重记录只在卡面验证并发布成功后原子写入，符合条件的未记录池耗尽时不会回退到重复卡面；
 - 拒绝未知字段、路径穿越、不支持的扩展名、符号链接和不存在文件；
@@ -344,31 +346,32 @@ Content-Type: application/json
 克隆后至少完成以下修改和检查，再部署到自己的环境：
 
 1. 修改 `index.html` 中全部 Services 与 Quick Links 地址、名称和探测目标；卡片数量和动画序号会自动生成。
-2. 使用首次引导或严格 v2 配置设置自己的 `backgroundDir`、`allowedOrigins`、`probeDomainSuffix`、回环监听地址和探测超时。
+2. 使用首次引导或严格 v3 配置设置自己的 `backgroundDir`、`allowedOrigins`、`probeDomainSuffix`、回环监听地址和探测超时。
 3. 在 Zoraxy 中为自己的首页域配置同源 `/api/...` 转发，并只把 `index.html`、当前版本的 `assets/` 和 `backgrounds/` 放入公开 Web 根。
 4. 按实际暴露范围配置 Basic Auth 或等价访问控制；Origin、请求头和 CORS 不是身份认证。
 5. 确认 EXE、JSON 配置、状态、日志、去重记录、源代码和 `.git/` 均无法通过站点下载。
 6. 替换或新增壁纸时自行核对授权；不要把私人、来源不明或仅允许个人使用的素材提交到公开仓库。
 
-### 严格 v2 配置
+### 严格 v3 配置
 
-状态服务只接受完整的 v2 配置，v1、缺失字段和未知字段都会拒绝启动。从 v1 迁移时应删除旧配置并重新运行首次引导：
+状态服务只接受完整的 v3 配置，v1、v2、缺失字段和未知字段都会拒绝启动。从 v2 升级时先备份现有 JSON，再运行新版 `HomeLabWallpaperState.exe configure`；向导会保留旧配置中的已有值和控制令牌，并补充默认国际代理，无需删除状态目录：
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "backgroundDir": "D:\\Zoraxy\\www\\html\\backgrounds",
   "allowedOrigins": ["https://home.example.com"],
   "listen": "127.0.0.1:8787",
   "stateDir": "HomeLabWallpaperState-data",
   "controlToken": "由首次引导生成的随机令牌",
+  "bingInternationalProxy": "127.0.0.1:7890",
   "probeConnectAddress": "127.0.0.1:443",
   "probeDomainSuffix": "home.example.com",
   "probeTimeoutSeconds": 5
 }
 ```
 
-`probeConnectAddress` 只允许回环 IP，`probeTimeoutSeconds` 允许 1–5 秒。服务状态请求示例：
+`bingInternationalProxy` 只接受无协议、无凭据、无路径的回环 IP 与 1–65535 端口，默认 `127.0.0.1:7890`；代理必须支持 HTTPS CONNECT。`probeConnectAddress` 只允许回环 IP，`probeTimeoutSeconds` 允许 1–5 秒。服务状态请求示例：
 
 ```http
 POST /api/service-status
@@ -406,7 +409,7 @@ HomeLabWallpaperState.exe restart
 
 如果端口由其它 HTTP 服务或接口版本不兼容的旧后端占用，启动器会拒绝复用和启动第二个实例；应先停止占用进程，再重新启动当前版本。
 
-监视器每 60 秒显示 API、PID、背景槽位、探测配置、目录和最近日志。按 `R` 立即刷新；按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `X` 进入“大退”确认界面，只有精确输入大写 `Y` 并按 Enter 才会停止后端 API 并关闭监视器，其它输入会取消并返回默认界面。确认时如果 API 已经不可用，监视器会直接退出且不会操作未知进程；关闭请求被拒绝、超时或异常时则保留监视器并显示失败原因。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE 即可检查并恢复。
+监视器每 60 秒显示 API、PID、背景槽位、Bing 国际代理、探测配置、目录和最近日志。按 `R` 立即刷新；按 `Q` 或关闭窗口只关闭监视器，后端继续运行；按 `X` 进入“大退”确认界面，只有精确输入大写 `Y` 并按 Enter 才会停止后端 API 并关闭监视器，其它输入会取消并返回默认界面。确认时如果 API 已经不可用，监视器会直接退出且不会操作未知进程；关闭请求被拒绝、超时或异常时则保留监视器并显示失败原因。连续三次检查失败时，监视器会自动尝试恢复一次。关闭监视器后不再守护，之后再次双击 EXE 即可检查并恢复。
 
 `service.log` 只记录服务启动、停止和异常，不记录正常 HTTP 请求。日志按 48 KiB 轮转并只保留一个 `service.log.1` 备份，总量约 96 KiB。
 
@@ -427,7 +430,7 @@ D:/Zoraxy/www/html/backgrounds/
 └── thumbnails/                  # 后端自动生成，可随时重建且无需备份
 ```
 
-引导会验证 `bg.jpg`、公开目录边界、回环探测入口、域名后缀和超时；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。从 v1 迁移到 v2 时按全新配置处理，不导入旧状态。
+引导会验证 `bg.jpg`、公开目录边界、Bing 国际版回环代理、回环探测入口、域名后缀和超时；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。从 v2 迁移到 v3 时读取并保留可复用的旧配置值，现有状态文件继续使用。
 
 ## 构建
 
@@ -465,9 +468,9 @@ py_compile
 ## 部署和迁移
 
 1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置；已经存在时单独备份 `HomeLabWallpaperState-data/DashboardCards.json`。
-2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；只有仍在使用旧 v1 配置时才按“严格 v2 配置”一节重新引导。
+2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；若配置仍为 v1/v2，按“严格 v3 配置”一节运行新版 `configure` 完成迁移。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
-4. 先验证卡片未初始化 GET、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、Bing 路由、离线抽卡历史维护和 Homepage 同源 `/api/service-status`。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，卡片与壁纸功能会各自进入静态或缓存降级，不会向旧后端写入初始化状态。
+4. 先验证卡片未初始化 GET、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、Bing 路由、离线抽卡历史维护和 Homepage 同源 `/api/service-status`；确认代理运行时 international 可获取，代理停止时 CN 仍成功且 international 不直连。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，卡片与壁纸功能会各自进入静态或缓存降级，不会向旧后端写入初始化状态。
 5. 新部署第一次打开首页时，确认现有 11+5 张卡片一次性导入、`DashboardCards.json` 位于非公开状态目录，随后刷新不重复初始化；再打开背景选择器等待已有原图生成缩略图，并检查批量状态请求、卡片编辑、壁纸同步、上传、Bing 中国版/国际版每日图、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
@@ -507,7 +510,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 .\scripts\verify-project.ps1 -Build
 ```
 
-验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、现有 11+5 张静态卡片的稳定 ID/顺序/字段/SVG、一次性原子导入、服务器/缓存/静态三级来源、编辑草稿与必填阻塞、删除/保存确认、空频道、鼠标排序、动态频道重绑、陈旧状态探测隔离、SVG 白名单、双向频道状态与动效锁、宽窄屏与减少动态效果、壁纸批量上传、批量新增图片的展开/高亮/聚焦/清理、Bing 每日一图的固定源/市场/回退/幂等/部分失败契约、Python 卡片/探测/API 测试、Git 运行态文件排除以及暂存/未暂存空白差异。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 的卡片初始化、重启读取、PATCH/409 冲突及既有 API 冒烟测试。
+验证包括：PowerShell 语法、前端首屏内联脚本、稳定路径的外部 CSS 与原生 ES 模块入口、逐模块语法和本地 import 依赖、现有 11+5 张静态卡片的稳定 ID/顺序/字段/SVG、一次性原子导入、服务器/缓存/静态三级来源、编辑草稿与必填阻塞、删除/保存确认、空频道、鼠标排序、动态频道重绑、陈旧状态探测隔离、SVG 白名单、双向频道状态与动效锁、宽窄屏与减少动态效果、壁纸批量上传、批量新增图片的展开/高亮/聚焦/清理、Bing 每日一图的固定源、CN 直连、国际代理、市场回退、幂等和部分失败契约、Python 卡片/探测/API 测试、Git 运行态文件排除以及暂存/未暂存空白差异。验证会拒绝手写 `--card-index`；`-Build` 额外执行 PyInstaller 和真实 EXE 的卡片初始化、重启读取、PATCH/409 冲突及既有 API 冒烟测试。
 
 人工部署后还应检查：
 
@@ -524,7 +527,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - 系统启用减少动态效果后，频道切换应立即完成且保持可操作；
 - 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
 - Windows、Android 和 iOS 可以一次选择多张真实图片；队列逐张显示进度，非法文件被跳过、单项失败继续、全局错误停止，取消与重试可用；全成功窗口约 1.2 秒后自动返回，异常批次等待用户关闭，随后全部新增项同时高亮且第一张获得焦点；
-- “每日一图”按钮位于“查看原图”和抽卡按钮之间；首次点击保存中国版与 ROW（必要时 US）图片并同时高亮新增项，再次点击只定位已存在图片，均只刷新一次且不自动切换当前背景；
+- “每日一图”按钮位于“查看原图”和抽卡按钮之间；代理运行时首次点击应直连保存中国版、经代理保存 ROW（必要时 US）并同时高亮新增项，代理停止时中国版仍可成功且国际版提示检查代理、不得直连；再次点击只定位已存在图片，均只刷新一次且不自动切换当前背景；
 - 删除非默认背景会二次确认、优先进入回收站并让所有引用槽位回退；`bg.jpg` 无法删除；
 - 角色模式和全随机模式只接受 3–5 星，抽卡成功会以新增角标、描边、轻微摆动和键盘焦点提示图片，但不会自动切换背景；
 - 重复卡面不会再次抽取；清理失效记录和清空全部记录不删除背景图片，清空前会二次确认；

@@ -21,6 +21,7 @@ from homelab_state.backgrounds import StateStore
 from homelab_state.config import (
     CONFIG_VERSION,
     DEFAULT_BACKGROUND_DIRECTORY,
+    DEFAULT_BING_INTERNATIONAL_PROXY,
     DEFAULT_DATA_DIRECTORY,
     DEFAULT_LISTEN,
     DEFAULT_ORIGIN,
@@ -279,6 +280,7 @@ def monitor(config: AppConfig) -> int:
         print(f"进程 PID      ：{status.get('pid') if status else '-'}")
         print(f"背景目录      ：{config.background_dir}")
         print(f"状态目录      ：{config.state_dir}")
+        print(f"Bing 国际代理：{config.bing_international_proxy}")
         print(f"探测入口      ：{config.probe_connect_address}")
         print(f"探测域后缀    ：{config.probe_domain_suffix}")
         if preferences:
@@ -388,6 +390,9 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
     origin_default = ",".join(existing.get("allowedOrigins", [DEFAULT_ORIGIN]))
     listen_default = str(existing.get("listen", DEFAULT_LISTEN))
     state_default = str(existing.get("stateDir", DEFAULT_DATA_DIRECTORY))
+    bing_proxy_default = str(
+        existing.get("bingInternationalProxy", DEFAULT_BING_INTERNATIONAL_PROXY)
+    )
     probe_connect_default = str(existing.get("probeConnectAddress", DEFAULT_PROBE_CONNECT_ADDRESS))
     probe_domain_default = str(existing.get("probeDomainSuffix", DEFAULT_PROBE_DOMAIN_SUFFIX))
     probe_timeout_default = str(existing.get("probeTimeoutSeconds", DEFAULT_PROBE_TIMEOUT_SECONDS)).removesuffix(".0")
@@ -397,6 +402,7 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
         origin_text = prompt_value("允许的首页 Origin（多个值用逗号分隔）", origin_default)
         listen_text = prompt_value("监听地址", listen_default)
         state_text = prompt_value("状态目录", state_default)
+        bing_proxy_text = prompt_value("Bing 国际版 HTTP 代理", bing_proxy_default)
         probe_connect_text = prompt_value("Zoraxy 回环探测入口", probe_connect_default)
         probe_domain_text = prompt_value("允许探测的域名后缀", probe_domain_default)
         probe_timeout_text = prompt_value("单目标探测超时秒数（1-5）", probe_timeout_default)
@@ -409,6 +415,7 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
                 "listen": listen_text,
                 "stateDir": state_text,
                 "controlToken": existing.get("controlToken") or secrets.token_urlsafe(32),
+                "bingInternationalProxy": bing_proxy_text,
                 "probeConnectAddress": probe_connect_text,
                 "probeDomainSuffix": probe_domain_text,
                 "probeTimeoutSeconds": float(probe_timeout_text),

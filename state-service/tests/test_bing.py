@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import unittest
 from unittest import mock
+from urllib.error import URLError
+from urllib.request import ProxyHandler
 
 from homelab_state import backgrounds, bing
 from tests.helpers import FIXED_TIME, TemporaryProject, image_bytes
 
 
+PROXY_URL = "http://127.0.0.1:7890"
+
+
 class BingClientTests(unittest.TestCase):
     def test_metadata_parses_date_id_and_required_market(self) -> None:
-        client = bing.BingClient(opener=mock.Mock())
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=mock.Mock(),
+            international_opener=mock.Mock(),
+        )
         payload = json.dumps({
             "images": [{
                 "startdate": "20260820",
@@ -40,7 +50,11 @@ class BingClientTests(unittest.TestCase):
                 client.daily_image("en-WW")
 
     def test_metadata_rejects_invalid_dates_urls_and_identifiers(self) -> None:
-        client = bing.BingClient(opener=mock.Mock())
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=mock.Mock(),
+            international_opener=mock.Mock(),
+        )
         cases = (
             {"images": []},
             {"images": [{"startdate": "20260230", "urlbase": "/th?id=OHR.Test_ROW1"}]},
@@ -58,7 +72,13 @@ class BingClientTests(unittest.TestCase):
                     client.daily_image("en-WW")
 
     def test_fixed_https_urls_response_limits_and_redirect_rejection(self) -> None:
-        client = bing.BingClient(opener=mock.Mock())
+        direct_opener = mock.Mock()
+        international_opener = mock.Mock()
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=direct_opener,
+            international_opener=international_opener,
+        )
         invalid_urls = (
             "http://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&uhd=1&mkt=zh-CN",
             "https://evil.example/HPImageArchive.aspx?format=js&idx=0&n=1&uhd=1&mkt=zh-CN",
@@ -76,12 +96,14 @@ class BingClientTests(unittest.TestCase):
         response.headers.get_content_type.return_value = "application/json"
         response.headers.get.return_value = str(bing.MAX_BING_METADATA_BODY + 1)
         response.__enter__.return_value = response
-        client.opener.open.return_value = response
+        direct_opener.open.return_value = response
         with self.assertRaisesRegex(bing.BingUnavailable, "too large"):
             client._read(
                 metadata_url,
                 bing.MAX_BING_METADATA_BODY,
                 frozenset({"application/json"}),
+                opener=direct_opener,
+                proxied=False,
             )
 
         response.headers.get.return_value = None
@@ -91,6 +113,8 @@ class BingClientTests(unittest.TestCase):
                 metadata_url,
                 bing.MAX_BING_METADATA_BODY,
                 frozenset({"application/json"}),
+                opener=direct_opener,
+                proxied=False,
             )
 
         response.geturl.return_value = metadata_url
@@ -100,19 +124,131 @@ class BingClientTests(unittest.TestCase):
                 metadata_url,
                 bing.MAX_BING_METADATA_BODY,
                 frozenset({"application/json"}),
+                opener=direct_opener,
+                proxied=False,
             )
-        self.assertTrue(
-            any(isinstance(handler, bing._RejectBingRedirects) for handler in bing.BingClient().opener.handlers)
+        real_client = bing.BingClient(PROXY_URL)
+        for opener in (real_client.direct_opener, real_client.international_opener):
+            self.assertTrue(
+                any(
+                    isinstance(handler, bing._RejectBingRedirects)
+                    for handler in opener.handlers
+                )
+            )
+
+    def test_direct_and_proxy_openers_ignore_environment_proxy_configuration(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HTTP_PROXY": "http://192.0.2.1:3128",
+                "HTTPS_PROXY": "http://192.0.2.1:3128",
+            },
+        ):
+            client = bing.BingClient(PROXY_URL)
+
+        direct_proxy_handlers = [
+            handler
+            for handler in client.direct_opener.handlers
+            if isinstance(handler, ProxyHandler)
+        ]
+        international_proxy_handlers = [
+            handler
+            for handler in client.international_opener.handlers
+            if isinstance(handler, ProxyHandler)
+        ]
+        self.assertEqual(direct_proxy_handlers, [])
+        self.assertEqual(len(international_proxy_handlers), 1)
+        self.assertEqual(
+            international_proxy_handlers[0].proxies,
+            {"https": PROXY_URL},
         )
 
+    def test_market_metadata_and_image_downloads_use_the_expected_opener(self) -> None:
+        direct_opener = mock.Mock()
+        international_opener = mock.Mock()
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=direct_opener,
+            international_opener=international_opener,
+        )
+        china_payload = json.dumps({
+            "images": [{
+                "startdate": "20260820",
+                "urlbase": "/th?id=OHR.China_ZH-CN100",
+            }],
+        }).encode()
+        row_payload = json.dumps({
+            "images": [{
+                "startdate": "20260820",
+                "urlbase": "/th?id=OHR.World_ROW200",
+            }],
+        }).encode()
+        with mock.patch.object(
+            client,
+            "_read",
+            side_effect=[china_payload, row_payload],
+        ) as read:
+            china = client.daily_image("zh-CN")
+            row = client.daily_image("en-WW")
+
+        self.assertIs(read.call_args_list[0].kwargs["opener"], direct_opener)
+        self.assertFalse(read.call_args_list[0].kwargs["proxied"])
+        self.assertIs(read.call_args_list[1].kwargs["opener"], international_opener)
+        self.assertTrue(read.call_args_list[1].kwargs["proxied"])
+
+        with mock.patch.object(client, "_read", return_value=b"jpeg") as read:
+            client.download_image(china)
+            client.download_image(row)
+        self.assertIs(read.call_args_list[0].kwargs["opener"], direct_opener)
+        self.assertFalse(read.call_args_list[0].kwargs["proxied"])
+        self.assertIs(read.call_args_list[1].kwargs["opener"], international_opener)
+        self.assertTrue(read.call_args_list[1].kwargs["proxied"])
+
+    def test_proxied_transport_failures_are_distinct_from_direct_failures(self) -> None:
+        transport = mock.Mock()
+        transport.open.side_effect = URLError("offline")
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=transport,
+            international_opener=transport,
+        )
+        metadata_url = client._metadata_url("en-WW")
+        with self.assertRaises(bing.BingProxyUnavailable):
+            client._read(
+                metadata_url,
+                bing.MAX_BING_METADATA_BODY,
+                frozenset({"application/json"}),
+                opener=transport,
+                proxied=True,
+            )
+        with self.assertRaises(bing.BingUnavailable) as raised:
+            client._read(
+                metadata_url,
+                bing.MAX_BING_METADATA_BODY,
+                frozenset({"application/json"}),
+                opener=transport,
+                proxied=False,
+            )
+        self.assertNotIsInstance(raised.exception, bing.BingProxyUnavailable)
+
     def test_operation_deadline_caps_individual_request_timeout(self) -> None:
-        client = bing.BingClient(timeout=20, opener=mock.Mock(), monotonic=lambda: 45)
+        client = bing.BingClient(
+            PROXY_URL,
+            timeout=20,
+            direct_opener=mock.Mock(),
+            international_opener=mock.Mock(),
+            monotonic=lambda: 45,
+        )
         self.assertEqual(client._remaining_timeout(55), 10)
         with self.assertRaisesRegex(bing.BingUnavailable, "timed out"):
             client._remaining_timeout(45)
 
     def test_image_download_uses_no_rf_and_falls_back_only_after_uhd_404(self) -> None:
-        client = bing.BingClient(opener=mock.Mock())
+        client = bing.BingClient(
+            PROXY_URL,
+            direct_opener=mock.Mock(),
+            international_opener=mock.Mock(),
+        )
         image = bing.BingImage("20260820", "OHR.Test_ROW123", "row")
         payload = image_bytes("JPEG")
         with mock.patch.object(
@@ -127,6 +263,9 @@ class BingClientTests(unittest.TestCase):
         self.assertIn("_1920x1080.jpg", read.call_args_list[1].args[0])
         self.assertNotIn("rf=", read.call_args_list[0].args[0])
         self.assertNotIn("rf=", read.call_args_list[1].args[0])
+        for call in read.call_args_list:
+            self.assertIs(call.kwargs["opener"], client.international_opener)
+            self.assertTrue(call.kwargs["proxied"])
 
 
 class FakeBingClient:
@@ -252,6 +391,36 @@ class BingDailyManagerTests(unittest.TestCase):
         self.assertEqual(international["market"], "en-US")
         self.assertTrue(international["fallback"])
         self.assertFalse(any(path.name.startswith("bing_row_") for path in self.project.backgrounds.iterdir()))
+
+    def test_proxy_metadata_failure_stops_before_us_without_affecting_china(self) -> None:
+        self.client.failures["en-WW"] = bing.BingProxyUnavailable("proxy offline")
+        result = self.manager.fetch_daily()
+
+        self.assertEqual(result["results"][0]["status"], "created")
+        self.assertEqual(
+            result["results"][1],
+            {
+                "slot": "international",
+                "status": "failed",
+                "error": "bing_unavailable",
+                "market": "ROW",
+                "fallback": False,
+            },
+        )
+        self.assertEqual(self.client.daily_calls, ["zh-CN", "en-WW"])
+
+    def test_proxy_image_failure_stops_before_us_without_direct_retry(self) -> None:
+        self.client.download_failures["row"] = bing.BingProxyUnavailable(
+            "proxy offline"
+        )
+        result = self.manager.fetch_daily()
+
+        self.assertEqual(result["results"][0]["status"], "created")
+        self.assertEqual(result["results"][1]["status"], "failed")
+        self.assertEqual(result["results"][1]["error"], "bing_unavailable")
+        self.assertEqual(result["results"][1]["market"], "ROW")
+        self.assertEqual(self.client.daily_calls, ["zh-CN", "en-WW"])
+        self.assertEqual(self.client.download_calls, ["cn", "row"])
 
     def test_invalid_row_image_falls_back_and_full_upstream_failure_is_partial(self) -> None:
         self.client.download_failures["row"] = backgrounds.InvalidImage("bad image")

@@ -78,12 +78,13 @@ class TemporaryProject:
 
     def write_config(self, **overrides: object) -> config.AppConfig:
         value = {
-            "version": 2,
+            "version": 3,
             "backgroundDir": r"web\html\backgrounds",
             "allowedOrigins": [TEST_ORIGIN],
             "listen": "127.0.0.1:8787",
             "stateDir": config.DEFAULT_DATA_DIRECTORY,
             "controlToken": "x" * 43,
+            "bingInternationalProxy": "127.0.0.1:7890",
             "probeConnectAddress": "127.0.0.1:443",
             "probeDomainSuffix": "home.example.test",
             "probeTimeoutSeconds": 5,

@@ -36,7 +36,7 @@ from homelab_state.bestdori import (
     BestdoriPoolExhausted,
     BestdoriUnavailable,
 )
-from homelab_state.bing import BingDailyBusy, BingDailyManager
+from homelab_state.bing import BingClient, BingDailyBusy, BingDailyManager
 from homelab_state.cards import (
     MAX_CARDS_REQUEST_BODY,
     CardsAlreadyInitialized,
@@ -111,7 +111,10 @@ class StateHTTPServer(ThreadingHTTPServer):
             store,
             config.state_dir / "BestdoriCardDraws.json",
         )
-        self.bing_manager = bing_manager or BingDailyManager(store)
+        self.bing_manager = bing_manager or BingDailyManager(
+            store,
+            client=BingClient(config.bing_international_proxy_url),
+        )
         self.cards_store = cards_store or CardsStore.for_state_directory(
             config.state_dir,
             config.probe_domain_suffix,
