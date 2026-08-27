@@ -2,6 +2,18 @@
 
 ## 待完成
 
+### 可配置 SVG 地址栏图标（favicon）
+
+- [ ] 支持从网页上传、替换和移除全站 SVG favicon；本阶段确定后端契约、文件读取、保存及页面加载刷新逻辑，不预设按钮位置、样式、动效或最终提示文案。
+  - 存储边界：使用 Web Root 之外 `stateDir` 中独立的 `DashboardFavicon.json`，不写入公开 `favicon.svg`，也不并入按频道修订的 `DashboardCards.json`；状态缺失或旧后端不支持接口时保持当前“无图标”降级。
+  - SVG 安全：后端以固定 favicon 作用域直接复用 `cards.py` 的 `sanitize_svg()`，前端复用 `card-svg.js` 做本地预检；继续执行现有 64 KiB 原始大小、24 KiB 清洗后大小、元素/属性/命名空间/内部引用白名单及外部资源禁用规则，后端始终重新验证并返回规范化 SVG。
+  - 状态接口：新增 `GET /api/favicon` 返回 `version`、`configured`、`updatedAt` 和 SHA-256 `contentHash`；新增 `PATCH /api/favicon`，以 `iconSvg` 字符串上传或替换、以 `iconSvg: null` 移除，并沿用精确 Origin、`X-Requested-With`、JSON Content-Type、正文上限和未知字段拒绝策略。
+  - 并发语义：favicon 为全站单例并采用最后写入生效，不增加 revision 或 409 冲突；缺失状态表示从未配置，移除后原子写入空状态，损坏、符号链接或不兼容状态返回稳定 503，且不得自动覆盖或重置。
+  - 图标资源：新增 `GET /api/favicon.svg?v=<完整内容哈希>`，仅在哈希匹配当前配置时返回清洗后的 `image/svg+xml`，同时设置 `nosniff`、ETag 和私有 immutable 缓存；未配置或哈希不匹配返回 404，避免旧 URL 被错误复用于新内容。
+  - 前端加载：新增独立 favicon 管理模块，页面启动时读取状态并按内容哈希创建或更新 `<link rel="icon" type="image/svg+xml">`；上传或移除所在页面立即更新，其他标签页和设备在下次刷新时同步，不增加轮询、跨标签广播或跨设备推送。
+  - 兼容范围：只支持现代浏览器的 SVG favicon，不生成 PNG 或 ICO，不新增栅格化依赖、配置版本或公开目录写权限；新版前端遇到旧后端时静默保留无图标，新后端配合旧前端时不影响其它功能。
+  - 验收要求：自动测试覆盖状态缺失、上传、连续替换、移除、重启持久化、最后写入、安全 SVG 拒绝、正文与方法限制、内容哈希及响应头、状态损坏和前端 link 降级；同步更新服务接口版本、PyInstaller 冒烟、README 与 CHANGELOG，并在 Chrome/Edge 人工确认替换和移除后不残留旧图标。
+
 ---
 
 ## 已完成
