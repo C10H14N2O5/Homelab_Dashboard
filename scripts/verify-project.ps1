@@ -664,6 +664,237 @@ if (settingsMenuClickStart < 0
     || pageSettingsScript.slice(settingsMenuClickStart, settingsMenuPointerdownStart).includes('}, true);')) {
     throw new Error('Settings menu item clicks must defer closing until Edge finishes native dialog activation.');
 }
+const pageSettingsMenuRule = stylesheet.match(/\.page-settings-menu\s*\{([^}]*)\}/)?.[1] || '';
+const pageSettingsVisibleRule = stylesheet.match(/\.page-settings\[data-menu-open="true"\]\s+\.page-settings-menu\s*\{([^}]*)\}/)?.[1] || '';
+if (!/opacity:\s*0/.test(pageSettingsMenuRule)
+    || !/translateY\(6px\)\s*scale\(0\.98\)/.test(pageSettingsMenuRule)
+    || !/opacity\s+150ms\s+ease/.test(pageSettingsMenuRule)
+    || !/transform\s+170ms\s+cubic-bezier\(0\.2,\s*0\.8,\s*0\.2,\s*1\)/.test(pageSettingsMenuRule)
+    || !/pointer-events:\s*none/.test(pageSettingsMenuRule)
+    || !/will-change:\s*opacity,\s*transform/.test(pageSettingsMenuRule)
+    || !/opacity:\s*1/.test(pageSettingsVisibleRule)
+    || !/translateY\(0\)\s*scale\(1\)/.test(pageSettingsVisibleRule)
+    || !/pointer-events:\s*auto/.test(pageSettingsVisibleRule)) {
+    throw new Error('The page settings menu lost its lightweight bidirectional motion or closing interaction guard.');
+}
+
+function makePageSettingsHarness(reducedMotion = false) {
+    function makeEventTarget(extra = {}) {
+        const listeners = new Map();
+        return Object.assign({
+            addEventListener(type, handler) {
+                if (!listeners.has(type)) listeners.set(type, new Set());
+                listeners.get(type).add(handler);
+            },
+            removeEventListener(type, handler) {
+                listeners.get(type)?.delete(handler);
+            },
+            dispatch(type, event = {}) {
+                Array.from(listeners.get(type) || []).forEach((handler) => handler(event));
+            }
+        }, extra);
+    }
+
+    const frames = new Map();
+    const timers = new Map();
+    let nextFrame = 1;
+    let nextTimer = 1;
+    let runtimeDocument;
+    function makeMenuItem() {
+        const attributes = new Map();
+        return makeEventTarget({
+            disabled: false,
+            focusCount: 0,
+            getAttribute(name) { return attributes.get(name) ?? null; },
+            setAttribute(name, value) { attributes.set(name, String(value)); },
+            focus() {
+                this.focusCount += 1;
+                runtimeDocument.activeElement = this;
+            },
+            closest(selector) { return selector === '[role="menuitem"]' ? this : null; }
+        });
+    }
+    const items = [makeMenuItem(), makeMenuItem()];
+    const menu = makeEventTarget({
+        hidden: true,
+        querySelectorAll(selector) { return selector === '[role="menuitem"]' ? items : []; }
+    });
+    const triggerAttributes = new Map();
+    const trigger = makeEventTarget({
+        isConnected: true,
+        focusCount: 0,
+        getAttribute(name) { return triggerAttributes.get(name) ?? null; },
+        setAttribute(name, value) { triggerAttributes.set(name, String(value)); },
+        focus() {
+            this.focusCount += 1;
+            runtimeDocument.activeElement = this;
+        }
+    });
+    const container = makeEventTarget({
+        dataset: { menuOpen: 'false' },
+        contains(target) {
+            return target === this || target === trigger || target === menu || items.includes(target);
+        }
+    });
+    const documentTarget = makeEventTarget();
+    runtimeDocument = Object.assign(documentTarget, {
+        activeElement: trigger,
+        getElementById(id) {
+            return {
+                'page-settings': container,
+                'page-settings-button': trigger,
+                'page-settings-menu': menu
+            }[id] || null;
+        }
+    });
+    const windowTarget = makeEventTarget({
+        matchMedia() { return { matches: reducedMotion }; },
+        requestAnimationFrame(callback) {
+            const id = nextFrame++;
+            frames.set(id, callback);
+            return id;
+        },
+        cancelAnimationFrame(id) { frames.delete(id); },
+        setTimeout(callback, delay) {
+            const id = nextTimer++;
+            timers.set(id, { callback, delay });
+            return id;
+        },
+        clearTimeout(id) { timers.delete(id); }
+    });
+    const executablePageSettings = pageSettingsScript.replace(/^export /, '');
+    const context = vm.createContext({ document: runtimeDocument, Promise, window: windowTarget });
+    new vm.Script(
+        `${executablePageSettings}\n`
+        + 'globalThis.initializePageSettings = initializePageSettings;'
+    ).runInContext(context);
+    const controller = context.initializePageSettings();
+    return {
+        container,
+        controller,
+        items,
+        menu,
+        trigger,
+        frameCount() { return frames.size; },
+        runNextFrame() {
+            const entry = frames.entries().next().value;
+            if (!entry) return;
+            frames.delete(entry[0]);
+            entry[1]();
+        },
+        runAllFrames() {
+            while (frames.size) this.runNextFrame();
+        },
+        runTimers() {
+            Array.from(timers.entries()).forEach(([id, timer]) => {
+                timers.delete(id);
+                timer.callback();
+            });
+        },
+        timerCount() { return timers.size; },
+        timerDelays() { return Array.from(timers.values(), (timer) => timer.delay); }
+    };
+}
+
+const animatedSettings = makePageSettingsHarness();
+if (!animatedSettings.menu.hidden
+    || animatedSettings.container.dataset.menuOpen !== 'false'
+    || animatedSettings.trigger.getAttribute('aria-expanded') !== 'false') {
+    throw new Error('The page settings menu must initialize fully hidden and collapsed.');
+}
+animatedSettings.controller.open();
+if (animatedSettings.menu.hidden
+    || animatedSettings.container.dataset.menuOpen !== 'false'
+    || animatedSettings.trigger.getAttribute('aria-expanded') !== 'true'
+    || animatedSettings.items[0].focusCount !== 0
+    || animatedSettings.frameCount() !== 1) {
+    throw new Error('The page settings menu must expose an initial transparent frame before opening.');
+}
+animatedSettings.runNextFrame();
+if (animatedSettings.container.dataset.menuOpen !== 'false' || animatedSettings.frameCount() !== 1) {
+    throw new Error('The page settings menu reveal must wait for its second animation frame.');
+}
+animatedSettings.runNextFrame();
+if (!animatedSettings.controller.isOpen()
+    || animatedSettings.container.dataset.menuOpen !== 'true'
+    || animatedSettings.items[0].focusCount !== 1) {
+    throw new Error('The page settings menu did not reveal and focus after two animation frames.');
+}
+animatedSettings.controller.close({ restoreFocus: true });
+if (animatedSettings.controller.isOpen()
+    || animatedSettings.menu.hidden
+    || animatedSettings.container.dataset.menuOpen !== 'false'
+    || animatedSettings.trigger.getAttribute('aria-expanded') !== 'false'
+    || animatedSettings.trigger.focusCount !== 1
+    || JSON.stringify(animatedSettings.timerDelays()) !== JSON.stringify([220])) {
+    throw new Error('The page settings menu closed before its exit transition or failed to restore trigger state.');
+}
+animatedSettings.menu.dispatch('transitionend', {
+    target: animatedSettings.menu,
+    propertyName: 'transform'
+});
+if (animatedSettings.menu.hidden) {
+    throw new Error('A non-opacity transition ended the page settings menu prematurely.');
+}
+animatedSettings.menu.dispatch('transitionend', {
+    target: animatedSettings.menu,
+    propertyName: 'opacity'
+});
+if (!animatedSettings.menu.hidden || animatedSettings.timerCount() !== 0) {
+    throw new Error('The page settings menu transition did not finish by hiding and cleaning its fallback timer.');
+}
+
+const fallbackSettings = makePageSettingsHarness();
+fallbackSettings.controller.open();
+fallbackSettings.runAllFrames();
+fallbackSettings.controller.close();
+fallbackSettings.runTimers();
+if (!fallbackSettings.menu.hidden) {
+    throw new Error('The page settings menu close timeout did not provide a bounded fallback.');
+}
+
+const interruptedSettings = makePageSettingsHarness();
+interruptedSettings.controller.open();
+interruptedSettings.runAllFrames();
+interruptedSettings.controller.close();
+interruptedSettings.controller.open({ last: true });
+interruptedSettings.menu.dispatch('transitionend', {
+    target: interruptedSettings.menu,
+    propertyName: 'opacity'
+});
+interruptedSettings.runAllFrames();
+interruptedSettings.runTimers();
+if (interruptedSettings.menu.hidden
+    || !interruptedSettings.controller.isOpen()
+    || interruptedSettings.container.dataset.menuOpen !== 'true'
+    || interruptedSettings.items[1].focusCount !== 1
+    || interruptedSettings.timerCount() !== 0) {
+    throw new Error('Reopening the page settings menu must cancel stale close completion.');
+}
+
+const staleRevealSettings = makePageSettingsHarness();
+staleRevealSettings.controller.open();
+staleRevealSettings.controller.close();
+staleRevealSettings.runAllFrames();
+staleRevealSettings.runTimers();
+if (!staleRevealSettings.menu.hidden || staleRevealSettings.container.dataset.menuOpen !== 'false') {
+    throw new Error('Closing during page settings entrance must cancel stale reveal frames.');
+}
+
+const reducedSettings = makePageSettingsHarness(true);
+reducedSettings.controller.open();
+if (reducedSettings.menu.hidden
+    || reducedSettings.container.dataset.menuOpen !== 'true'
+    || reducedSettings.items[0].focusCount !== 1
+    || reducedSettings.frameCount() !== 0) {
+    throw new Error('Reduced-motion page settings must reveal and focus immediately.');
+}
+reducedSettings.controller.close({ restoreFocus: true });
+if (!reducedSettings.menu.hidden
+    || reducedSettings.trigger.focusCount !== 1
+    || reducedSettings.timerCount() !== 0) {
+    throw new Error('Reduced-motion page settings must close and restore focus immediately.');
+}
 if (!faviconManagerScript.includes("new URL('/api/favicon', document.baseURI)")
     || !faviconManagerScript.includes("new URL('/api/favicon.svg', document.baseURI)")
     || !faviconManagerScript.includes("document.head.querySelector('link[data-managed-favicon=\"true\"]')")

@@ -1173,6 +1173,8 @@
             transform: translateY(6px) scale(0.98);
             transform-origin: right bottom;
             transition: opacity 150ms ease, transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
+            pointer-events: none;
+            will-change: opacity, transform;
         }
 
         .page-settings-menu[hidden] {
@@ -1182,6 +1184,7 @@
         .page-settings[data-menu-open="true"] .page-settings-menu {
             opacity: 1;
             transform: translateY(0) scale(1);
+            pointer-events: auto;
         }
 
         .page-settings-item {

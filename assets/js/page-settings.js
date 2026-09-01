@@ -5,40 +5,121 @@ export function initializePageSettings() {
     if (!container || !trigger || !menu) throw new Error('网页设置菜单结构不完整。');
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
     if (items.length !== 2) throw new Error('网页设置菜单项结构不完整。');
+    const closeFallbackMs = 220;
     let pointerIsInside = false;
+    let motionToken = 0;
+    let menuState = 'closed';
+    let firstRevealFrame = 0;
+    let secondRevealFrame = 0;
+    let closeTimer = 0;
+    let closeHandler = null;
+    let pendingFocusTarget = null;
 
     function enabledItems() {
         return items.filter((item) => !item.disabled && item.getAttribute('aria-disabled') !== 'true');
     }
 
     function isOpen() {
-        return !menu.hidden;
+        return menuState === 'opening' || menuState === 'open';
     }
 
     function focusTrigger() {
         if (trigger.isConnected) trigger.focus({ preventScroll: true });
     }
 
+    function prefersReducedMotion() {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    function clearMotionWait() {
+        if (firstRevealFrame) window.cancelAnimationFrame(firstRevealFrame);
+        if (secondRevealFrame) window.cancelAnimationFrame(secondRevealFrame);
+        firstRevealFrame = 0;
+        secondRevealFrame = 0;
+        if (closeHandler) menu.removeEventListener('transitionend', closeHandler);
+        closeHandler = null;
+        window.clearTimeout(closeTimer);
+        closeTimer = 0;
+    }
+
+    function beginMotion() {
+        motionToken += 1;
+        clearMotionWait();
+        return motionToken;
+    }
+
+    function finishClose(token) {
+        if (token !== motionToken || menuState !== 'closing') return;
+        clearMotionWait();
+        pendingFocusTarget = null;
+        menu.hidden = true;
+        menuState = 'closed';
+    }
+
     function close(options = {}) {
-        if (!isOpen()) {
+        if (menuState === 'closed') {
             if (options.restoreFocus) focusTrigger();
             return false;
         }
-        menu.hidden = true;
+        if (menuState === 'closing') {
+            if (options.restoreFocus) focusTrigger();
+            return false;
+        }
+        const token = beginMotion();
+        menuState = 'closing';
+        pendingFocusTarget = null;
         container.dataset.menuOpen = 'false';
         trigger.setAttribute('aria-expanded', 'false');
         if (options.restoreFocus) focusTrigger();
+        if (prefersReducedMotion()) {
+            finishClose(token);
+        } else {
+            closeHandler = (event) => {
+                if (event.target !== menu || event.propertyName !== 'opacity') return;
+                finishClose(token);
+            };
+            menu.addEventListener('transitionend', closeHandler);
+            closeTimer = window.setTimeout(() => finishClose(token), closeFallbackMs);
+        }
         return true;
     }
 
     function open(options = {}) {
         const available = enabledItems();
         if (available.length === 0) return false;
-        menu.hidden = false;
-        container.dataset.menuOpen = 'true';
-        trigger.setAttribute('aria-expanded', 'true');
         const target = options.last ? available[available.length - 1] : available[0];
-        target.focus({ preventScroll: true });
+        if (menuState === 'open') {
+            target.focus({ preventScroll: true });
+            return true;
+        }
+        if (menuState === 'opening') {
+            pendingFocusTarget = target;
+            return true;
+        }
+        const token = beginMotion();
+        menuState = 'opening';
+        pendingFocusTarget = target;
+        menu.hidden = false;
+        container.dataset.menuOpen = 'false';
+        trigger.setAttribute('aria-expanded', 'true');
+
+        const reveal = () => {
+            secondRevealFrame = 0;
+            if (token !== motionToken || menuState !== 'opening') return;
+            menuState = 'open';
+            container.dataset.menuOpen = 'true';
+            const focusTarget = pendingFocusTarget;
+            pendingFocusTarget = null;
+            focusTarget?.focus({ preventScroll: true });
+        };
+        if (prefersReducedMotion()) {
+            reveal();
+        } else {
+            firstRevealFrame = window.requestAnimationFrame(() => {
+                firstRevealFrame = 0;
+                secondRevealFrame = window.requestAnimationFrame(reveal);
+            });
+        }
         return true;
     }
 
@@ -68,6 +149,10 @@ export function initializePageSettings() {
         }
     });
     menu.addEventListener('keydown', (event) => {
+        if (!isOpen()) {
+            event.preventDefault();
+            return;
+        }
         if (event.key === 'ArrowDown') {
             event.preventDefault();
             moveFocus(1);
@@ -92,7 +177,7 @@ export function initializePageSettings() {
     // Edge can otherwise cancel a dialog opened while its triggering menu is hidden.
     menu.addEventListener('click', (event) => {
         const item = event.target.closest?.('[role="menuitem"]');
-        if (!item || item.disabled || item.getAttribute('aria-disabled') === 'true') return;
+        if (!isOpen() || !item || item.disabled || item.getAttribute('aria-disabled') === 'true') return;
         window.setTimeout(() => close(), 0);
     });
     container.addEventListener('pointerdown', () => {
@@ -116,6 +201,8 @@ export function initializePageSettings() {
         close({ restoreFocus: menu.contains(document.activeElement) });
     });
 
-    close();
+    menu.hidden = true;
+    container.dataset.menuOpen = 'false';
+    trigger.setAttribute('aria-expanded', 'false');
     return { close, focusTrigger, isOpen, open };
 }
