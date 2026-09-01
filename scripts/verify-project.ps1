@@ -32,8 +32,11 @@ $frontendModulePaths = @(
     'channel-switch.js',
     'service-status.js',
     'card-svg.js',
+    'dialog-motion.js',
     'card-editor.js',
     'card-manager.js',
+    'page-settings.js',
+    'favicon-manager.js',
     'app.js'
 ) | ForEach-Object { Join-Path $frontendModuleRoot $_ }
 $stateServicePath = Join-Path $projectRoot 'state-service'
@@ -97,12 +100,16 @@ function Test-BlockedRepositoryPath {
             'state.json.bak',
             'dashboardcards.json',
             'dashboardcards.json.bak',
+            'dashboardfavicon.json',
+            'dashboardfavicon.json.bak',
             'homelabwallpaperstate.json'
         ) -or
         $leafName -like 'state.json.corrupt-*' -or
         $leafName -like 'dashboardcards.json.corrupt-*' -or
+        $leafName -like 'dashboardfavicon.json.corrupt-*' -or
         $leafName -like '.state-*.tmp' -or
         $leafName -like '.dashboardcards.json.*.tmp' -or
+        $leafName -like '.dashboardfavicon.json.*.tmp' -or
         $leafName -match '\.log(?:\..+)?$') {
         return $true
     }
@@ -138,8 +145,11 @@ $requiredFiles = @(
     'assets\js\channel-switch.js',
     'assets\js\service-status.js',
     'assets\js\card-svg.js',
+    'assets\js\dialog-motion.js',
     'assets\js\card-editor.js',
     'assets\js\card-manager.js',
+    'assets\js\page-settings.js',
+    'assets\js\favicon-manager.js',
     'assets\js\app.js',
     'README.md',
     'CHANGELOG.md',
@@ -163,6 +173,7 @@ $requiredFiles = @(
     'state-service\homelab_state\config.py',
     'state-service\homelab_state\backgrounds.py',
     'state-service\homelab_state\cards.py',
+    'state-service\homelab_state\favicon.py',
     'state-service\homelab_state\bestdori.py',
     'state-service\homelab_state\bing.py',
     'state-service\homelab_state\probe.py',
@@ -173,6 +184,7 @@ $requiredFiles = @(
     'state-service\tests\test_config.py',
     'state-service\tests\test_backgrounds.py',
     'state-service\tests\test_cards.py',
+    'state-service\tests\test_favicon.py',
     'state-service\tests\test_bestdori.py',
     'state-service\tests\test_bing.py',
     'state-service\tests\test_probe.py',
@@ -210,6 +222,9 @@ $backgroundServiceSource = [IO.File]::ReadAllText(
 $cardsServiceSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\homelab_state\cards.py')
 )
+$faviconServiceSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\homelab_state\favicon.py')
+)
 $launcherTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_launcher.py')
 )
@@ -218,6 +233,9 @@ $httpServiceTestSource = [IO.File]::ReadAllText(
 )
 $cardsServiceTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_cards.py')
+)
+$faviconServiceTestSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'state-service\tests\test_favicon.py')
 )
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
@@ -251,6 +269,10 @@ $maintenanceContracts = @(
     @{ Name = 'dashboard cards private state'; Source = $cardsServiceSource; Marker = 'CARDS_STATE_FILE_NAME = "DashboardCards.json"' },
     @{ Name = 'dashboard cards channel limit'; Source = $cardsServiceSource; Marker = 'MAX_CARDS_PER_CHANNEL = 32' },
     @{ Name = 'dashboard cards SVG sanitizer'; Source = $cardsServiceSource; Marker = 'def sanitize_svg(' },
+    @{ Name = 'dashboard favicon private state'; Source = $faviconServiceSource; Marker = 'FAVICON_STATE_FILE_NAME = "DashboardFavicon.json"' },
+    @{ Name = 'dashboard favicon shared SVG sanitizer'; Source = $faviconServiceSource; Marker = 'sanitize_svg(icon_svg, FAVICON_SANITIZER_SCOPE)' },
+    @{ Name = 'dashboard favicon restart persistence regression'; Source = $faviconServiceTestSource; Marker = 'test_upload_is_sanitized_hashed_and_persists_across_restart' },
+    @{ Name = 'dashboard favicon removed-state restart regression'; Source = $faviconServiceTestSource; Marker = 'test_replacement_invalidates_old_hash_and_removal_persists_tombstone' },
     @{ Name = 'dashboard cards concurrent initialization regression'; Source = $cardsServiceTestSource; Marker = 'test_concurrent_initialize_has_one_winner' },
     @{ Name = 'dashboard cards cross-channel concurrency regression'; Source = $cardsServiceTestSource; Marker = 'test_concurrent_different_channel_updates_both_persist' },
     @{ Name = 'Python unit tests'; Source = $buildSource; Marker = 'unittest discover' },
@@ -260,6 +282,8 @@ $maintenanceContracts = @(
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'packaged card initialization check'; Source = $buildSource; Marker = '/api/cards/initialize' },
     @{ Name = 'packaged card restart persistence check'; Source = $buildSource; Marker = 'did not preserve card state across restart' },
+    @{ Name = 'packaged favicon resource check'; Source = $buildSource; Marker = '/api/favicon.svg?v=' },
+    @{ Name = 'packaged favicon removal persistence check'; Source = $buildSource; Marker = 'did not preserve removed favicon state across restart' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'release file manifest'; Source = $packageSource; Marker = 'SHA256SUMS.txt' },
     @{ Name = 'release archive checksum'; Source = $packageSource; Marker = 'ArchiveSha256' },
@@ -364,8 +388,11 @@ const expectedModuleNames = [
     'channel-switch.js',
     'service-status.js',
     'card-svg.js',
+    'dialog-motion.js',
     'card-editor.js',
     'card-manager.js',
+    'page-settings.js',
+    'favicon-manager.js',
     'app.js'
 ];
 if (JSON.stringify(Object.keys(moduleSources)) !== JSON.stringify(expectedModuleNames)) {
@@ -389,8 +416,11 @@ const searchScript = moduleSources['search.js'];
 const channelScript = moduleSources['channel-switch.js'];
 const serviceScript = moduleSources['service-status.js'];
 const cardSvgScript = moduleSources['card-svg.js'];
+const dialogMotionModuleScript = moduleSources['dialog-motion.js'];
 const cardEditorScript = moduleSources['card-editor.js'];
 const cardManagerScript = moduleSources['card-manager.js'];
+const pageSettingsScript = moduleSources['page-settings.js'];
+const faviconManagerScript = moduleSources['favicon-manager.js'];
 const appScript = moduleSources['app.js'];
 const runtimeScript = moduleEntries.map((entry) => entry[1]).join('\n');
 const backgroundNetworkScript = coreScript.slice(coreScript.indexOf('function fetchWithTimeout('))
@@ -544,13 +574,28 @@ if (/<(?:script|foreignObject|image)\b/i.test(quickLinkSvgMarkup)
 
 const cardEditorLaunchTag = htmlDocument.match(/<button\b[^>]*\bid="card-editor-button"[^>]*>/)?.[0] || '';
 if (!cardEditorLaunchTag.includes('type="button"')
+    || !cardEditorLaunchTag.includes('role="menuitem"')
     || !cardEditorLaunchTag.includes('aria-haspopup="dialog"')
     || !cardEditorLaunchTag.includes('aria-controls="card-editor-dialog"')
     || !/\bdisabled(?:\s|>)/.test(cardEditorLaunchTag)) {
-    throw new Error('The card editor launch button must be a progressively enhanced disabled dialog trigger.');
+    throw new Error('The card editor launch button must remain a progressively enhanced disabled settings-menu item.');
 }
-if (!/<div\b[^>]*class="dashboard-footer-actions"[^>]*>[\s\S]*?id="background-picker-button"[\s\S]*?id="card-editor-button"[\s\S]*?<\/div>/.test(htmlDocument)) {
-    throw new Error('Background and card editor controls must remain grouped side by side in footer order.');
+const pageSettingsLaunchTag = htmlDocument.match(/<button\b[^>]*\bid="page-settings-button"[^>]*>/)?.[0] || '';
+const faviconEditorLaunchTag = htmlDocument.match(/<button\b[^>]*\bid="favicon-editor-button"[^>]*>/)?.[0] || '';
+if (!pageSettingsLaunchTag.includes('type="button"')
+    || !pageSettingsLaunchTag.includes('aria-haspopup="menu"')
+    || !pageSettingsLaunchTag.includes('aria-controls="page-settings-menu"')
+    || !pageSettingsLaunchTag.includes('aria-expanded="false"')) {
+    throw new Error('The page settings trigger must expose its popup-menu relationship and closed state.');
+}
+if (!faviconEditorLaunchTag.includes('role="menuitem"')
+    || !faviconEditorLaunchTag.includes('aria-haspopup="dialog"')
+    || !faviconEditorLaunchTag.includes('aria-controls="favicon-dialog"')) {
+    throw new Error('The favicon editor launch button must be a settings-menu dialog trigger.');
+}
+if (!/<div\b[^>]*class="dashboard-footer-actions"[^>]*>[\s\S]*?id="background-picker-button"[\s\S]*?id="page-settings-button"[\s\S]*?<\/div>/.test(htmlDocument)
+    || !/<div\b[^>]*id="page-settings-menu"[^>]*role="menu"[^>]*>[\s\S]*?id="card-editor-button"[\s\S]*?id="favicon-editor-button"[\s\S]*?<\/div>/.test(htmlDocument)) {
+    throw new Error('The footer must keep background and page-settings controls in order, with card then favicon menu items.');
 }
 for (const requiredEditorId of [
     'card-editor-dialog',
@@ -572,9 +617,61 @@ for (const requiredEditorId of [
         throw new Error(`Missing configurable-card editor structure: ${requiredEditorId}.`);
     }
 }
+for (const requiredFaviconId of [
+    'favicon-dialog',
+    'favicon-close',
+    'favicon-preview',
+    'favicon-state-label',
+    'favicon-select-button',
+    'favicon-file-input',
+    'favicon-remove-button',
+    'favicon-save-button',
+    'favicon-status',
+    'favicon-remove-confirm-dialog',
+    'favicon-remove-cancel',
+    'favicon-remove-confirm',
+    'favicon-remove-status'
+]) {
+    if (!htmlDocument.includes(`id="${requiredFaviconId}"`)) {
+        throw new Error(`Missing favicon editor structure: ${requiredFaviconId}.`);
+    }
+}
 const cardIconInputTag = htmlDocument.match(/<input\b[^>]*\bid="card-icon-input"[^>]*>/)?.[0] || '';
 if (!cardIconInputTag.includes('type="file"') || !cardIconInputTag.includes('accept=".svg,image/svg+xml"')) {
     throw new Error('Card icons must be selected through an SVG-only file input.');
+}
+const faviconInputTag = htmlDocument.match(/<input\b[^>]*\bid="favicon-file-input"[^>]*>/)?.[0] || '';
+if (!faviconInputTag.includes('type="file"') || !faviconInputTag.includes('accept=".svg,image/svg+xml"')) {
+    throw new Error('The favicon must be selected through an SVG-only file input.');
+}
+if (!pageSettingsScript.includes("event.key === 'ArrowDown'")
+    || !pageSettingsScript.includes("event.key === 'ArrowUp'")
+    || !pageSettingsScript.includes("event.key === 'Home'")
+    || !pageSettingsScript.includes("event.key === 'End'")
+    || !pageSettingsScript.includes("event.key === 'Escape'")
+    || !pageSettingsScript.includes("container.addEventListener('pointerdown'")
+    || !pageSettingsScript.includes("container.addEventListener('focusout'")
+    || !pageSettingsScript.includes("document.addEventListener('pointerdown'")
+    || !pageSettingsScript.includes("document.addEventListener('pointerup'")
+    || !pageSettingsScript.includes('!pointerIsInside && isOpen()')) {
+    throw new Error('The page settings menu is missing required keyboard, focus, or outside-click behavior.');
+}
+const settingsMenuClickStart = pageSettingsScript.indexOf("menu.addEventListener('click'");
+const settingsMenuPointerdownStart = pageSettingsScript.indexOf("container.addEventListener('pointerdown'", settingsMenuClickStart);
+if (settingsMenuClickStart < 0
+    || settingsMenuPointerdownStart < settingsMenuClickStart
+    || !pageSettingsScript.slice(settingsMenuClickStart, settingsMenuPointerdownStart).includes('window.setTimeout(() => close(), 0)')
+    || pageSettingsScript.slice(settingsMenuClickStart, settingsMenuPointerdownStart).includes('}, true);')) {
+    throw new Error('Settings menu item clicks must defer closing until Edge finishes native dialog activation.');
+}
+if (!faviconManagerScript.includes("new URL('/api/favicon', document.baseURI)")
+    || !faviconManagerScript.includes("new URL('/api/favicon.svg', document.baseURI)")
+    || !faviconManagerScript.includes("document.head.querySelector('link[data-managed-favicon=\"true\"]')")
+    || !faviconManagerScript.includes('sanitizeSvgMarkup(await file.text())')
+    || !faviconManagerScript.includes("JSON.stringify({ version: 1, iconSvg })")
+    || !faviconManagerScript.includes("error.status === 404 ? 'unsupported' : 'unavailable'")
+    || !faviconManagerScript.includes('await requestFavicon(\'PATCH\', null)')) {
+    throw new Error('The favicon manager is missing its API, managed-link, safe-draft, removal, or old-backend contract.');
 }
 const cardEditorDialogRule = stylesheet.match(/\.card-editor-dialog,\s*\.card-confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 const cardConfirmDialogRule = [...stylesheet.matchAll(/\.card-confirm-dialog\s*\{([^}]*)\}/g)]
@@ -621,7 +718,7 @@ if (!/opacity:\s*0/.test(cardEditorMotionRule)
     || !/\.card-editor-dialog::backdrop\s*\{[^}]*transition:\s*opacity\s+220ms\s+ease/.test(stylesheet)
     || !/\.card-confirm-dialog::backdrop\s*\{[^}]*transition:\s*opacity\s+180ms\s+ease/.test(stylesheet)
     || !/\.card-editor-dialog\.is-visible::backdrop,\s*\.card-confirm-dialog\.is-visible::backdrop\s*\{[^}]*opacity:\s*1/.test(stylesheet)
-    || !/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.card-editor-dialog,\s*\.card-confirm-dialog\s*\{[^}]*transform:\s*none/.test(stylesheet)) {
+    || !/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.card-editor-dialog,\s*\.card-confirm-dialog,\s*\.favicon-dialog,\s*\.favicon-remove-confirm-dialog\s*\{[^}]*transform:\s*none/.test(stylesheet)) {
     throw new Error('Card editor and confirmation dialogs lost their background-picker-aligned motion or reduced-motion contract.');
 }
 if (narrowEditorStart < 0
@@ -693,12 +790,9 @@ if (!cardEditorScript.includes("const BLANK_CARD_ID = '__new_card__'")
     || !cardEditorScript.includes("field: 'probeUrl'")) {
     throw new Error('Card editor lost permanent blank-add, batched draft, dirty guard, or conflict preservation behavior.');
 }
-const dialogMotionStart = cardEditorScript.indexOf('function createDialogMotionController(dialog, closeFallbackMs) {');
-const dialogMotionEnd = cardEditorScript.indexOf('\n\nexport function initializeCardEditor', dialogMotionStart);
-if (dialogMotionStart < 0 || dialogMotionEnd < 0) {
-    throw new Error('Card dialog motion controller is missing.');
-}
-const dialogMotionScript = cardEditorScript.slice(dialogMotionStart, dialogMotionEnd);
+const dialogMotionStart = dialogMotionModuleScript.indexOf('export function createDialogMotionController(dialog, closeFallbackMs) {');
+if (dialogMotionStart < 0) throw new Error('Shared dialog motion controller is missing.');
+const dialogMotionScript = dialogMotionModuleScript.slice(dialogMotionStart).replace(/^export /, '');
 function makeDialogMotionHarness(reducedMotion = false, fallbackMs = 300) {
     const classes = new Set();
     const attributes = new Set();
@@ -1438,13 +1532,19 @@ if (!serviceScript.includes('let requestGeneration = 0;')
     || !channelScript.includes("quickLinksGrid.style.removeProperty('--quick-links-width')")) {
     throw new Error('Dynamic card replacement must invalidate probes and resynchronize empty-channel layout.');
 }
-const managerInitialization = appScript.indexOf('await initializeCardManager()');
+const settingsInitialization = appScript.indexOf("initializeFeature('网页设置菜单', initializePageSettings)");
+const faviconInitialization = appScript.indexOf("initializeFeature('网站图标'");
+const managerInitialization = appScript.indexOf('await initializeCardManager({');
 const channelInitialization = appScript.indexOf("initializeFeature('双频道预览', initializeChannelSwitch)");
 const statusInitialization = appScript.indexOf("initializeFeature('服务状态', initializeServiceStatus)");
-if (managerInitialization < 0
+if (settingsInitialization < 0
+    || faviconInitialization < settingsInitialization
+    || managerInitialization < faviconInitialization
     || channelInitialization < managerInitialization
     || statusInitialization < managerInitialization
-    || !appScript.includes('cardManager.subscribe(() => {')) {
+    || !appScript.includes('cardManager.subscribe(() => {')
+    || !appScript.includes('editorRestoreFocus: restorePageSettingsFocus')
+    || !appScript.includes('restoreFocus: restorePageSettingsFocus')) {
     throw new Error('Card data must settle before channel/status controllers and notify both controllers after replacement.');
 }
 const channelSwitchTag = html.match(/<button\b[^>]*\bid="channel-switch"[^>]*>/);
@@ -4794,11 +4894,16 @@ try {
         'DashboardCards.json.bak',
         'DashboardCards.json.corrupt-verify',
         '.DashboardCards.json.verify.tmp',
+        'DashboardFavicon.json',
+        'DashboardFavicon.json.bak',
+        'DashboardFavicon.json.corrupt-verify',
+        '.DashboardFavicon.json.verify.tmp',
         'service.log',
         'service.log.1',
         'HomeLabWallpaperState.json',
         'HomeLabWallpaperState-data/state.json',
         'HomeLabWallpaperState-data/DashboardCards.json',
+        'HomeLabWallpaperState-data/DashboardFavicon.json',
         'temp/verify-probe.svg'
     )
     foreach ($probe in $ignoreProbes) {
@@ -4837,11 +4942,16 @@ try {
                 [Text.UTF8Encoding]::new($false)
             )
             [IO.File]::WriteAllText(
+                (Join-Path $resolvedProbe 'DashboardFavicon.json'),
+                '{"version":1}',
+                [Text.UTF8Encoding]::new($false)
+            )
+            [IO.File]::WriteAllText(
                 (Join-Path $resolvedProbe 'staged-only.txt'),
                 "trailing whitespace `n",
                 [Text.UTF8Encoding]::new($false)
             )
-            & $git.Source add -f -- '.venv/forced.pyc' 'DashboardCards.json' 'staged-only.txt'
+            & $git.Source add -f -- '.venv/forced.pyc' 'DashboardCards.json' 'DashboardFavicon.json' 'staged-only.txt'
             if ($LASTEXITCODE -ne 0) {
                 throw 'Unable to stage temporary Git policy probes.'
             }

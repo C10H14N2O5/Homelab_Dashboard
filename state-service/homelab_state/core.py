@@ -13,7 +13,7 @@ from typing import Any
 
 DEFAULT_BACKGROUND = "bg.jpg"
 SERVICE_NAME = "HomeLabWallpaperState"
-SERVICE_VERSION = 9
+SERVICE_VERSION = 10
 
 
 class ConfigurationError(ValueError):

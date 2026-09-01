@@ -17,7 +17,11 @@ state.json.corrupt-*
 DashboardCards.json
 DashboardCards.json.bak
 DashboardCards.json.corrupt-*
+DashboardFavicon.json
+DashboardFavicon.json.bak
+DashboardFavicon.json.corrupt-*
 service.log
 service.log.*
 .state-*.tmp
 .DashboardCards.json.*.tmp
+.DashboardFavicon.json.*.tmp

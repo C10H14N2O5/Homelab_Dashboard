@@ -1117,9 +1117,12 @@
         }
 
         .background-picker-button:focus-visible,
+        .page-settings-item:focus-visible,
         .card-editor-dialog button:focus-visible,
         .card-editor-dialog input:focus-visible,
         .card-confirm-dialog button:focus-visible,
+        .favicon-dialog button:focus-visible,
+        .favicon-remove-confirm-dialog button:focus-visible,
         .dialog-close:focus-visible,
         .background-mode-button:focus-visible,
         .background-action-button:focus-visible,
@@ -1137,6 +1140,80 @@
         .background-picker-button svg {
             width: 0.92rem;
             height: 0.92rem;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .page-settings {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .page-settings-menu {
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 0.55rem);
+            z-index: 12;
+            width: max-content;
+            min-width: 10.5rem;
+            padding: 0.35rem;
+            display: grid;
+            gap: 0.18rem;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.97);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 0.85rem;
+            box-shadow: 0 18px 48px rgba(2, 8, 23, 0.62);
+            -webkit-backdrop-filter: blur(18px) saturate(125%);
+            backdrop-filter: blur(18px) saturate(125%);
+            opacity: 0;
+            transform: translateY(6px) scale(0.98);
+            transform-origin: right bottom;
+            transition: opacity 150ms ease, transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .page-settings-menu[hidden] {
+            display: none;
+        }
+
+        .page-settings[data-menu-open="true"] .page-settings-menu {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .page-settings-item {
+            min-height: 2.45rem;
+            padding: 0.52rem 0.68rem;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: var(--muted);
+            text-align: left;
+            background: transparent;
+            border: 0;
+            border-radius: 0.58rem;
+            cursor: pointer;
+            transition: color 150ms ease, background-color 150ms ease;
+        }
+
+        .page-settings-item:hover:not(:disabled),
+        .page-settings-item:focus-visible {
+            color: var(--text);
+            background: rgba(24, 53, 82, 0.82);
+        }
+
+        .page-settings-item:disabled {
+            cursor: wait;
+            opacity: 0.5;
+        }
+
+        .page-settings-item svg {
+            width: 1rem;
+            height: 1rem;
+            flex: 0 0 auto;
             fill: none;
             stroke: currentColor;
             stroke-width: 1.8;
@@ -1172,6 +1249,164 @@
             border: 1px solid rgba(226, 232, 240, 0.16);
             border-radius: 1.2rem;
             box-shadow: 0 32px 90px rgba(2, 8, 23, 0.72);
+        }
+
+        .favicon-dialog,
+        .favicon-remove-confirm-dialog {
+            width: min(36rem, calc(100vw - 2rem));
+            max-width: none;
+            max-height: min(86vh, 40rem);
+            max-height: min(86svh, 40rem);
+            margin: auto;
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: rgba(7, 17, 31, 0.98);
+            border: 1px solid rgba(226, 232, 240, 0.16);
+            border-radius: 1.2rem;
+            box-shadow: 0 32px 90px rgba(2, 8, 23, 0.72);
+            opacity: 0;
+            transform: translateY(10px) scale(0.98);
+            transform-origin: center;
+            transition: opacity 180ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+            will-change: opacity, transform;
+        }
+
+        .favicon-remove-confirm-dialog {
+            width: min(28rem, calc(100vw - 2rem));
+        }
+
+        .favicon-dialog.is-visible,
+        .favicon-remove-confirm-dialog.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .favicon-dialog.is-closing,
+        .favicon-remove-confirm-dialog.is-closing {
+            pointer-events: none;
+            transition-duration: 180ms;
+        }
+
+        .favicon-dialog::backdrop,
+        .favicon-remove-confirm-dialog::backdrop {
+            background: rgba(2, 8, 23, 0.74);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            opacity: 0;
+            transition: opacity 220ms ease;
+        }
+
+        .favicon-dialog.is-visible::backdrop,
+        .favicon-remove-confirm-dialog.is-visible::backdrop {
+            opacity: 1;
+        }
+
+        .favicon-dialog.is-closing::backdrop,
+        .favicon-remove-confirm-dialog.is-closing::backdrop {
+            transition-duration: 180ms;
+        }
+
+        .favicon-shell {
+            max-height: min(86vh, 40rem);
+            max-height: min(86svh, 40rem);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .favicon-editor-body {
+            padding: 1rem 1.15rem;
+            display: grid;
+            grid-template-columns: 8.5rem minmax(0, 1fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .favicon-preview-panel,
+        .favicon-editor-copy {
+            min-width: 0;
+            padding: 0.85rem;
+            border: 1px solid rgba(226, 232, 240, 0.11);
+            border-radius: 0.85rem;
+            background: rgba(3, 12, 24, 0.5);
+        }
+
+        .favicon-preview-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .favicon-preview-panel h3,
+        .favicon-editor-copy h3 {
+            margin: 0;
+            color: var(--text);
+            font-size: 0.8rem;
+        }
+
+        .favicon-preview {
+            width: 4.6rem;
+            height: 4.6rem;
+            margin-top: 0.72rem;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            color: var(--subtle);
+            background: repeating-conic-gradient(rgba(226, 232, 240, 0.08) 0 25%, transparent 0 50%) 50% / 0.8rem 0.8rem;
+            border: 1px solid rgba(226, 232, 240, 0.14);
+            border-radius: 0.85rem;
+        }
+
+        .favicon-preview svg,
+        .favicon-preview img {
+            width: 3.35rem;
+            height: 3.35rem;
+            display: block;
+            object-fit: contain;
+        }
+
+        .favicon-preview-panel p,
+        .favicon-editor-copy p {
+            margin: 0.65rem 0 0;
+            color: var(--subtle);
+            font-size: 0.7rem;
+            line-height: 1.55;
+        }
+
+        .favicon-editor-copy .background-action-button {
+            margin-top: 0.9rem;
+        }
+
+        .favicon-status {
+            min-height: 1.5rem;
+            margin: 0;
+            padding: 0 1.15rem 0.7rem;
+            color: var(--muted);
+            font-size: 0.72rem;
+            line-height: 1.5;
+        }
+
+        .favicon-status[data-kind="error"] {
+            color: #fda4af;
+        }
+
+        .favicon-status[data-kind="success"] {
+            color: #86efac;
+        }
+
+        .favicon-actions {
+            padding: 0.85rem 1.15rem 1.05rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.55rem;
+            border-top: 1px solid rgba(226, 232, 240, 0.1);
+        }
+
+        .favicon-save-button {
+            color: #bae6fd;
+            border-color: rgba(56, 189, 248, 0.38);
         }
 
         .card-editor-dialog {
@@ -2652,6 +2887,12 @@
                 align-self: center;
             }
 
+            .page-settings-menu {
+                right: auto;
+                left: 0;
+                transform-origin: left bottom;
+            }
+
             .card-editor-dialog {
                 width: min(100% - 1rem, 68rem);
                 max-height: calc(100svh - 1rem);
@@ -2743,6 +2984,30 @@
             }
 
             .card-editor-actions .background-action-button {
+                width: 100%;
+            }
+
+            .favicon-dialog,
+            .favicon-remove-confirm-dialog {
+                width: calc(100vw - 1rem);
+                max-height: calc(100svh - 1rem);
+                border-radius: 1rem;
+            }
+
+            .favicon-shell {
+                max-height: calc(100svh - 1rem);
+            }
+
+            .favicon-editor-body {
+                grid-template-columns: 1fr;
+            }
+
+            .favicon-actions {
+                flex-direction: column-reverse;
+            }
+
+            .favicon-actions .background-action-button {
+                flex: 0 0 auto;
                 width: 100%;
             }
 
@@ -2853,7 +3118,9 @@
             }
 
             .card-editor-dialog,
-            .card-confirm-dialog {
+            .card-confirm-dialog,
+            .favicon-dialog,
+            .favicon-remove-confirm-dialog {
                 transform: none;
             }
 

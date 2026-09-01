@@ -388,13 +388,31 @@
                         </svg>
                         <span>切换背景</span>
                     </button>
-                    <button class="background-picker-button card-editor-launch" id="card-editor-button" type="button" aria-haspopup="dialog" aria-controls="card-editor-dialog" disabled>
-                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/>
-                            <path d="m13.5 6.5 4 4"/>
-                        </svg>
-                        <span>修改卡片</span>
-                    </button>
+                    <div class="page-settings" id="page-settings" data-menu-open="false">
+                        <button class="background-picker-button" id="page-settings-button" type="button" aria-haspopup="menu" aria-controls="page-settings-menu" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.52-1H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 8.94 4.6 1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/>
+                            </svg>
+                            <span>网页设置</span>
+                        </button>
+                        <div class="page-settings-menu" id="page-settings-menu" role="menu" aria-label="网页设置" hidden>
+                            <button class="page-settings-item card-editor-launch" id="card-editor-button" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="card-editor-dialog" disabled>
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/>
+                                    <path d="m13.5 6.5 4 4"/>
+                                </svg>
+                                <span>修改卡片</span>
+                            </button>
+                            <button class="page-settings-item" id="favicon-editor-button" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="favicon-dialog">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M5 3h11l3 3v15H5V3Z"/>
+                                    <path d="M9 3v6h6V3M9 16h6"/>
+                                </svg>
+                                <span>网站图标</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <p id="last-checked">正在检测服务入口…</p>
                 <p class="sr-only" id="status-summary" role="status" aria-live="polite"></p>
@@ -472,6 +490,48 @@
             <div class="background-delete-actions">
                 <button class="background-action-button" id="card-confirm-cancel" type="button">取消</button>
                 <button class="background-action-button" id="card-confirm-accept" type="button">确认</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="favicon-dialog" id="favicon-dialog" aria-labelledby="favicon-title" aria-describedby="favicon-description">
+        <div class="favicon-shell">
+            <header class="dialog-header">
+                <div>
+                    <h2 id="favicon-title">网站图标</h2>
+                    <p id="favicon-description">上传服务器共享的 SVG 地址栏图标；选择文件后需确认保存才会生效。</p>
+                </div>
+                <button class="dialog-close" id="favicon-close" type="button" aria-label="关闭网站图标设置">✕</button>
+            </header>
+            <div class="favicon-editor-body">
+                <section class="favicon-preview-panel" aria-labelledby="favicon-preview-title">
+                    <h3 id="favicon-preview-title">预览</h3>
+                    <div class="favicon-preview" id="favicon-preview" aria-label="网站图标预览"></div>
+                    <p id="favicon-state-label">正在读取当前网站图标…</p>
+                </section>
+                <section class="favicon-editor-copy" aria-labelledby="favicon-upload-title">
+                    <h3 id="favicon-upload-title">选择 SVG</h3>
+                    <p>仅接受不含脚本、外部资源或动画的本地 SVG 文件。服务器会在保存时再次进行安全净化。</p>
+                    <button class="background-action-button" id="favicon-select-button" type="button">选择 / 更换 SVG</button>
+                    <input class="sr-only" id="favicon-file-input" type="file" accept=".svg,image/svg+xml">
+                </section>
+            </div>
+            <p class="favicon-status" id="favicon-status" role="status" aria-live="polite"></p>
+            <div class="favicon-actions">
+                <button class="background-action-button" id="favicon-remove-button" type="button" data-kind="danger" disabled>移除网站图标</button>
+                <button class="background-action-button favicon-save-button" id="favicon-save-button" type="button" disabled>保存网站图标</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="favicon-remove-confirm-dialog" id="favicon-remove-confirm-dialog" aria-labelledby="favicon-remove-title" aria-describedby="favicon-remove-description">
+        <div class="background-delete-shell">
+            <h2 id="favicon-remove-title">移除网站图标？</h2>
+            <p id="favicon-remove-description">确认后将删除服务器共享的 SVG favicon；其他标签页和设备会在下次加载时同步。</p>
+            <p class="background-delete-status" id="favicon-remove-status" role="status" aria-live="polite"></p>
+            <div class="background-delete-actions">
+                <button class="background-action-button" id="favicon-remove-cancel" type="button">取消</button>
+                <button class="background-action-button" id="favicon-remove-confirm" type="button" data-kind="danger">确认移除</button>
             </div>
         </div>
     </dialog>

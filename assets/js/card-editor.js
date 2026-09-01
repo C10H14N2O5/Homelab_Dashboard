@@ -1,4 +1,5 @@
 import { createSafeSvgElement, sanitizeSvgMarkup, cardSvgLimits } from './card-svg.js';
+import { createDialogMotionController } from './dialog-motion.js';
 
 const BLANK_CARD_ID = '__new_card__';
 const MAX_CARDS = 32;
@@ -147,114 +148,7 @@ function serverValidationFeedback(error) {
     return contextualize({ field: 'name', message: '服务器拒绝了卡片字段；请检查必填项、链接和 SVG 图标后重试。' });
 }
 
-function createDialogMotionController(dialog, closeFallbackMs) {
-    let animationToken = 0;
-    let closeTimer = 0;
-    let closeHandler = null;
-    let closePromise = null;
-    let closeResolve = null;
-
-    function isOpen() {
-        return dialog.open || dialog.hasAttribute('open');
-    }
-
-    function isClosing() {
-        return dialog.classList.contains('is-closing');
-    }
-
-    function clearCloseWait(settlePending = false) {
-        if (closeHandler) dialog.removeEventListener('transitionend', closeHandler);
-        closeHandler = null;
-        window.clearTimeout(closeTimer);
-        closeTimer = 0;
-        if (!settlePending || !closeResolve) return;
-        const resolve = closeResolve;
-        closeResolve = null;
-        closePromise = null;
-        resolve(false);
-    }
-
-    function reset() {
-        animationToken += 1;
-        clearCloseWait(true);
-        dialog.classList.remove('is-visible', 'is-closing');
-    }
-
-    function show(onVisible) {
-        reset();
-        const token = animationToken;
-        if (typeof dialog.showModal === 'function') {
-            if (!dialog.open) dialog.showModal();
-        } else {
-            dialog.setAttribute('open', '');
-        }
-
-        const reveal = () => {
-            if (token !== animationToken || !isOpen() || isClosing()) return;
-            dialog.classList.add('is-visible');
-            onVisible?.();
-        };
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            reveal();
-        } else {
-            window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
-        }
-    }
-
-    function hide(returnValue = '', restoreFocus = null) {
-        if (!isOpen()) {
-            restoreFocus?.();
-            return Promise.resolve(false);
-        }
-        if (isClosing()) return closePromise || Promise.resolve(false);
-
-        const token = ++animationToken;
-        dialog.classList.add('is-closing');
-        dialog.classList.remove('is-visible');
-        closePromise = new Promise((resolve) => {
-            closeResolve = resolve;
-        });
-        const pending = closePromise;
-
-        const finishAfterTransition = (event) => {
-            if (event && (event.target !== dialog || event.propertyName !== 'opacity')) return;
-            if (token !== animationToken) return;
-            if (closeHandler) dialog.removeEventListener('transitionend', closeHandler);
-            closeHandler = null;
-            window.clearTimeout(closeTimer);
-            closeTimer = 0;
-            const resolve = closeResolve;
-            closeResolve = null;
-            closePromise = null;
-            dialog.classList.remove('is-visible', 'is-closing');
-            if (typeof dialog.close === 'function' && dialog.open) {
-                dialog.close(returnValue);
-            } else {
-                dialog.removeAttribute('open');
-            }
-            restoreFocus?.();
-            resolve?.(true);
-        };
-
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            finishAfterTransition();
-        } else {
-            closeHandler = finishAfterTransition;
-            dialog.addEventListener('transitionend', finishAfterTransition);
-            closeTimer = window.setTimeout(finishAfterTransition, closeFallbackMs);
-        }
-        return pending;
-    }
-
-    dialog.addEventListener('close', () => {
-        if (isOpen()) return;
-        reset();
-    });
-
-    return { hide, isClosing, isOpen, show };
-}
-
-export function initializeCardEditor(manager) {
+export function initializeCardEditor(manager, options = {}) {
     const launchButton = document.getElementById('card-editor-button');
     const dialog = document.getElementById('card-editor-dialog');
     const closeButton = document.getElementById('card-editor-close');
@@ -288,6 +182,9 @@ export function initializeCardEditor(manager) {
         confirmTitle, confirmDescription, confirmCancel, confirmAccept, dashboard, channelSwitch
     ];
     if (required.some((element) => !element)) throw new Error('卡片编辑器页面结构不完整。');
+    const restoreEditorFocus = typeof options.restoreFocus === 'function'
+        ? options.restoreFocus
+        : () => launchButton.focus({ preventScroll: true });
 
     let channel = 'services';
     let revision = 0;
@@ -578,7 +475,7 @@ export function initializeCardEditor(manager) {
             if (!discard) return;
         }
         dirty = false;
-        await editorMotion.hide('', () => launchButton.focus({ preventScroll: true }));
+        await editorMotion.hide('', restoreEditorFocus);
     }
 
     function setBusy(nextBusy) {
@@ -722,7 +619,7 @@ export function initializeCardEditor(manager) {
         try {
             await manager.saveChannel(channel, revision, draftCards);
             dirty = false;
-            await editorMotion.hide('saved', () => launchButton.focus({ preventScroll: true }));
+            await editorMotion.hide('saved', restoreEditorFocus);
         } catch (error) {
             if (error.name === 'CardRevisionConflictError') {
                 setStatus('服务器数据已在其它页面更新，当前草稿尚未丢失。', 'error');

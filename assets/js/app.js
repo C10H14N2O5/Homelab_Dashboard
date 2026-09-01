@@ -3,6 +3,8 @@ import { initializeSearch } from './search.js';
 import { initializeChannelSwitch } from './channel-switch.js';
 import { initializeServiceStatus } from './service-status.js';
 import { initializeCardManager } from './card-manager.js';
+import { initializePageSettings } from './page-settings.js';
+import { initializeFaviconManager } from './favicon-manager.js';
 
 function initializeIntro() {
     const root = document.documentElement;
@@ -55,12 +57,22 @@ function initializeFeature(label, initializer) {
 initializeFeature('页面入场', initializeIntro);
 initializeFeature('背景管理', initializeBackgroundManager);
 initializeFeature('搜索栏增强', initializeSearch);
+const pageSettingsController = initializeFeature('网页设置菜单', initializePageSettings);
+const restorePageSettingsFocus = () => {
+    if (pageSettingsController) pageSettingsController.focusTrigger();
+    else document.getElementById('page-settings-button')?.focus({ preventScroll: true });
+};
+initializeFeature('网站图标', () => initializeFaviconManager({
+    restoreFocus: restorePageSettingsFocus
+}));
 
 async function initializeDashboardNavigation() {
     let cardManager = null;
     try {
         // Card data must settle before channel sizing and service probes capture the DOM.
-        cardManager = await initializeCardManager();
+        cardManager = await initializeCardManager({
+            editorRestoreFocus: restorePageSettingsFocus
+        });
     } catch (error) {
         console.warn('卡片数据初始化失败，已保留静态卡片降级。', error);
     }

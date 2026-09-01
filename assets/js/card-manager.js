@@ -280,7 +280,7 @@ function renderGrid(grid, cards, channel) {
     grid.replaceChildren(fragment);
 }
 
-export async function initializeCardManager() {
+export async function initializeCardManager(options = {}) {
     const serviceGrid = document.getElementById('service-grid');
     const quickLinksGrid = document.getElementById('quick-links-grid');
     const editorButton = document.getElementById('card-editor-button');
@@ -494,7 +494,7 @@ export async function initializeCardManager() {
     }
 
     try {
-        initializeCardEditor(controller);
+        initializeCardEditor(controller, { restoreFocus: options.editorRestoreFocus });
     } catch (error) {
         editorButton.disabled = true;
         editorButton.setAttribute('aria-label', '卡片编辑器初始化失败');

@@ -52,6 +52,13 @@ from homelab_state.core import (
     SERVICE_VERSION,
     ConfigurationError,
 )
+from homelab_state.favicon import (
+    MAX_FAVICON_REQUEST_BODY,
+    FaviconNotFound,
+    FaviconStateUnavailable,
+    FaviconStore,
+    InvalidFavicon,
+)
 from homelab_state.probe import MAX_PROBE_TARGETS, ProbeClient
 
 
@@ -67,6 +74,8 @@ BESTDORI_RESET_PATH = "/api/bestdori/history/reset"
 BING_DAILY_PATH = "/api/background-files/bing-daily"
 CARDS_PATH = "/api/cards"
 CARDS_INITIALIZE_PATH = "/api/cards/initialize"
+FAVICON_PATH = "/api/favicon"
+FAVICON_ASSET_PATH = "/api/favicon.svg"
 HEALTH_PATH = "/healthz"
 CONTROL_PATH = "/_control/shutdown"
 MAX_PATCH_BODY = 4 * 1024
@@ -102,6 +111,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         bestdori_manager: BestdoriDrawManager | None = None,
         cards_store: CardsStore | None = None,
         bing_manager: BingDailyManager | None = None,
+        favicon_store: FaviconStore | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -118,6 +128,9 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.cards_store = cards_store or CardsStore.for_state_directory(
             config.state_dir,
             config.probe_domain_suffix,
+        )
+        self.favicon_store = favicon_store or FaviconStore.for_state_directory(
+            config.state_dir,
         )
         owns_probe_client = probe_client is None
         self.probe_client = probe_client or ProbeClient(config)
@@ -245,7 +258,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
 
     def _route_accepts_body(self) -> bool:
         if self.command == "PATCH":
-            return self.path in {API_PATH, CARDS_PATH}
+            return self.path in {API_PATH, CARDS_PATH, FAVICON_PATH}
         if self.command != "POST":
             return False
         if urlsplit(self.path).path == BACKGROUND_UPLOAD_PATH:
@@ -338,6 +351,30 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self._common_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _write_favicon_svg(self, icon_svg: str, content_hash: str) -> None:
+        body = icon_svg.encode("utf-8")
+        etag = f'"sha256-{content_hash}"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("Cache-Control", "private, max-age=31536000, immutable")
+            self.send_header("ETag", etag)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", "0")
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Cache-Control", "private, max-age=31536000, immutable")
+        self.send_header("ETag", etag)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         if self.close_connection:
             self.send_header("Connection", "close")
@@ -784,7 +821,70 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         self._write_json(HTTPStatus.OK, state)
 
+    def _handle_favicon_update(self) -> None:
+        request = self._read_dashboard_json(MAX_FAVICON_REQUEST_BODY)
+        if request is None:
+            return
+        try:
+            state = self.server.favicon_store.update(request)
+        except InvalidFavicon as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        except FaviconStateUnavailable:
+            self._error(HTTPStatus.SERVICE_UNAVAILABLE, "favicon_state_unavailable")
+            return
+        except Exception:
+            self.server.logger.exception("PATCH %s failed", FAVICON_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self._write_json(HTTPStatus.OK, state)
+
+    def _handle_favicon_asset(self, parsed_path) -> None:
+        try:
+            query = parse_qsl(
+                parsed_path.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=2,
+            )
+        except ValueError:
+            query = []
+        if (
+            len(query) != 1
+            or query[0][0] != "v"
+            or re.fullmatch(r"[0-9a-f]{64}", query[0][1]) is None
+            or parsed_path.fragment
+        ):
+            self._error(HTTPStatus.NOT_FOUND, "favicon_not_found")
+            return
+        try:
+            icon_svg, content_hash = self.server.favicon_store.get_asset(query[0][1])
+        except FaviconNotFound:
+            self._error(HTTPStatus.NOT_FOUND, "favicon_not_found")
+            return
+        except FaviconStateUnavailable:
+            self._error(HTTPStatus.SERVICE_UNAVAILABLE, "favicon_state_unavailable")
+            return
+        except Exception:
+            self.server.logger.exception("GET %s failed", FAVICON_ASSET_PATH)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        self._write_favicon_svg(icon_svg, content_hash)
+
     def do_GET(self) -> None:
+        parsed_path = urlsplit(self.path)
+        if self.path == FAVICON_PATH:
+            try:
+                self._write_json(HTTPStatus.OK, self.server.favicon_store.get())
+            except FaviconStateUnavailable:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "favicon_state_unavailable")
+            except Exception:
+                self.server.logger.exception("GET %s failed", self.path)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
+            return
+        if parsed_path.path == FAVICON_ASSET_PATH:
+            self._handle_favicon_asset(parsed_path)
+            return
         if self.path == CARDS_PATH:
             try:
                 self._write_json(HTTPStatus.OK, self.server.cards_store.get())
@@ -859,6 +959,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PATCH(self) -> None:
+        if self.path == FAVICON_PATH:
+            self._handle_favicon_update()
+            return
         if self.path == CARDS_PATH:
             self._handle_cards_update()
             return
@@ -882,6 +985,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self._allow("GET")
             return
         if self.path == BACKGROUND_FILES_PATH:
+            self._allow("GET")
+            return
+        if urlsplit(self.path).path == FAVICON_ASSET_PATH:
             self._allow("GET")
             return
         if self.path != API_PATH:
@@ -915,6 +1021,12 @@ class StateRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed_path = urlsplit(self.path)
+        if self.path == FAVICON_PATH:
+            self._allow("GET, PATCH")
+            return
+        if parsed_path.path == FAVICON_ASSET_PATH:
+            self._allow("GET")
+            return
         if self.path == CARDS_INITIALIZE_PATH:
             self._handle_cards_initialize()
             return
@@ -986,8 +1098,13 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._method_not_allowed()
 
     def _method_not_allowed(self) -> None:
+        parsed_path = urlsplit(self.path)
         if self.path == API_PATH:
             self._allow("GET, PATCH")
+        elif self.path == FAVICON_PATH:
+            self._allow("GET, PATCH")
+        elif parsed_path.path == FAVICON_ASSET_PATH:
+            self._allow("GET")
         elif self.path == CARDS_PATH:
             self._allow("GET, PATCH")
         elif self.path == CARDS_INITIALIZE_PATH:

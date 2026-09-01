@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 9
+$expectedServiceVersion = 10
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -227,6 +227,102 @@ try {
             -TimeoutSec 2
         if ($patched.landscape -ne 'test.jpg') {
             throw 'Packaged executable failed the PATCH compatibility smoke test.'
+        }
+
+        $initialFavicon = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/favicon" `
+            -TimeoutSec 2
+        if ($initialFavicon.version -ne 1 -or
+            $initialFavicon.configured -ne $false -or
+            $null -ne $initialFavicon.updatedAt -or
+            $null -ne $initialFavicon.contentHash) {
+            throw 'Packaged executable returned an invalid unconfigured favicon state.'
+        }
+
+        $smokeFavicon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>'
+        $smokeFaviconBody = [ordered]@{
+            version = 1
+            iconSvg = $smokeFavicon
+        } | ConvertTo-Json -Compress
+        $uploadedFavicon = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Patch `
+            -Uri "http://127.0.0.1:$smokePort/api/favicon" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $smokeFaviconBody `
+            -TimeoutSec 2
+        if ($uploadedFavicon.version -ne 1 -or
+            $uploadedFavicon.configured -ne $true -or
+            $uploadedFavicon.contentHash -notmatch '^[0-9a-f]{64}$') {
+            throw 'Packaged executable returned an invalid configured favicon state.'
+        }
+        $smokeFaviconHash = [string]$uploadedFavicon.contentHash
+        $faviconAssetUri = "http://127.0.0.1:$smokePort/api/favicon.svg?v=$smokeFaviconHash"
+        $faviconAssetResponse = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri $faviconAssetUri `
+            -TimeoutSec 2
+        if ($faviconAssetResponse.StatusCode -ne 200) {
+            throw "Packaged executable returned HTTP $($faviconAssetResponse.StatusCode) for the favicon SVG resource."
+        }
+        $faviconContentType = [string]$faviconAssetResponse.Headers['Content-Type']
+        if ($faviconContentType -ne 'image/svg+xml; charset=utf-8') {
+            throw "Packaged favicon SVG returned an invalid Content-Type: $faviconContentType"
+        }
+        $faviconNosniff = [string]$faviconAssetResponse.Headers['X-Content-Type-Options']
+        if ($faviconNosniff -ne 'nosniff') {
+            throw "Packaged favicon SVG returned an invalid X-Content-Type-Options value: $faviconNosniff"
+        }
+        $faviconCacheControl = [string]$faviconAssetResponse.Headers['Cache-Control']
+        $faviconCacheTokens = @($faviconCacheControl.Split(',') | ForEach-Object { $_.Trim() })
+        if ($faviconCacheTokens.Count -ne 3 -or
+            $faviconCacheTokens -notcontains 'private' -or
+            $faviconCacheTokens -notcontains 'max-age=31536000' -or
+            $faviconCacheTokens -notcontains 'immutable') {
+            throw "Packaged favicon SVG returned an invalid Cache-Control value: $faviconCacheControl"
+        }
+        $faviconEtag = [string]$faviconAssetResponse.Headers['ETag']
+        if ($faviconEtag -ne ('"sha256-' + $smokeFaviconHash + '"')) {
+            throw "Packaged favicon SVG returned an invalid ETag: $faviconEtag"
+        }
+        if (-not $faviconAssetResponse.Content.Contains('<svg')) {
+            throw 'Packaged favicon SVG response did not contain an SVG root element.'
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $smokeState 'DashboardFavicon.json') -PathType Leaf)) {
+            throw 'Packaged executable updated favicon state without persisting DashboardFavicon.json.'
+        }
+
+        $removeFaviconBody = [ordered]@{
+            version = 1
+            iconSvg = $null
+        } | ConvertTo-Json -Compress
+        $removedFavicon = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Method Patch `
+            -Uri "http://127.0.0.1:$smokePort/api/favicon" `
+            -Headers @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' } `
+            -ContentType 'application/json' `
+            -Body $removeFaviconBody `
+            -TimeoutSec 2
+        if ($removedFavicon.version -ne 1 -or
+            $removedFavicon.configured -ne $false -or
+            $null -eq $removedFavicon.updatedAt -or
+            $null -ne $removedFavicon.contentHash) {
+            throw 'Packaged executable returned an invalid removed favicon state.'
+        }
+        try {
+            $null = Invoke-WebRequest `
+                -UseBasicParsing `
+                -Uri $faviconAssetUri `
+                -TimeoutSec 2
+            throw 'Packaged executable continued serving a removed favicon resource.'
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response -or [int]$response.StatusCode -ne 404) {
+                throw
+            }
         }
 
         $initialCards = Invoke-RestMethod `
@@ -503,6 +599,16 @@ try {
             $persistedCards.channels.services.cards[0].iconSvg -ne $initializedCards.channels.services.cards[0].iconSvg -or
             $persistedCards.channels.quickLinks.revision -ne 1) {
             throw 'Packaged executable did not preserve card state across restart.'
+        }
+        $persistedRemovedFavicon = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$smokePort/api/favicon" `
+            -TimeoutSec 2
+        if ($persistedRemovedFavicon.version -ne 1 -or
+            $persistedRemovedFavicon.configured -ne $false -or
+            $null -eq $persistedRemovedFavicon.updatedAt -or
+            $null -ne $persistedRemovedFavicon.contentHash) {
+            throw 'Packaged executable did not preserve removed favicon state across restart.'
         }
         $null = Invoke-RestMethod `
             -UseBasicParsing `

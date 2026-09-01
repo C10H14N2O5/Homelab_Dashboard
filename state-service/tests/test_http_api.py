@@ -10,7 +10,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest import mock
 
-from homelab_state import backgrounds, bestdori, bing, cards, core, http_api, probe
+from homelab_state import backgrounds, bestdori, bing, cards, core, favicon, http_api, probe
 from tests.helpers import (
     FIXED_TIME,
     TEST_ORIGIN,
@@ -135,6 +135,10 @@ class APITests(unittest.TestCase):
             self.config.probe_domain_suffix,
             lambda: FIXED_TIME,
         )
+        self.favicon_store = favicon.FaviconStore.for_state_directory(
+            self.config.state_dir,
+            lambda: FIXED_TIME,
+        )
         logger = logging.getLogger(f"test-{id(self)}")
         logger.handlers.clear()
         logger.addHandler(logging.NullHandler())
@@ -146,6 +150,7 @@ class APITests(unittest.TestCase):
             FakeBestdoriManager(),
             self.cards_store,
             FakeBingManager(),
+            self.favicon_store,
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -171,6 +176,22 @@ class APITests(unittest.TestCase):
         status = response.status
         connection.close()
         return status, payload
+
+    def raw_http_request(
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, dict[str, str]]:
+        connection = HTTPConnection(self.host, self.port, timeout=2)
+        connection.request(method, path, body=body, headers=headers or {})
+        response = connection.getresponse()
+        payload = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        status = response.status
+        connection.close()
+        return status, payload, response_headers
 
     def raw_exchange(
         self,
@@ -233,6 +254,25 @@ class APITests(unittest.TestCase):
         if headers:
             request_headers.update(headers)
         return self.request(method, path, json.dumps(value).encode(), request_headers)
+
+    def favicon_request(
+        self,
+        value: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        request_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self.request(
+            "PATCH",
+            http_api.FAVICON_PATH,
+            json.dumps(value).encode(),
+            request_headers,
+        )
 
     def upload(
         self,
@@ -849,6 +889,163 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(health["status"], "ok")
 
+    def test_favicon_get_upload_asset_replace_remove_and_cache_contract(self) -> None:
+        status, initial = self.request("GET", http_api.FAVICON_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            initial,
+            {
+                "version": 1,
+                "configured": False,
+                "updatedAt": None,
+                "contentHash": None,
+            },
+        )
+        self.assertFalse((self.config.state_dir / favicon.FAVICON_STATE_FILE_NAME).exists())
+
+        first_svg = '<svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg>'
+        status, created = self.favicon_request({"version": 1, "iconSvg": first_svg})
+        self.assertEqual(status, 200)
+        self.assertTrue(created["configured"])
+        first_hash = created["contentHash"]
+        self.assertRegex(first_hash, r"^[0-9a-f]{64}$")
+        self.assertTrue((self.config.state_dir / favicon.FAVICON_STATE_FILE_NAME).is_file())
+
+        asset_path = f"{http_api.FAVICON_ASSET_PATH}?v={first_hash}"
+        status, body, headers = self.raw_http_request("GET", asset_path)
+        self.assertEqual(status, 200)
+        self.assertIn(b'<svg xmlns="http://www.w3.org/2000/svg"', body)
+        self.assertEqual(headers["content-type"], "image/svg+xml; charset=utf-8")
+        self.assertEqual(headers["x-content-type-options"], "nosniff")
+        self.assertEqual(headers["cache-control"], "private, max-age=31536000, immutable")
+        self.assertEqual(headers["etag"], f'"sha256-{first_hash}"')
+
+        status, not_modified_body, not_modified_headers = self.raw_http_request(
+            "GET",
+            asset_path,
+            headers={"If-None-Match": headers["etag"]},
+        )
+        self.assertEqual(status, 304)
+        self.assertEqual(not_modified_body, b"")
+        self.assertEqual(not_modified_headers["etag"], headers["etag"])
+
+        second_svg = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>'
+        status, replaced = self.favicon_request({"version": 1, "iconSvg": second_svg})
+        self.assertEqual(status, 200)
+        self.assertNotEqual(replaced["contentHash"], first_hash)
+        status, stale = self.request("GET", asset_path)
+        self.assertEqual(status, 404)
+        self.assertEqual(stale, {"error": "favicon_not_found"})
+
+        status, removed = self.favicon_request({"version": 1, "iconSvg": None})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            removed,
+            {
+                "version": 1,
+                "configured": False,
+                "updatedAt": FIXED_TIME,
+                "contentHash": None,
+            },
+        )
+        self.assertTrue((self.config.state_dir / favicon.FAVICON_STATE_FILE_NAME).is_file())
+        status, _ = self.request(
+            "GET",
+            f"{http_api.FAVICON_ASSET_PATH}?v={replaced['contentHash']}",
+        )
+        self.assertEqual(status, 404)
+
+    def test_favicon_validation_body_limit_queries_and_methods(self) -> None:
+        valid_svg = '<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>'
+        cases = (
+            ({"version": 1, "iconSvg": valid_svg}, {"Origin": "https://evil.test"}, 403),
+            ({"version": 1, "iconSvg": valid_svg}, {"X-Requested-With": "wrong"}, 403),
+            ({"version": 1, "iconSvg": valid_svg}, {"Content-Type": "text/plain"}, 415),
+            ({"version": True, "iconSvg": valid_svg}, None, 400),
+            ({"version": 1, "iconSvg": valid_svg, "extra": True}, None, 400),
+            (
+                {"version": 1, "iconSvg": '<svg onload="alert(1)"><path d="M0 0"/></svg>'},
+                None,
+                400,
+            ),
+        )
+        for value, headers, expected in cases:
+            with self.subTest(value=value, headers=headers):
+                status, _ = self.favicon_request(value, headers)
+                self.assertEqual(status, expected)
+
+        dashboard_headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        status, _ = self.request(
+            "PATCH",
+            http_api.FAVICON_PATH,
+            b'{"version":1,"version":1,"iconSvg":null}',
+            dashboard_headers,
+        )
+        self.assertEqual(status, 400)
+
+        connection = HTTPConnection(self.host, self.port, timeout=2)
+        connection.putrequest("PATCH", http_api.FAVICON_PATH)
+        for name, value in dashboard_headers.items():
+            connection.putheader(name, value)
+        connection.putheader("Content-Length", str(favicon.MAX_FAVICON_REQUEST_BODY + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read()
+        connection.close()
+
+        for path in (
+            http_api.FAVICON_ASSET_PATH,
+            f"{http_api.FAVICON_ASSET_PATH}?v=",
+            f"{http_api.FAVICON_ASSET_PATH}?v={'A' * 64}",
+            f"{http_api.FAVICON_ASSET_PATH}?v={'0' * 64}&extra=1",
+            f"{http_api.FAVICON_ASSET_PATH}?v={'0' * 64}&v={'0' * 64}",
+        ):
+            with self.subTest(path=path):
+                status, _ = self.request("GET", path)
+                self.assertEqual(status, 404)
+
+        for method, path in (
+            ("POST", http_api.FAVICON_PATH),
+            ("PUT", http_api.FAVICON_PATH),
+            ("DELETE", http_api.FAVICON_PATH),
+            ("HEAD", http_api.FAVICON_PATH),
+            ("POST", http_api.FAVICON_ASSET_PATH),
+            ("PATCH", http_api.FAVICON_ASSET_PATH),
+            ("PUT", http_api.FAVICON_ASSET_PATH),
+        ):
+            with self.subTest(method=method, path=path):
+                status, _, headers = self.raw_http_request(method, path)
+                self.assertEqual(status, 405)
+                self.assertIn("allow", headers)
+
+    def test_favicon_corrupt_state_maps_to_unavailable_without_affecting_health(self) -> None:
+        with mock.patch.object(
+            self.server.favicon_store,
+            "get",
+            side_effect=favicon.FaviconStateUnavailable("damaged"),
+        ):
+            status, payload = self.request("GET", http_api.FAVICON_PATH)
+        self.assertEqual(status, 503)
+        self.assertEqual(payload, {"error": "favicon_state_unavailable"})
+
+        with mock.patch.object(
+            self.server.favicon_store,
+            "update",
+            side_effect=favicon.FaviconStateUnavailable("damaged"),
+        ):
+            status, payload = self.favicon_request({"version": 1, "iconSvg": None})
+        self.assertEqual(status, 503)
+        self.assertEqual(payload, {"error": "favicon_state_unavailable"})
+
+        status, health = self.request("GET", http_api.HEALTH_PATH)
+        self.assertEqual(status, 200)
+        self.assertEqual(health["status"], "ok")
+
     def test_background_upload_contract_and_collision_naming(self) -> None:
         payload = image_bytes()
         status, uploaded = self.upload("from-browser.png", payload)
@@ -1096,6 +1293,7 @@ class APITests(unittest.TestCase):
         endpoints = (
             ("PATCH", http_api.API_PATH),
             ("PATCH", http_api.CARDS_PATH),
+            ("PATCH", http_api.FAVICON_PATH),
             ("POST", http_api.BACKGROUND_REMOVE_PATH),
             ("POST", http_api.SERVICE_STATUS_PATH),
             ("POST", http_api.CARDS_INITIALIZE_PATH),
