@@ -2586,7 +2586,8 @@
             gap: 0.55rem;
         }
 
-        .sr-only {
+        .sr-only,
+        .service-state[data-state="online"] .state-label {
             position: absolute;
             width: 1px;
             height: 1px;
