@@ -28,6 +28,8 @@ zoraxy-homelab-dashboard/
 ├── assets/
 │   ├── default-background.svg   # 项目自有兜底壁纸源文件
 │   ├── dashboard.css            # Homepage 样式，使用稳定部署路径
+│   ├── icons/
+│   │   └── homepage-badge.svg   # 页面图标默认金边徽章
 │   └── js/
 │       ├── app.js              # 原生 ES 模块入口与独立降级编排
 │       ├── core-http.js        # 共用超时请求
@@ -39,11 +41,11 @@ zoraxy-homelab-dashboard/
 │       ├── channel-switch.js
 │       ├── service-status.js
 │       ├── card-svg.js          # SVG 双重校验所需的前端白名单与安全 DOM 导入
-│       ├── dialog-motion.js      # 卡片与 favicon 对话框共用的开合动效控制器
+│       ├── dialog-motion.js      # 卡片与图标对话框共用的开合动效控制器
 │       ├── card-editor.js       # 当前频道卡片草稿、表单、删除和鼠标排序
 │       ├── card-manager.js      # 首次导入、服务器/缓存降级和动态卡片渲染
 │       ├── page-settings.js     # “网页设置”菜单的键盘、焦点和收起行为
-│       └── favicon-manager.js   # favicon 状态、草稿预览、保存、移除和页面 link
+│       └── favicon-manager.js   # favicon 与页面图标的独立管理、预览和默认回退
 ├── backgrounds/
 │   ├── .gitignore               # 仅放行项目兜底导出图
 │   ├── bg.jpg                   # SVG 导出的默认占位壁纸
@@ -55,7 +57,7 @@ zoraxy-homelab-dashboard/
 │   │   ├── config.py            # 严格 v3 配置模型、解析和路径边界
 │   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
 │   │   ├── cards.py             # 卡片模型、SVG 清洗、原子初始化和修订号存储
-│   │   ├── favicon.py           # 独立 favicon 状态、内容哈希和资源读取
+│   │   ├── favicon.py           # favicon 与页面图标共用的状态存储、哈希和资源读取
 │   │   ├── bing.py              # Bing 固定源客户端、市场回退和每日图保存
 │   │   ├── bestdori.py          # 固定源客户端、抽卡和去重历史
 │   │   ├── probe.py             # 回环固定的 HTTPS 批量入口探测
@@ -84,7 +86,7 @@ zoraxy-homelab-dashboard/
 
 历次代码、架构和安全审计结果请参见 [审计报告索引](audits/README.md)。
 
-仓库只分发兜底背景 `backgrounds/bg.jpg`，不分发其它背景、缩略图缓存、构建出的 EXE、`DashboardCards.json`、`DashboardFavicon.json`、其它 JSON 状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用稳定路径，部署时直接覆盖完整的 `assets/` 与 `index.html`，然后使用 `Ctrl+F5` 强制刷新验收；版本和回滚由 Git Tag/Release 管理。
+仓库分发兜底背景 `backgrounds/bg.jpg` 与默认页面徽章 `assets/icons/homepage-badge.svg`，不分发其它背景、缩略图缓存、构建出的 EXE、`DashboardCards.json`、`DashboardFavicon.json`、`DashboardPageIcon.json`、其它 JSON 状态或日志。公开 Web 根目录只应部署 `index.html`、`assets/` 和 `backgrounds/`；不要复制 README、其它脚本、后端源码、EXE、配置、状态或 Git 文件。`assets/` 使用稳定路径，部署时直接覆盖完整的 `assets/` 与 `index.html`，然后使用 `Ctrl+F5` 强制刷新验收；版本和回滚由 Git Tag/Release 管理。
 
 项目代码、文档和项目自有占位资产按 [MIT License](LICENSE) 发布。品牌标识、用户壁纸以及运行时获取的第三方卡面不属于本项目许可范围，详见 [ASSETS.md](ASSETS.md)；二进制依赖及完整许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 `licenses/`。
 
@@ -106,6 +108,8 @@ GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者
 ├── GET/POST/PATCH /api/cards              -> Python 状态服务原子初始化及按频道保存
 ├── GET/PATCH /api/favicon                 -> Python 状态服务读取或保存私有 SVG 状态
 ├── GET /api/favicon.svg?v=<SHA-256>        -> Python 状态服务返回当前哈希对应 SVG
+├── GET/PATCH /api/page-icon               -> Python 状态服务管理独立的页面图标
+├── GET /api/page-icon.svg?v=<SHA-256>      -> Python 状态服务返回页面图标 SVG
 ├── POST /api/background-files/...         -> 127.0.0.1:8787/api/...
 │                                               -> Bing 固定 HTTPS 首页图端点
 ├── GET/POST /api/bestdori/...              -> Python 状态服务
@@ -157,11 +161,17 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、
 
 卡片图标通过本地 `.svg` 文件导入；浏览器只读取文件文本，不向公开目录单独上传图标。为兼容常见图标导出格式，前后端允许一个位于根 `<svg>` 下的简单纯文本 `<title>`，也接受无命名空间的行内 `style` 属性，但二者都会在清洗时移除，不会进入保存结果或页面 DOM。真正的 `<style>` 样式表、`class`、脚本、事件属性、外部资源、嵌入图片、动画、DTD 和实体仍会被拒绝；元素数量、嵌套、图标与请求体大小也继续受限。渲染不会把服务器字符串直接赋给 `innerHTML`，内部渐变、遮罩和裁剪 ID 会加上卡片级前缀以免不同图标互相引用。
 
-### 网页设置与网站图标
+### 网页设置与图标
 
-页脚“网页设置”按钮在上方打开包含“修改卡片”和“网站图标”的菜单，支持方向键、Home、End、Escape、外部点击和焦点离开。网站图标编辑器只接受本地 `.svg` 文件，选择后先在当前页面形成经过清洗的安全预览草稿，点击保存后才写入服务器；移除已有图标需要单独二次确认。写入期间会锁定重复操作，关闭后焦点回到“网页设置”，减少动态效果时不等待过渡。
+页脚“网页设置”按钮在上方打开包含“修改卡片”、“网站图标”和“页面图标”的菜单，支持方向键、Home、End、Escape、外部点击和焦点离开。网站图标编辑器只接受本地 `.svg` 文件，选择后先在当前页面形成经过清洗的安全预览草稿，点击保存后才写入服务器；移除已有图标需要单独二次确认。写入期间会锁定重复操作，关闭后焦点回到“网页设置”，减少动态效果时不等待过渡。
 
 全站 favicon 独立保存在 Web Root 之外的 `DashboardFavicon.json`，不创建公开 `favicon.svg`，也不占用卡片修订号。页面加载时读取 `GET /api/favicon`，按完整 SHA-256 构造 `/api/favicon.svg?v=...` 并维护 `<link rel="icon" type="image/svg+xml">`；保存或移除所在页面立即更新，其它标签页和设备在下次加载时同步。旧后端、网络故障或尚未配置时保持无图标，主页和其它功能继续可用；网站图标编辑器仍可打开并说明 API 状态，但不可写入。
+
+“页面图标”独立控制 HomeLab 标题左侧和宽屏左右下角的三个装饰图标，与 favicon 互不覆盖。两个编辑器复用 SVG 校验、草稿预览、保存和移除流程。页面图标通过 `GET/PATCH /api/page-icon` 管理，资源为 `/api/page-icon.svg?v=<SHA-256>`，私有状态独立保存在 `DashboardPageIcon.json`，不修改 `DashboardFavicon.json`。
+
+未配置、移除自定义图标、API 不可用或 SVG 加载失败时，页面图标回退到版本管理中的 `assets/icons/homepage-badge.svg`。标题图标按大写字母高度和基线对齐，间距为 `0.22em`；两枚角落图标只在宽度至少 1440px 且横屏时显示，边距为 16px，默认宽度为 `2.65rem`。自定义 SVG 会按透明区域计算显示边界并等比例缩放，特别宽或高的图形会限制尺寸以免遮挡内容；SVG 母版不变。三个装饰不接收点击或焦点，不重复朗读。其它页面在刷新后读取共享的页面图标配置。
+
+两枚角落图标同时播放缓慢悬浮和薄卡片式 3D 旋转：6 秒上下浮动一个来回、上浮 6px，16 秒绕竖直中轴转一圈，透视距离为 240px；背面自然显示镜像。右侧浮动和旋转分别错开 3 秒和 2 秒。弹窗打开时暂停，关闭后继续；系统开启“减少动态效果”时保持正面静止。标题图标只保留现有入场效果。
 
 ### 服务入口状态
 
@@ -468,12 +478,12 @@ py_compile
 -> 依赖导入与 JPEG/PNG/WebP/AVIF 编解码能力预检
 -> PyInstaller --onefile --console --noupx
 -> 临时端口 EXE 冒烟测试
--> 健康检查、GET、PATCH、favicon 上传/资源/移除持久化、真实 PNG 上传与缩略图清单、Bing 路由离线校验、离线抽卡历史维护、批量状态 API、控制关闭
+-> 健康检查、GET、PATCH、favicon 与页面图标上传/资源/移除持久化、真实 PNG 上传与缩略图清单、Bing 路由离线校验、离线抽卡历史维护、批量状态 API、控制关闭
 -> SHA-256
 -> dist/HomeLabWallpaperState.exe
 ```
 
-构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。卡片初始化/修订冲突、favicon 上传/资源读取/移除/重启持久化、图片上传、Bing 路由和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理；Bing 烟测使用非法空对象字段确认路由存在，不请求 Bing 或 Bestdori 公网，也不会向系统回收站写入测试文件。
+构建脚本不会自动安装依赖。任一固定依赖或 Pillow 必需编解码器缺失时会给出明确安装命令。卡片初始化/修订冲突、favicon 与页面图标上传/资源读取/移除/重启持久化、图片上传、Bing 路由和抽卡历史维护冒烟测试只操作构建目录中的临时背景/状态文件并随构建临时目录清理；Bing 烟测使用非法空对象字段确认路由存在，不请求 Bing 或 Bestdori 公网，也不会向系统回收站写入测试文件。
 
 公开发布的 EXE 必须与项目许可证和捆绑组件的完整许可证一起分发。构建完成后可生成带文件清单与 SHA-256 的 Windows x64 发布包：
 
@@ -485,14 +495,14 @@ py_compile
 
 ## 部署和迁移
 
-1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置；已经存在时单独备份 `HomeLabWallpaperState-data/DashboardCards.json` 与 `DashboardFavicon.json`。
+1. 记录当前提交、Zoraxy 版本、旧 EXE 哈希，并备份旧 EXE、JSON、状态、日志、`index.html`、完整 `assets/` 和 Zoraxy 配置；已经存在时单独备份 `HomeLabWallpaperState-data/DashboardCards.json`、`DashboardFavicon.json` 与 `DashboardPageIcon.json`。
 2. 停止现有后端，将待部署 EXE 复制到非公开的 Zoraxy 程序目录。不要删除现有 `HomeLabWallpaperState.json` 或 `HomeLabWallpaperState-data/`；若配置仍为 v1/v2，按“严格 v3 配置”一节运行新版 `configure` 完成迁移。
 3. 核对构建输出 SHA-256 后双击新版 EXE，确认 `/healthz` 的服务标识和接口版本与当前构建匹配；接口版本不匹配时启动器会拒绝复用旧进程。
 4. 先验证卡片未初始化 GET、favicon 状态/哈希资源、壁纸 GET/PATCH、`GET /api/background-files`、上传/删除、Bing 路由、离线抽卡历史维护和 Homepage 同源 `/api/service-status`；确认代理运行时 international 可获取，代理停止时 CN 仍成功且 international 不直连。部署前端时完整覆盖 `assets/` 与配套的 `index.html`，逐个确认 CSS/JavaScript 返回 200 和正确的 `Content-Type`，再使用 `Ctrl+F5` 强制刷新。若前端先于后端上线，favicon 保持无图标，卡片与壁纸功能各自进入静态或缓存降级，不会向旧后端写入新状态。
 5. 新部署第一次打开首页时，确认现有 11+5 张卡片一次性导入、`DashboardCards.json` 位于非公开状态目录，随后刷新不重复初始化；通过“网页设置”上传、替换并移除一次 SVG favicon，确认 `DashboardFavicon.json` 仍只位于非公开状态目录；再打开背景选择器等待已有原图生成缩略图，并检查批量状态请求、卡片编辑、壁纸同步、上传、Bing 中国版/国际版每日图、回收站删除和两种抽卡模式。
 6. 最后删除各子服务 Host Rule 中旧的 CORS 响应头，并验证 AstrBot 插件 JS/CSS 和其它服务。
 
-若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层原图、`HomeLabWallpaperState-data/DashboardCards.json`、`DashboardFavicon.json` 和 `BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版本即使不读取卡片、favicon 或去重记录，也不得删除它们。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
+若回滚到旧前端，必须从目标 Git Release 同时恢复与其兼容的 EXE、JSON、`index.html`、完整 `assets/` 和相关 Host Rule 配置，随后强刷浏览器缓存。升级前应独立备份部署机 `backgrounds/` 第一层原图、`HomeLabWallpaperState-data/DashboardCards.json`、`DashboardFavicon.json`、`DashboardPageIcon.json` 和 `BestdoriCardDraws.json`；`backgrounds/thumbnails/` 是完全可再生的缓存，不需要备份，也不应作为用户数据恢复。旧版本即使不读取卡片、favicon 或去重记录，也不得删除它们。从 Windows 回收站恢复的图片需保持原文件名；下次打开背景选择器时会重新生成缩略图，随后可在网页中重新选择对应槽位。已经永久删除的原图只能从独立备份恢复。
 
 ### Zoraxy Virtual Directory
 
@@ -542,6 +552,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - Services 与 Quick Links 可以分别连续新增、修改、删除和保存；桌面鼠标排序可用，手机端隐藏排序但其它编辑可用；
 - 导入合法的单色和彩色 SVG 能正确预览，常见的简单根级 `<title>` 与行内 `style` 包装信息不会误杀且不会保留，脚本、事件、外链、嵌入图片和 `<style>` 样式表会被阻止；
 - “网页设置”可通过鼠标和完整键盘操作；上传 favicon A 后当前标签立即显示，替换为 B 不残留 A，刷新及新标签读取 B，移除后当前页和刷新后均保持无图标；
+- 分别上传不同的网站图标和页面图标，保存、刷新及移除时互不覆盖；移除页面图标后恢复默认金边徽章，窄屏和竖屏隐藏两枚角落装饰；
 - 另一设备先保存同频道时当前草稿收到修订冲突并保留，确认重新载入前不会静默丢失或覆盖数据；
 - 系统启用减少动态效果后，频道切换应立即完成且保持可操作；
 - 打开背景选择器时默认只请求 WebP 缩略图，选择一张后才新增对应原图请求；清单故障时会提示原图加载降级模式；
@@ -563,7 +574,7 @@ curl.exe -sS -L --resolve "anon.home.example.com:443:127.0.0.1" --connect-timeou
 - `backgrounds/bg.jpg` 作为兜底进入 Git；其它原图不进入 Git，应独立备份；`backgrounds/thumbnails/` 是可再生缓存，不备份、不手工管理。
 - `BestdoriCardDraws.json` 位于非公开状态目录并应随背景图片一起备份；清理或重置记录不会清理对应图片。
 - `DashboardCards.json` 位于非公开状态目录并应独立备份；旧版本前端或 EXE 不读取它时也不得删除或覆盖。
-- `DashboardFavicon.json` 位于同一非公开状态目录并应独立备份；移除图标会保留 `iconSvg: null` 的状态，旧版本不得删除、覆盖或搬到公开 Web Root。
+- `DashboardFavicon.json` 与 `DashboardPageIcon.json` 分别保存网站图标和页面图标，位于同一非公开状态目录并应独立备份；移除图标会保留 `iconSvg: null` 的状态，旧版本不得删除、覆盖或搬到公开 Web Root。
 - 从回收站恢复的背景不会自动恢复横竖屏选择；永久删除没有应用内撤销能力。
-- `state.json`、`DashboardCards.json`、`DashboardFavicon.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
+- `state.json`、`DashboardCards.json`、`DashboardFavicon.json`、`DashboardPageIcon.json` 格式与前端 API 是兼容边界，迁移或升级不得随意改变。
 - `index.html`、稳定路径的前端 `assets/`、状态服务和 Zoraxy 配置分层维护；服务状态 API 契约变化必须同步更新前端验证。

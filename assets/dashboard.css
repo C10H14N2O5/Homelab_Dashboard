@@ -122,6 +122,101 @@
             line-height: 0.96;
         }
 
+        .hero-title {
+            display: flex;
+            align-items: baseline;
+            gap: 0.22em;
+            white-space: nowrap;
+        }
+
+        .homepage-badge {
+            position: relative;
+            display: inline-block;
+            flex: none;
+            overflow: hidden;
+            /* Crop the 1254-square master to (24, 130, 1212, 921),
+               retaining a small safety margin around the gold outline. */
+            aspect-ratio: var(--badge-aspect, 1.3159609121);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .homepage-badge img {
+            position: absolute;
+            display: block;
+            width: var(--badge-image-width, calc(100% * 1254 / 1212));
+            max-width: none;
+            height: auto;
+            left: var(--badge-image-left, calc(-100% * 24 / 1212));
+            top: var(--badge-image-top, calc(-100% * 130 / 921));
+        }
+
+        .hero-badge {
+            width: min(calc(0.72em * var(--badge-aspect, 1.3159609121)), 1.44em);
+            width: min(calc(1cap * var(--badge-aspect, 1.3159609121)), 2cap);
+            height: auto;
+        }
+
+        .corner-badge {
+            position: fixed;
+            z-index: 2;
+            display: none;
+            width: max-content;
+            bottom: 16px;
+            perspective: 240px;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .corner-badge .homepage-badge {
+            display: block;
+            width: min(2.65rem, calc(2.65rem * var(--badge-aspect, 1.3159609121)));
+            transform-origin: center;
+            backface-visibility: visible;
+        }
+
+        .corner-badge-left {
+            left: 16px;
+        }
+
+        .corner-badge-right {
+            right: 16px;
+        }
+
+        @media (min-width: 1440px) and (orientation: landscape) {
+            .corner-badge {
+                display: block;
+                animation: corner-badge-float 6s ease-in-out infinite;
+            }
+
+            .corner-badge .homepage-badge {
+                animation: corner-badge-turn 16s linear infinite;
+            }
+
+            .corner-badge-right {
+                animation-delay: -3s;
+            }
+
+            .corner-badge-right .homepage-badge {
+                animation-delay: -2s;
+            }
+        }
+
+        body:has(dialog[open]) .corner-badge,
+        body:has(dialog[open]) .corner-badge .homepage-badge {
+            animation-play-state: paused;
+        }
+
+        @keyframes corner-badge-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        @keyframes corner-badge-turn {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(360deg); }
+        }
+
         .hero-subtitle {
             margin: 1rem 0 0;
             color: rgba(241, 245, 249, 0.82);
@@ -3111,6 +3206,12 @@
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
                 transition-delay: 0ms !important;
+            }
+
+            .corner-badge,
+            .corner-badge .homepage-badge {
+                animation: none !important;
+                transform: none !important;
             }
 
             .background-layer.is-changing {

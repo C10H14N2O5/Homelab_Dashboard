@@ -15,6 +15,7 @@ from homelab_state.core import atomic_write_json, utc_timestamp
 
 FAVICON_VERSION = 1
 FAVICON_STATE_FILE_NAME = "DashboardFavicon.json"
+PAGE_ICON_STATE_FILE_NAME = "DashboardPageIcon.json"
 MAX_FAVICON_REQUEST_BODY = 128 * 1024
 MAX_FAVICON_STATE_FILE_BYTES = 64 * 1024
 FAVICON_SANITIZER_SCOPE = "site-favicon"

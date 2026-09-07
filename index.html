@@ -133,7 +133,12 @@
         <header class="hero">
             <div class="hero-copy">
                 <p class="eyebrow">Private Infrastructure</p>
-                <h1>HomeLab</h1>
+                <h1 class="hero-title">
+                    <span class="homepage-badge hero-badge" data-site-icon aria-hidden="true">
+                        <img src="/assets/icons/homepage-badge.svg" width="1254" height="1254" alt="" draggable="false">
+                    </span>
+                    <span>HomeLab</span>
+                </h1>
                 <p class="hero-subtitle">Service Dashboard · <span id="service-count-label">家庭服务入口</span></p>
                 <form class="search-form" id="homepage-search-form" action="https://www.bing.com/search" method="get" target="_blank" rel="noopener noreferrer" role="search" data-expanded="false" data-menu-open="false">
                     <div class="search-shell">
@@ -411,6 +416,13 @@
                                 </svg>
                                 <span>网站图标</span>
                             </button>
+                            <button class="page-settings-item" id="page-icon-editor-button" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="page-icon-dialog">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M5 3h11l3 3v15H5V3Z"/>
+                                    <path d="M9 3v6h6V3M9 16h6"/>
+                                </svg>
+                                <span>页面图标</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -419,6 +431,17 @@
             </footer>
         </section>
     </main>
+
+    <span class="corner-badge corner-badge-left" aria-hidden="true">
+        <span class="homepage-badge" data-site-icon aria-hidden="true">
+            <img src="/assets/icons/homepage-badge.svg" width="1254" height="1254" alt="" draggable="false">
+        </span>
+    </span>
+    <span class="corner-badge corner-badge-right" aria-hidden="true">
+        <span class="homepage-badge" data-site-icon aria-hidden="true">
+            <img src="/assets/icons/homepage-badge.svg" width="1254" height="1254" alt="" draggable="false">
+        </span>
+    </span>
 
     <dialog class="card-editor-dialog" id="card-editor-dialog" aria-labelledby="card-editor-title" aria-describedby="card-editor-description">
         <div class="card-editor-shell">
@@ -532,6 +555,48 @@
             <div class="background-delete-actions">
                 <button class="background-action-button" id="favicon-remove-cancel" type="button">取消</button>
                 <button class="background-action-button" id="favicon-remove-confirm" type="button" data-kind="danger">确认移除</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="favicon-dialog" id="page-icon-dialog" aria-labelledby="page-icon-title" aria-describedby="page-icon-description">
+        <div class="favicon-shell">
+            <header class="dialog-header">
+                <div>
+                    <h2 id="page-icon-title">页面图标</h2>
+                    <p id="page-icon-description">上传 SVG，同时替换标题和宽屏左右下角的图标；地址栏图标独立设置。</p>
+                </div>
+                <button class="dialog-close" id="page-icon-close" type="button" aria-label="关闭页面图标设置">✕</button>
+            </header>
+            <div class="favicon-editor-body">
+                <section class="favicon-preview-panel" aria-labelledby="page-icon-preview-title">
+                    <h3 id="page-icon-preview-title">预览</h3>
+                    <div class="favicon-preview" id="page-icon-preview" aria-label="页面图标预览"></div>
+                    <p id="page-icon-state-label">正在读取当前页面图标…</p>
+                </section>
+                <section class="favicon-editor-copy" aria-labelledby="page-icon-upload-title">
+                    <h3 id="page-icon-upload-title">选择 SVG</h3>
+                    <p>选择新的 SVG 查看预览；保存后才会更新页面。移除自定义图标将恢复默认金边徽章。</p>
+                    <button class="background-action-button" id="page-icon-select-button" type="button">选择 / 更换 SVG</button>
+                    <input class="sr-only" id="page-icon-file-input" type="file" accept=".svg,image/svg+xml">
+                </section>
+            </div>
+            <p class="favicon-status" id="page-icon-status" role="status" aria-live="polite"></p>
+            <div class="favicon-actions">
+                <button class="background-action-button" id="page-icon-remove-button" type="button" data-kind="danger" disabled>移除页面图标</button>
+                <button class="background-action-button favicon-save-button" id="page-icon-save-button" type="button" disabled>保存页面图标</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="favicon-remove-confirm-dialog" id="page-icon-remove-confirm-dialog" aria-labelledby="page-icon-remove-title" aria-describedby="page-icon-remove-description">
+        <div class="background-delete-shell">
+            <h2 id="page-icon-remove-title">移除页面图标？</h2>
+            <p id="page-icon-remove-description">确认后页面内三个图标恢复为默认金边徽章；地址栏图标不变。</p>
+            <p class="background-delete-status" id="page-icon-remove-status" role="status" aria-live="polite"></p>
+            <div class="background-delete-actions">
+                <button class="background-action-button" id="page-icon-remove-cancel" type="button">取消</button>
+                <button class="background-action-button" id="page-icon-remove-confirm" type="button" data-kind="danger">确认移除</button>
             </div>
         </div>
     </dialog>

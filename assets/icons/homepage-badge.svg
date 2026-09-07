@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <title>HomeLab badge</title>
+  <circle cx="48" cy="48" r="44" fill="#14283b" stroke="#82d5fa" stroke-width="4"/>
+  <path d="M24 47 48 27l24 20v24H24Z" fill="#d9f4ff"/>
+  <path d="M37 49h22v8H37Zm0 12h22v6H37Z" fill="#215276"/>
+  <path d="M41 53h2m-2 11h2" stroke="#82d5fa" stroke-width="2" stroke-linecap="round"/>
+</svg>

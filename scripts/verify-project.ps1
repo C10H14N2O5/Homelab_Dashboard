@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter()]
     [switch]$SkipPython,
@@ -74,6 +74,7 @@ function Test-BlockedRepositoryPath {
         '.venv/',
         'build/',
         'temp/',
+        'output/',
         'homelabwallpaperstate-data/'
     )
     foreach ($prefix in $blockedRootPrefixes) {
@@ -92,7 +93,7 @@ function Test-BlockedRepositoryPath {
         return $true
     }
     if ($extension -in @('.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif', '.svg') -and
-        $lower -notin @('backgrounds/bg.jpg', 'assets/default-background.svg')) {
+        $lower -notin @('backgrounds/bg.jpg', 'assets/default-background.svg', 'assets/icons/homepage-badge.svg')) {
         return $true
     }
     if ($leafName -in @(
@@ -102,14 +103,18 @@ function Test-BlockedRepositoryPath {
             'dashboardcards.json.bak',
             'dashboardfavicon.json',
             'dashboardfavicon.json.bak',
+            'dashboardpageicon.json',
+            'dashboardpageicon.json.bak',
             'homelabwallpaperstate.json'
         ) -or
         $leafName -like 'state.json.corrupt-*' -or
         $leafName -like 'dashboardcards.json.corrupt-*' -or
         $leafName -like 'dashboardfavicon.json.corrupt-*' -or
+        $leafName -like 'dashboardpageicon.json.corrupt-*' -or
         $leafName -like '.state-*.tmp' -or
         $leafName -like '.dashboardcards.json.*.tmp' -or
         $leafName -like '.dashboardfavicon.json.*.tmp' -or
+        $leafName -like '.dashboardpageicon.json.*.tmp' -or
         $leafName -match '\.log(?:\..+)?$') {
         return $true
     }
@@ -282,7 +287,8 @@ $maintenanceContracts = @(
     @{ Name = 'packaged service status check'; Source = $buildSource; Marker = '/api/service-status' },
     @{ Name = 'packaged card initialization check'; Source = $buildSource; Marker = '/api/cards/initialize' },
     @{ Name = 'packaged card restart persistence check'; Source = $buildSource; Marker = 'did not preserve card state across restart' },
-    @{ Name = 'packaged favicon resource check'; Source = $buildSource; Marker = '/api/favicon.svg?v=' },
+    @{ Name = 'packaged icon route coverage'; Source = $buildSource; Marker = 'foreach ($iconKind in @(''favicon'', ''page-icon''))' },
+    @{ Name = 'packaged icon resource check'; Source = $buildSource; Marker = '/api/$iconKind.svg?v=' },
     @{ Name = 'packaged favicon removal persistence check'; Source = $buildSource; Marker = 'did not preserve removed favicon state across restart' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
     @{ Name = 'release file manifest'; Source = $packageSource; Marker = 'SHA256SUMS.txt' },
@@ -714,7 +720,7 @@ function makePageSettingsHarness(reducedMotion = false) {
             closest(selector) { return selector === '[role="menuitem"]' ? this : null; }
         });
     }
-    const items = [makeMenuItem(), makeMenuItem()];
+    const items = [makeMenuItem(), makeMenuItem(), makeMenuItem()];
     const menu = makeEventTarget({
         hidden: true,
         querySelectorAll(selector) { return selector === '[role="menuitem"]' ? items : []; }
@@ -867,7 +873,7 @@ interruptedSettings.runTimers();
 if (interruptedSettings.menu.hidden
     || !interruptedSettings.controller.isOpen()
     || interruptedSettings.container.dataset.menuOpen !== 'true'
-    || interruptedSettings.items[1].focusCount !== 1
+    || interruptedSettings.items[2].focusCount !== 1
     || interruptedSettings.timerCount() !== 0) {
     throw new Error('Reopening the page settings menu must cancel stale close completion.');
 }
@@ -901,9 +907,104 @@ if (!faviconManagerScript.includes("new URL('/api/favicon', document.baseURI)")
     || !faviconManagerScript.includes('sanitizeSvgMarkup(await file.text())')
     || !faviconManagerScript.includes("JSON.stringify({ version: 1, iconSvg })")
     || !faviconManagerScript.includes("error.status === 404 ? 'unsupported' : 'unavailable'")
-    || !faviconManagerScript.includes('await requestFavicon(\'PATCH\', null)')) {
+    || !faviconManagerScript.includes('await requestIcon(\'PATCH\', null)')) {
     throw new Error('The favicon manager is missing its API, managed-link, safe-draft, removal, or old-backend contract.');
 }
+// Page artwork updates are independent, atomic across all three slots, and recoverable.
+const artworkTags = [...htmlDocument.matchAll(/<span\b[^>]*\bdata-site-icon\b[^>]*>/g)];
+if (artworkTags.length !== 3 || artworkTags.some(([tag]) => !tag.includes('aria-hidden="true"'))
+    || !htmlDocument.includes('id="page-icon-editor-button"')
+    || !appScript.includes("kind: 'page-icon'")) {
+    throw new Error('The page icon setting must control exactly three decorative artwork slots.');
+}
+const artworkLoads = [];
+let artworkRasterMode = 'padded';
+const artworkDocument = {
+    createElement(tag) {
+        if (tag !== 'canvas') throw new Error('Unexpected artwork element');
+        const canvas = { width: 0, height: 0 };
+        canvas.getContext = () => {
+            if (artworkRasterMode === 'unavailable') return null;
+            return {
+                drawImage() {},
+                getImageData() {
+                    const data = new Uint8ClampedArray(canvas.width * canvas.height * 4);
+                    if (artworkRasterMode === 'padded') {
+                        for (let y = 64; y < 192; y += 1) {
+                            for (let x = 32; x < 224; x += 1) {
+                                data[(y * canvas.width + x) * 4 + 3] = 255;
+                            }
+                        }
+                    }
+                    return { data };
+                }
+            };
+        };
+        return canvas;
+    }
+};
+const artworkContext = vm.createContext({
+    document: artworkDocument,
+    Image: class {
+        constructor() {
+            this.naturalWidth = 256;
+            this.naturalHeight = 256;
+            artworkLoads.push(this);
+        }
+    }
+});
+vm.runInContext(faviconManagerScript.slice(faviconManagerScript.indexOf('function pageIconCrop('),
+    faviconManagerScript.indexOf('export function initializeFaviconManager(')), artworkContext);
+const artworkSlots = Array.from({ length: 3 }, () => {
+    const properties = new Map();
+    const image = { src: '/default.svg', getAttribute() { return '/default.svg'; } };
+    return { image, properties, querySelector() { return image; }, style: {
+        setProperty(key, value) { properties.set(key, value); },
+        removeProperty(key) { properties.delete(key); }
+    } };
+});
+const artworkController = artworkContext.createPageIconController(artworkSlots);
+artworkController.apply('/first.svg');
+if (artworkSlots.some((slot) => slot.image.src !== '/default.svg')) {
+    throw new Error('Page artwork changed before the SVG loaded.');
+}
+artworkController.apply('/second.svg');
+artworkLoads[0].onload();
+if (artworkSlots.some((slot) => slot.image.src !== '/default.svg')) {
+    throw new Error('An old SVG load overwrote newer page artwork.');
+}
+artworkLoads[1].onload();
+if (artworkSlots.some((slot) => slot.image.src !== '/second.svg'
+    || Math.abs(Number(slot.properties.get('--badge-aspect')) - 194 / 130) > 1e-8
+    || Math.abs(parseFloat(slot.properties.get('--badge-image-left')) + 100 * 31 / 194) > 1e-8
+    || Math.abs(parseFloat(slot.properties.get('--badge-image-top')) + 100 * 63 / 130) > 1e-8)) {
+    throw new Error('Page artwork lost its shared alpha crop or safety padding.');
+}
+artworkController.apply('/second.svg');
+if (artworkLoads.length !== 2) throw new Error('Unchanged page artwork was loaded again.');
+artworkController.apply('/failed.svg');
+artworkLoads[2].onerror();
+if (artworkSlots.some((slot) => slot.image.src !== '/default.svg' || slot.properties.size)) {
+    throw new Error('Failed SVG loading must restore the default artwork and crop.');
+}
+artworkController.apply('/failed.svg');
+if (artworkLoads.length !== 4) throw new Error('Failed SVG loading must remain retryable.');
+artworkController.apply(null);
+artworkLoads[3].onload();
+if (artworkSlots.some((slot) => slot.image.src !== '/default.svg')) {
+    throw new Error('Removing page artwork must cancel pending SVG loads.');
+}
+for (const mode of ['transparent', 'unavailable']) {
+    artworkRasterMode = mode;
+    artworkController.apply(`/${mode}.svg`);
+    artworkLoads.at(-1).naturalWidth = 512;
+    artworkLoads.at(-1).onload();
+    if (artworkSlots.some((slot) => slot.properties.get('--badge-aspect') !== '2'
+        || slot.properties.get('--badge-image-width') !== '100%')) {
+        throw new Error('Transparent SVG or unavailable canvas must preserve the full image ratio.');
+    }
+}
+
 const cardEditorDialogRule = stylesheet.match(/\.card-editor-dialog,\s*\.card-confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 const cardConfirmDialogRule = [...stylesheet.matchAll(/\.card-confirm-dialog\s*\{([^}]*)\}/g)]
     .map((match) => match[1])
@@ -5114,9 +5215,31 @@ try {
     Assert-RepositorySourceControlPolicy -Paths $trackedFiles -Source 'tracked'
     Assert-RepositorySourceControlPolicy -Paths $untrackedFiles -Source 'untracked'
 
+    Write-Host 'Checking the exact homepage icon exception...'
+    if (Test-BlockedRepositoryPath -Path 'assets/icons/homepage-badge.svg') {
+        throw 'The official homepage icon must be eligible for source control.'
+    }
+    foreach ($probe in @(
+        'assets/icons/other.svg',
+        'assets/icons/homepage-badge.png',
+        'assets/other/homepage-badge.svg',
+        'output/homepage-badge.svg',
+        'output/preview.html'
+    )) {
+        if (-not (Test-BlockedRepositoryPath -Path $probe)) {
+            throw "The homepage icon exception admitted an unrelated asset: $probe"
+        }
+    }
+    & $git.Source check-ignore --no-index --quiet -- 'assets/icons/homepage-badge.svg'
+    if ($LASTEXITCODE -ne 1) {
+        throw 'The official homepage icon must not match a Git ignore rule.'
+    }
+
     $ignoreProbes = @(
         'backgrounds/verify-probe.jpg',
         'dist/verify-probe.exe',
+        'output/verify-probe.svg',
+        'output/nested/preview.html',
         'state.json',
         'state.json.bak',
         'state.json.corrupt-verify',
@@ -5129,6 +5252,10 @@ try {
         'DashboardFavicon.json.bak',
         'DashboardFavicon.json.corrupt-verify',
         '.DashboardFavicon.json.verify.tmp',
+        'DashboardPageIcon.json',
+        'DashboardPageIcon.json.bak',
+        'DashboardPageIcon.json.corrupt-verify',
+        '.DashboardPageIcon.json.verify.tmp',
         'service.log',
         'service.log.1',
         'HomeLabWallpaperState.json',

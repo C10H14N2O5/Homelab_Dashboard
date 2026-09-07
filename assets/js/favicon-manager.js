@@ -4,6 +4,8 @@ import { createDialogMotionController } from './dialog-motion.js';
 
 const FAVICON_STATE_ENDPOINT = new URL('/api/favicon', document.baseURI);
 const FAVICON_ASSET_ENDPOINT = new URL('/api/favicon.svg', document.baseURI);
+const PAGE_ICON_STATE_ENDPOINT = new URL('/api/page-icon', document.baseURI);
+const PAGE_ICON_ASSET_ENDPOINT = new URL('/api/page-icon.svg', document.baseURI);
 const MAX_FAVICON_RESPONSE_BYTES = 16 * 1024;
 const FAVICON_HASH_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -48,9 +50,9 @@ export function normalizeFaviconState(value) {
     };
 }
 
-export function faviconAssetUrl(contentHash) {
+export function faviconAssetUrl(contentHash, endpoint = FAVICON_ASSET_ENDPOINT) {
     if (!FAVICON_HASH_PATTERN.test(contentHash)) throw new Error('网站图标内容哈希无效。');
-    const url = new URL(FAVICON_ASSET_ENDPOINT.href);
+    const url = new URL(endpoint.href);
     url.searchParams.set('v', contentHash);
     return url;
 }
@@ -75,7 +77,7 @@ async function readJsonResponse(response) {
     }
 }
 
-async function requestFavicon(method, iconSvg) {
+async function requestFavicon(method, iconSvg, endpoint = FAVICON_STATE_ENDPOINT) {
     const options = {
         method,
         credentials: 'same-origin',
@@ -89,7 +91,7 @@ async function requestFavicon(method, iconSvg) {
         options.headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify({ version: 1, iconSvg });
     }
-    return fetchWithTimeout(FAVICON_STATE_ENDPOINT.href, options, 7000, null, async (response) => {
+    return fetchWithTimeout(endpoint.href, options, 7000, null, async (response) => {
         let payload = null;
         try {
             payload = await readJsonResponse(response);
@@ -106,21 +108,121 @@ async function requestFavicon(method, iconSvg) {
     });
 }
 
+function pageIconCrop(image) {
+    const naturalWidth = image.naturalWidth;
+    const naturalHeight = image.naturalHeight;
+    if (!(naturalWidth > 0 && naturalHeight > 0)) throw new Error('Invalid icon dimensions');
+    const canvas = document.createElement('canvas');
+    const scale = 256 / Math.max(naturalWidth, naturalHeight);
+    canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let left = canvas.width;
+    let top = canvas.height;
+    let right = -1;
+    let bottom = -1;
+    for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+            if (data[(y * canvas.width + x) * 4 + 3] === 0) continue;
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x);
+            bottom = Math.max(bottom, y);
+        }
+    }
+    if (right < left || bottom < top) {
+        return { aspect: naturalWidth / naturalHeight, width: 100, left: 0, top: 0 };
+    }
+    // Include one raster pixel of padding so antialiased strokes are never clipped.
+    left = Math.max(0, left - 1);
+    top = Math.max(0, top - 1);
+    right = Math.min(canvas.width, right + 2);
+    bottom = Math.min(canvas.height, bottom + 2);
+    const width = right - left;
+    const height = bottom - top;
+    return {
+        aspect: (naturalWidth * width / canvas.width) / (naturalHeight * height / canvas.height),
+        width: 100 * canvas.width / width,
+        left: -100 * left / width,
+        top: -100 * top / height
+    };
+}
+
+function createPageIconController(containers) {
+    const icons = Array.from(containers, (container) => {
+        const image = container.querySelector('img');
+        return { container, image, fallback: image.getAttribute('src') };
+    });
+    let generation = 0;
+    let currentUrl = null;
+    const cropProperties = ['--badge-aspect', '--badge-image-width', '--badge-image-left', '--badge-image-top'];
+
+    function reset() {
+        icons.forEach(({ container, image, fallback }) => {
+            cropProperties.forEach((name) => container.style.removeProperty(name));
+            image.src = fallback;
+        });
+    }
+
+    function apply(url) {
+        if (icons.length === 0) return;
+        if (url && url === currentUrl) return;
+        currentUrl = url;
+        const token = ++generation;
+        if (!url) {
+            reset();
+            return;
+        }
+        const loaded = new Image();
+        loaded.onload = () => {
+            if (token !== generation) return;
+            let crop = { aspect: loaded.naturalWidth / loaded.naturalHeight || 1, width: 100, left: 0, top: 0 };
+            try { crop = pageIconCrop(loaded); } catch (error) {
+                // Canvas may be unavailable; show the complete image without cropping.
+            }
+            icons.forEach(({ container, image }) => {
+                container.style.setProperty('--badge-aspect', String(crop.aspect));
+                container.style.setProperty('--badge-image-width', `${crop.width}%`);
+                container.style.setProperty('--badge-image-left', `${crop.left}%`);
+                container.style.setProperty('--badge-image-top', `${crop.top}%`);
+                image.src = url;
+            });
+        };
+        loaded.onerror = () => {
+            if (token !== generation) return;
+            currentUrl = null;
+            reset();
+        };
+        loaded.src = url;
+    }
+
+    return { apply };
+}
+
 export function initializeFaviconManager(options = {}) {
-    const launchButton = document.getElementById('favicon-editor-button');
-    const dialog = document.getElementById('favicon-dialog');
-    const closeButton = document.getElementById('favicon-close');
-    const preview = document.getElementById('favicon-preview');
-    const stateLabel = document.getElementById('favicon-state-label');
-    const selectButton = document.getElementById('favicon-select-button');
-    const fileInput = document.getElementById('favicon-file-input');
-    const removeButton = document.getElementById('favicon-remove-button');
-    const saveButton = document.getElementById('favicon-save-button');
-    const status = document.getElementById('favicon-status');
-    const confirmDialog = document.getElementById('favicon-remove-confirm-dialog');
-    const confirmCancel = document.getElementById('favicon-remove-cancel');
-    const confirmAccept = document.getElementById('favicon-remove-confirm');
-    const confirmStatus = document.getElementById('favicon-remove-status');
+    const isPageIcon = options.kind === 'page-icon';
+    const prefix = isPageIcon ? 'page-icon' : 'favicon';
+    const element = (suffix) => document.getElementById(`${prefix}-${suffix}`);
+    const endpoint = isPageIcon ? PAGE_ICON_STATE_ENDPOINT : FAVICON_STATE_ENDPOINT;
+    const assetEndpoint = isPageIcon ? PAGE_ICON_ASSET_ENDPOINT : FAVICON_ASSET_ENDPOINT;
+    const requestIcon = (method, iconSvg) => requestFavicon(method, iconSvg, endpoint);
+    const assetUrl = (hash) => faviconAssetUrl(hash, assetEndpoint);
+    const launchButton = element('editor-button');
+    const dialog = element('dialog');
+    const closeButton = element('close');
+    const preview = element('preview');
+    const stateLabel = element('state-label');
+    const selectButton = element('select-button');
+    const fileInput = element('file-input');
+    const removeButton = element('remove-button');
+    const saveButton = element('save-button');
+    const status = element('status');
+    const confirmDialog = element('remove-confirm-dialog');
+    const confirmCancel = element('remove-cancel');
+    const confirmAccept = element('remove-confirm');
+    const confirmStatus = element('remove-status');
     const required = [
         launchButton, dialog, closeButton, preview, stateLabel, selectButton, fileInput,
         removeButton, saveButton, status, confirmDialog, confirmCancel, confirmAccept,
@@ -141,12 +243,17 @@ export function initializeFaviconManager(options = {}) {
     let readToken = 0;
     let requestToken = 0;
     let confirmResolver = null;
+    const pageIcons = createPageIconController(isPageIcon ? document.querySelectorAll('[data-site-icon]') : []);
 
     function managedLink() {
         return document.head.querySelector('link[data-managed-favicon="true"]');
     }
 
     function applyManagedLink(state) {
+        if (isPageIcon) {
+            pageIcons.apply(state?.configured ? assetUrl(state.contentHash).href : null);
+            return;
+        }
         if (!state?.configured) {
             managedLink()?.remove();
             return;
@@ -159,11 +266,11 @@ export function initializeFaviconManager(options = {}) {
         }
         link.rel = 'icon';
         link.type = 'image/svg+xml';
-        link.href = faviconAssetUrl(state.contentHash).href;
+        link.href = assetUrl(state.contentHash).href;
     }
 
     function setStatus(message, kind = '') {
-        status.textContent = message;
+        status.textContent = isPageIcon ? message.replaceAll('网站图标', '页面图标') : message;
         if (kind) status.dataset.kind = kind;
         else delete status.dataset.kind;
     }
@@ -184,11 +291,19 @@ export function initializeFaviconManager(options = {}) {
         }
         if (serverState?.configured) {
             const image = document.createElement('img');
-            image.src = faviconAssetUrl(serverState.contentHash).href;
+            image.src = assetUrl(serverState.contentHash).href;
             image.alt = '';
             image.decoding = 'async';
             preview.append(image);
             stateLabel.textContent = '当前服务器图标';
+            return;
+        }
+        if (isPageIcon) {
+            const image = document.createElement('img');
+            image.src = '/assets/icons/homepage-badge.svg';
+            image.alt = '';
+            preview.append(image);
+            stateLabel.textContent = '当前使用默认金边徽章';
             return;
         }
         const empty = document.createElement('span');
@@ -223,19 +338,21 @@ export function initializeFaviconManager(options = {}) {
             syncControls();
         }
         try {
-            const state = await requestFavicon('GET');
+            const state = await requestIcon('GET');
             if (token !== requestToken) return null;
             serverState = state;
             availability = 'online';
             applyManagedLink(state);
             render();
             if (dialogMotion.isOpen() && options.announce !== false) {
-                setStatus(state.configured ? '已载入当前服务器图标。' : '服务器当前未设置网站图标。');
+                setStatus(state.configured ? '已载入当前服务器图标。' : isPageIcon
+                    ? '当前使用默认金边徽章。' : '服务器当前未设置网站图标。');
             }
             return state;
         } catch (error) {
             if (token !== requestToken) return null;
             availability = error.status === 404 ? 'unsupported' : 'unavailable';
+            if (isPageIcon) pageIcons.apply(null);
             render();
             if (dialogMotion.isOpen() && options.announce !== false) {
                 setStatus(availabilityMessage(), 'error');
@@ -300,7 +417,7 @@ export function initializeFaviconManager(options = {}) {
         setStatus('正在保存网站图标并等待服务器确认…');
         let focusAfterWrite = null;
         try {
-            const state = await requestFavicon('PATCH', draftSvg);
+            const state = await requestIcon('PATCH', draftSvg);
             requestToken += 1;
             serverState = state;
             availability = 'online';
@@ -359,14 +476,15 @@ export function initializeFaviconManager(options = {}) {
         setStatus('正在移除服务器网站图标…');
         let focusAfterWrite = null;
         try {
-            const state = await requestFavicon('PATCH', null);
+            const state = await requestIcon('PATCH', null);
             requestToken += 1;
             serverState = state;
             availability = 'online';
             clearDraft();
             applyManagedLink(state);
             render();
-            setStatus('网站图标已移除；其他页面刷新后会同步。', 'success');
+            setStatus(isPageIcon ? '已恢复默认金边徽章；其他页面刷新后会同步。'
+                : '网站图标已移除；其他页面刷新后会同步。', 'success');
             focusAfterWrite = selectButton;
         } catch (error) {
             if (error.status === 404) availability = 'unsupported';

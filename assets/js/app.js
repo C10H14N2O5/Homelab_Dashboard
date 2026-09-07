@@ -65,6 +65,10 @@ const restorePageSettingsFocus = () => {
 initializeFeature('网站图标', () => initializeFaviconManager({
     restoreFocus: restorePageSettingsFocus
 }));
+initializeFeature('页面图标', () => initializeFaviconManager({
+    kind: 'page-icon',
+    restoreFocus: restorePageSettingsFocus
+}));
 
 async function initializeDashboardNavigation() {
     let cardManager = null;

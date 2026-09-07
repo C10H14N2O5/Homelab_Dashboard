@@ -4,7 +4,7 @@ export function initializePageSettings() {
     const menu = document.getElementById('page-settings-menu');
     if (!container || !trigger || !menu) throw new Error('网页设置菜单结构不完整。');
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
-    if (items.length !== 2) throw new Error('网页设置菜单项结构不完整。');
+    if (items.length < 2) throw new Error('网页设置菜单项结构不完整。');
     const closeFallbackMs = 220;
     let pointerIsInside = false;
     let motionToken = 0;

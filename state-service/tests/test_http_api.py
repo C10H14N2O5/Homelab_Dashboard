@@ -955,6 +955,85 @@ class APITests(unittest.TestCase):
         )
         self.assertEqual(status, 404)
 
+    def test_page_icon_is_independent_persistent_and_uses_hashed_assets(self) -> None:
+        first_svg = '<svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg>'
+        second_svg = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>'
+        _, favicon_state = self.favicon_request({"version": 1, "iconSvg": first_svg})
+        favicon_file = self.config.state_dir / favicon.FAVICON_STATE_FILE_NAME
+        favicon_before = favicon_file.read_bytes()
+        headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        status, initial = self.request("GET", http_api.PAGE_ICON_PATH)
+        self.assertEqual(status, 200)
+        self.assertFalse(initial["configured"])
+        page_file = self.config.state_dir / favicon.PAGE_ICON_STATE_FILE_NAME
+        self.assertFalse(page_file.exists())
+        status, created = self.request(
+            "PATCH", http_api.PAGE_ICON_PATH,
+            json.dumps({"version": 1, "iconSvg": second_svg}).encode(), headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(created["configured"])
+        asset_path = f"{http_api.PAGE_ICON_ASSET_PATH}?v={created['contentHash']}"
+        status, body, asset_headers = self.raw_http_request("GET", asset_path)
+        self.assertEqual(status, 200)
+        self.assertIn(b"<circle", body)
+        self.assertEqual(asset_headers["content-type"], "image/svg+xml; charset=utf-8")
+        self.assertEqual(asset_headers["x-content-type-options"], "nosniff")
+        status, _, _ = self.raw_http_request(
+            "GET", asset_path, headers={"If-None-Match": asset_headers["etag"]},
+        )
+        self.assertEqual(status, 304)
+        self.assertEqual(favicon.FaviconStore(page_file).get(), created)
+        self.assertEqual(self.request("GET", http_api.FAVICON_PATH)[1], favicon_state)
+        self.assertEqual(favicon_file.read_bytes(), favicon_before)
+        status, removed = self.request(
+            "PATCH", http_api.PAGE_ICON_PATH,
+            json.dumps({"version": 1, "iconSvg": None}).encode(), headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(removed["configured"])
+        self.assertEqual(favicon.FaviconStore(page_file).get(), removed)
+        self.assertEqual(self.request("GET", asset_path)[0], 404)
+        self.assertEqual(favicon_file.read_bytes(), favicon_before)
+
+    def test_page_icon_reuses_validation_guards_and_isolates_failures(self) -> None:
+        headers = {
+            "Origin": TEST_ORIGIN,
+            "X-Requested-With": "homelab-dashboard",
+            "Content-Type": "application/json",
+        }
+        for value, overrides, expected in (
+            ({"version": 1, "iconSvg": None}, {"Origin": "https://evil.test"}, 403),
+            ({"version": 1, "iconSvg": None}, {"X-Requested-With": "wrong"}, 403),
+            ({"version": 1, "iconSvg": None}, {"Content-Type": "text/plain"}, 415),
+            ({"version": True, "iconSvg": None}, {}, 400),
+            ({"version": 1, "iconSvg": '<svg onload="alert(1)"><path d="M0 0"/></svg>'}, {}, 400),
+        ):
+            with self.subTest(value=value, overrides=overrides):
+                status, _ = self.request(
+                    "PATCH", http_api.PAGE_ICON_PATH, json.dumps(value).encode(), headers | overrides,
+                )
+                self.assertEqual(status, expected)
+        for method in ("POST", "PUT", "DELETE", "HEAD"):
+            self.assertEqual(self.request(method, http_api.PAGE_ICON_PATH)[0], 405)
+        for method in ("PATCH", "POST", "PUT", "DELETE", "HEAD"):
+            self.assertEqual(self.request(method, http_api.PAGE_ICON_ASSET_PATH)[0], 405)
+        for query in ("", "?v=", "?v=" + "0" * 64 + "&extra=1"):
+            self.assertEqual(self.request("GET", http_api.PAGE_ICON_ASSET_PATH + query)[0], 404)
+        with mock.patch.object(
+            self.server.page_icon_store, "get",
+            side_effect=favicon.FaviconStateUnavailable("damaged"),
+        ):
+            status, payload = self.request("GET", http_api.PAGE_ICON_PATH)
+            self.assertEqual(status, 503)
+            self.assertEqual(payload, {"error": "page_icon_state_unavailable"})
+            self.assertEqual(self.request("GET", http_api.FAVICON_PATH)[0], 200)
+            self.assertEqual(self.request("GET", http_api.HEALTH_PATH)[0], 200)
+
     def test_favicon_validation_body_limit_queries_and_methods(self) -> None:
         valid_svg = '<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>'
         cases = (

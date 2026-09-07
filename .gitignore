@@ -7,6 +7,7 @@ __pycache__/
 *.spec
 /build/
 /temp/
+/output/
 HomeLabWallpaperState.json
 HomeLabWallpaperState-data/
 
@@ -25,3 +26,7 @@ service.log.*
 .state-*.tmp
 .DashboardCards.json.*.tmp
 .DashboardFavicon.json.*.tmp
+DashboardPageIcon.json
+DashboardPageIcon.json.bak
+DashboardPageIcon.json.corrupt-*
+.DashboardPageIcon.json.*.tmp
