@@ -155,10 +155,19 @@ def resolve_config_path(value: str, base: Path) -> Path:
     return path.resolve()
 
 
+def configured_public_root(value: str, base: Path) -> Path:
+    # Derive the served root before following a backgrounds-only link.
+    path = Path(os.path.expandvars(value)).expanduser()
+    if not path.is_absolute():
+        path = base / path
+    return path.parent.resolve()
+
+
 @dataclass(frozen=True)
 class AppConfig:
     config_path: Path
     background_dir: Path
+    public_root: Path
     allowed_origins: frozenset[str]
     listen_host: str
     listen_port: int
@@ -173,6 +182,10 @@ class AppConfig:
     notes_enabled: bool = False
     notes_primary_dir: Path | None = None
     notes_backup_dir: Path | None = None
+
+    @property
+    def public_directories(self) -> tuple[Path, ...]:
+        return (self.public_root, self.background_dir)
 
     @property
     def listen(self) -> str:
@@ -210,7 +223,7 @@ class AppConfig:
 
 
 def validate_application_location(config: AppConfig) -> None:
-    if path_is_within(application_directory(), config.background_dir.parent):
+    if any(path_is_within(application_directory(), root) for root in config.public_directories):
         raise ConfigurationError("application directory must be outside the public Web root")
 
 
@@ -276,10 +289,11 @@ def _parse_config_value(
         raise ConfigurationError(f"background directory does not exist: {background_dir}")
     if not (background_dir / DEFAULT_BACKGROUND).is_file():
         raise ConfigurationError(f"background directory must contain {DEFAULT_BACKGROUND}: {background_dir}")
-    public_root = background_dir.parent
-    if path_is_within(config_path, public_root):
+    public_root = configured_public_root(raw["backgroundDir"], base)
+    public_directories = (public_root, background_dir)
+    if any(path_is_within(config_path, root) for root in public_directories):
         raise ConfigurationError("configuration file must be outside the public Web root")
-    if path_is_within(state_dir, public_root):
+    if any(path_is_within(state_dir, root) for root in public_directories):
         raise ConfigurationError("stateDir must be outside the public Web root")
     notes_raw = raw.get("notes", {
         "enabled": False,
@@ -318,7 +332,7 @@ def _parse_config_value(
             return False
 
     for path in (notes_primary, notes_backup):
-        if lexical_within(path, public_root):
+        if any(lexical_within(path, root) for root in public_directories):
             raise ConfigurationError("notes directories must be outside the public Web root")
         if path == state_dir:
             raise ConfigurationError("notes directories must be separate from stateDir")
@@ -329,6 +343,7 @@ def _parse_config_value(
     return AppConfig(
         config_path=config_path,
         background_dir=background_dir,
+        public_root=public_root,
         allowed_origins=normalized_origins,
         listen_host=host,
         listen_port=port,

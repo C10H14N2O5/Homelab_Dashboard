@@ -166,7 +166,7 @@ class StateHTTPServer(ThreadingHTTPServer):
                 return self.notes_service
             self._notes_retry_at = time.monotonic() + 15.0
             try:
-                self.notes_service = NotesService(self.config.notes_primary_dir, self.config.notes_backup_dir, logger=self.logger, forbidden_root=self.config.background_dir.parent)
+                self.notes_service = NotesService(self.config.notes_primary_dir, self.config.notes_backup_dir, logger=self.logger, forbidden_roots=self.config.public_directories)
             except Exception:
                 self.logger.exception("notes could not initialize; other dashboard features remain available")
             return self.notes_service

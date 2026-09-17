@@ -95,13 +95,13 @@ def _read(path):
 
 
 class NotesService:
-    def __init__(self, primary_dir: Path, backup_dir: Path, logger=None, *, start_worker=True, forbidden_root=None):
+    def __init__(self, primary_dir: Path, backup_dir: Path, logger=None, *, start_worker=True, forbidden_roots=()):
         if Path(primary_dir).is_symlink() or (hasattr(Path(primary_dir), "is_junction") and Path(primary_dir).is_junction()):
             raise NotesError(503, "invalid_store", "linked Notes storage directories are not supported")
         self.primary_dir = Path(primary_dir).resolve()
         # Do not resolve a UNC/NAS path synchronously during startup.
         self.backup_dir = Path(os.path.abspath(backup_dir))
-        self.forbidden_root = str(forbidden_root) if forbidden_root else None
+        self.forbidden_roots = [str(root) for root in forbidden_roots]
         self.logger = logger
         self._lock = threading.RLock()
         self._worker_lock = threading.Lock()
@@ -524,7 +524,7 @@ class NotesService:
                     if self._process.poll() is None:
                         raise NotesError(503, "worker_unreaped", "previous Notes worker has not exited; restart may be required")
                     self._process = None
-                request = {"op": op, "root": str(self.backup_dir), "collectionId": self.collection_id, "forbiddenRoot": self.forbidden_root, **values}
+                request = {"op": op, "root": str(self.backup_dir), "collectionId": self.collection_id, "forbiddenRoots": self.forbidden_roots, **values}
                 command = [sys.executable, "--notes-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "homelab_state.notes_worker"]
                 environment = os.environ.copy()
                 environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent) + os.pathsep + environment.get("PYTHONPATH", "")
@@ -755,7 +755,7 @@ class NotesService:
                         self._retry_index += 1
                     if self.logger:
                         try:
-                            self.logger.warning("Notes backup unavailable: %s", type(exc).__name__)
+                            self.logger.warning("Notes backup unavailable: %s: %s", type(exc).__name__, exc)
                         except AttributeError:
                             pass
             self._wake.wait(5)

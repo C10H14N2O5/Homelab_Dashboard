@@ -113,8 +113,8 @@ def dispatch(request):
     if op == "validate":
         return inspect_image(base64.b64decode(request["data"], validate=True))
     root = Path(request["root"])
-    forbidden = request.get("forbiddenRoot")
-    if forbidden and root.resolve().is_relative_to(Path(forbidden).resolve()):
+    forbidden = request.get("forbiddenRoots", [])
+    if any(root.resolve().is_relative_to(Path(directory).resolve()) for directory in forbidden):
         raise ValueError("Notes storage must not be located inside the public Web Root")
     if op == "adopt":
         root.mkdir(parents=True, exist_ok=True)
