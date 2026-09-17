@@ -26,7 +26,9 @@ DEFAULT_BING_INTERNATIONAL_PROXY = "127.0.0.1:7890"
 DEFAULT_PROBE_CONNECT_ADDRESS = "127.0.0.1:443"
 DEFAULT_PROBE_DOMAIN_SUFFIX = "home.example.com"
 DEFAULT_PROBE_TIMEOUT_SECONDS = 5.0
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
+DEFAULT_NOTES_DIRECTORY = "HomeLabNotes-data"
+DEFAULT_NOTES_BACKUP_DIRECTORY = "HomeLabNotes-backup"
 DOMAIN_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -168,6 +170,9 @@ class AppConfig:
     probe_connect_port: int
     probe_domain_suffix: str
     probe_timeout_seconds: float
+    notes_enabled: bool = False
+    notes_primary_dir: Path | None = None
+    notes_backup_dir: Path | None = None
 
     @property
     def listen(self) -> str:
@@ -230,6 +235,8 @@ def _parse_config_value(
         "probeDomainSuffix",
         "probeTimeoutSeconds",
     }
+    if raw.get("version") == CONFIG_VERSION:
+        expected.add("notes")
     if set(raw) != expected:
         missing = sorted(expected - set(raw))
         unknown = sorted(set(raw) - expected)
@@ -239,7 +246,7 @@ def _parse_config_value(
         if unknown:
             details.append(f"unknown fields: {', '.join(unknown)}")
         raise ConfigurationError("; ".join(details))
-    if raw["version"] != CONFIG_VERSION:
+    if type(raw["version"]) is not int or raw["version"] not in {3, CONFIG_VERSION}:
         raise ConfigurationError(f"unsupported configuration version: {raw['version']!r}")
     if not isinstance(raw["backgroundDir"], str) or not raw["backgroundDir"].strip():
         raise ConfigurationError("backgroundDir must be a non-empty string")
@@ -274,6 +281,49 @@ def _parse_config_value(
         raise ConfigurationError("configuration file must be outside the public Web root")
     if path_is_within(state_dir, public_root):
         raise ConfigurationError("stateDir must be outside the public Web root")
+    notes_raw = raw.get("notes", {
+        "enabled": False,
+        "primaryDir": DEFAULT_NOTES_DIRECTORY,
+        "backupDir": DEFAULT_NOTES_BACKUP_DIRECTORY,
+    })
+    if not isinstance(notes_raw, dict) or set(notes_raw) != {"enabled", "primaryDir", "backupDir"}:
+        raise ConfigurationError("notes must contain enabled, primaryDir and backupDir")
+    if type(notes_raw["enabled"]) is not bool:
+        raise ConfigurationError("notes.enabled must be a boolean")
+    notes_paths = []
+    for field in ("primaryDir", "backupDir"):
+        value = notes_raw[field]
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            raise ConfigurationError(f"notes.{field} must be a non-empty path")
+        path = Path(os.path.expandvars(value)).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        # Do not stat/resolve an SMB path on the startup thread. Its physical
+        # boundary and availability are checked inside the supervised worker.
+        path = Path(os.path.abspath(path))
+        notes_paths.append(path)
+    notes_primary, notes_backup = notes_paths
+    if str(notes_primary).startswith("\\\\"):
+        raise ConfigurationError("notes.primaryDir must be on a local disk")
+    if os.name == "nt":
+        import ctypes
+        if ctypes.windll.kernel32.GetDriveTypeW(str(notes_primary.anchor)) == 4:
+            raise ConfigurationError("notes.primaryDir must not use a mapped network drive")
+    notes_primary = notes_primary.resolve()
+
+    def lexical_within(candidate: Path, directory: Path) -> bool:
+        try:
+            return os.path.commonpath([os.path.normcase(candidate), os.path.normcase(directory)]) == os.path.normcase(directory)
+        except ValueError:
+            return False
+
+    for path in (notes_primary, notes_backup):
+        if lexical_within(path, public_root):
+            raise ConfigurationError("notes directories must be outside the public Web root")
+        if path == state_dir:
+            raise ConfigurationError("notes directories must be separate from stateDir")
+    if lexical_within(notes_primary, notes_backup) or lexical_within(notes_backup, notes_primary):
+        raise ConfigurationError("notes directories must not overlap")
     if create_state_directory:
         state_dir.mkdir(parents=True, exist_ok=True)
     return AppConfig(
@@ -290,6 +340,9 @@ def _parse_config_value(
         probe_connect_port=probe_connect_port,
         probe_domain_suffix=probe_domain_suffix,
         probe_timeout_seconds=probe_timeout_seconds,
+        notes_enabled=notes_raw["enabled"],
+        notes_primary_dir=notes_primary,
+        notes_backup_dir=notes_backup,
     )
 
 

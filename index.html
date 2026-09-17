@@ -198,6 +198,36 @@
                     <p class="sr-only" id="search-status" role="status" aria-live="polite"></p>
                 </form>
             </div>
+            <section class="notes-shell" id="notes-shell" data-open="false" data-view="list" aria-label="笔记">
+                <button class="notes-capsule" id="notes-open" type="button" aria-expanded="false" aria-controls="notes-panel">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6zM9 9h7M9 13h7M9 17h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>笔记</span><span class="notes-capsule-hint">随手记录</span>
+                </button>
+                <div class="notes-panel" id="notes-panel" hidden>
+                    <div class="notes-panel-heading"><div><span class="notes-kicker">YOUR WORKSPACE</span><h2>笔记</h2></div><div class="notes-heading-actions"><button type="button" class="notes-icon-button" id="notes-settings-inline" aria-label="笔记设置" title="笔记设置">⚙</button><button type="button" class="notes-icon-button" id="notes-close" aria-label="保存并收起笔记" title="保存并收起">×</button></div></div>
+                    <div class="notes-notice" id="notes-notice" role="status" hidden></div>
+                    <div class="notes-workspace">
+                        <aside class="notes-sidebar"><button type="button" class="notes-new" id="notes-new">＋ 新建笔记</button><nav class="notes-list" id="notes-list" aria-label="笔记列表"></nav></aside>
+                        <section class="notes-detail" id="notes-detail" aria-label="当前笔记">
+                            <div class="notes-empty" id="notes-empty"><span class="notes-empty-symbol" aria-hidden="true">✎</span><h3>让想法有个落点</h3><p>新建一篇笔记，记录想法、清单或代码。</p></div>
+                            <div class="notes-editor-pane" id="notes-editor-pane" hidden>
+                                <button class="notes-back" id="notes-back" type="button">← 返回列表</button>
+                                <label class="sr-only" for="notes-title">笔记标题</label><input class="notes-title" id="notes-title" type="text" placeholder="未命名笔记" autocomplete="off">
+                                <div class="notes-tools-row"><div class="notes-mode-tabs" role="group" aria-label="显示模式"><button id="notes-mode-edit" type="button" aria-pressed="false">编辑</button><button id="notes-mode-preview" type="button" aria-pressed="true">预览</button></div><span class="notes-note-meta" id="notes-note-meta"></span></div>
+                                <div class="notes-format-toolbar" id="notes-format-toolbar" role="toolbar" aria-label="Markdown 格式工具" hidden>
+                                    <label class="sr-only" for="notes-heading-format">标题等级</label><select id="notes-heading-format" aria-label="标题等级"><option value="">标题</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option><option value="5">H5</option><option value="6">H6</option></select>
+                                    <button type="button" data-format="bold" title="粗体"><b>B</b></button><button type="button" data-format="italic" title="斜体"><i>I</i></button><button type="button" data-format="unordered" title="无序列表">• 列表</button><button type="button" data-format="ordered" title="有序列表">1. 列表</button><button type="button" data-format="task" title="任务清单">☑</button><button type="button" data-format="link" title="链接">链接</button><button type="button" data-format="inline-code" title="行内代码">&lt;/&gt;</button><button type="button" data-format="code" title="代码块">代码块</button><button type="button" id="notes-image" title="插入图片">图片</button>
+                                </div>
+                                <div class="notes-conflict" id="notes-conflict" hidden><p>服务器内容已变化，本机草稿仍保留。请选择处理方式。</p><button type="button" id="notes-conflict-copy">草稿另存为新笔记</button><button type="button" id="notes-conflict-reload">放弃草稿并载入服务器</button></div>
+                                <div class="notes-content"><label class="sr-only" for="notes-body">Markdown 正文</label><textarea id="notes-body" class="notes-body" placeholder="从这里开始记录… 支持 Markdown，也可以粘贴图片。" spellcheck="false" hidden></textarea><div id="notes-preview" class="notes-preview" tabindex="0"></div></div>
+                                <div class="notes-uploads" id="notes-uploads" aria-label="图片上传任务" hidden></div>
+                            </div>
+                        </section>
+                    </div>
+                    <footer class="notes-footer"><div class="notes-save-state"><span id="notes-save-status" role="status">正在连接笔记服务…</span><span id="notes-countdown"></span></div><div class="notes-footer-actions"><button type="button" id="notes-keep-draft" hidden>保留本机草稿并收起</button><button class="notes-primary" type="button" id="notes-save">保存全部</button></div></footer>
+                </div>
+                <input type="file" id="notes-image-input" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" multiple hidden>
+            </section>
         </header>
 
         <section class="dashboard" id="dashboard" data-active-channel="services" aria-label="Homepage navigation">
@@ -402,6 +432,7 @@
                             <span>网页设置</span>
                         </button>
                         <div class="page-settings-menu" id="page-settings-menu" role="menu" aria-label="网页设置" hidden>
+                            <button class="page-settings-item" id="notes-settings-button" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="notes-settings-dialog"><span aria-hidden="true">✎</span><span>笔记设置</span></button>
                             <button class="page-settings-item card-editor-launch" id="card-editor-button" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="card-editor-dialog" disabled>
                                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                     <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-4-4L4 16v4Z"/>

@@ -1,0 +1,119 @@
+{
+  "description": "Pinned browser dependencies for notes. Runtime assets are served locally; no CDN requests.",
+  "dependencies": [
+    {
+      "name": "markdown-it",
+      "version": "15.0.2",
+      "license": "MIT",
+      "source": "https://github.com/markdown-it/markdown-it/tree/15.0.2",
+      "files": [
+        {
+          "path": "markdown-it/markdown-it.mjs",
+          "source": "https://registry.npmjs.org/markdown-it/-/markdown-it-15.0.2.tgz#package/dist/browser/markdown-it.esm.min.mjs",
+          "sha256": "85feb50fd6ce1b7c49acb02b0337eb622ecc4fc2ed4ae0dcbb8c084556d463b6"
+        },
+        {
+          "path": "markdown-it/LICENSE",
+          "source": "https://registry.npmjs.org/markdown-it/-/markdown-it-15.0.2.tgz#package/LICENSE",
+          "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+        }
+      ]
+    },
+    {
+      "name": "highlight.js",
+      "version": "11.12.0",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/highlightjs/highlight.js/tree/11.12.0",
+      "files": [
+        {
+          "path": "highlightjs/core.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/core.min.js",
+          "sha256": "67a339aa68880a40c9803def9c8cebb2225dec76230382db86e349370dee70e9"
+        },
+        {
+          "path": "highlightjs/python.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/python.min.js",
+          "sha256": "fd5d479dcc9d07b957cf07b1df76d3d8fb6ee6f6d1437238d9530a9be724c046"
+        },
+        {
+          "path": "highlightjs/powershell.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/powershell.min.js",
+          "sha256": "67c95a71dae92f010a15e959158aaf682cd850a008d466f1c5d40394cbe22f12"
+        },
+        {
+          "path": "highlightjs/bash.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/bash.min.js",
+          "sha256": "7db1758fe6f04cd410760c29879812a3774edc54edcc91323511a24efc0b9e61"
+        },
+        {
+          "path": "highlightjs/javascript.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/javascript.min.js",
+          "sha256": "c3dbd515a79e2c00ff4535aa5ad2fe539fb2587d047f9ab826107d0784da7bb6"
+        },
+        {
+          "path": "highlightjs/typescript.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/typescript.min.js",
+          "sha256": "0e10ce9a81d42f8d43a54007ca7e31fe22ad801b2a2e1693d31736aa79fa5404"
+        },
+        {
+          "path": "highlightjs/json.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/json.min.js",
+          "sha256": "8f2343ffbcc4fdea4b336a4241d54d223d52f99b67729d2d6d3556bbf66908ae"
+        },
+        {
+          "path": "highlightjs/yaml.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/yaml.min.js",
+          "sha256": "7010955f1f87aef1de085483d79d42817544aaf03c4f57a6fd4eb838f2cdf609"
+        },
+        {
+          "path": "highlightjs/xml.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/xml.min.js",
+          "sha256": "2e8c8ba1e7a200cd83dfbf9c746b8e00f7d7bad966dbfd83eca142cf2caa4dd7"
+        },
+        {
+          "path": "highlightjs/css.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/css.min.js",
+          "sha256": "2f4264d9a07a4f5446e51e2d93b0c0e031b4fd910e8e44984cd17f996a990b99"
+        },
+        {
+          "path": "highlightjs/sql.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/sql.min.js",
+          "sha256": "79bead5cf2bfa93d3982073d000a97802f394fe287736644bab30f40cb5c7380"
+        },
+        {
+          "path": "highlightjs/ini.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/ini.min.js",
+          "sha256": "b2330623daa8da0c4ef98891b97f393daa2e809721842c312f217e0339e255db"
+        },
+        {
+          "path": "highlightjs/diff.mjs",
+          "source": "https://raw.githubusercontent.com/highlightjs/cdn-release/11.12.0/build/es/languages/diff.min.js",
+          "sha256": "cbd7cf3b49bee36d6a0cf97789a7c5e68fbfd4231e86a81966f9b78c7bc127d0"
+        },
+        {
+          "path": "highlightjs/LICENSE",
+          "source": "https://raw.githubusercontent.com/highlightjs/highlight.js/11.12.0/LICENSE",
+          "sha256": "6c081431591d9df696c82dc598fe1423765b8a299b200ed00b281afd0f64c490"
+        }
+      ]
+    },
+    {
+      "name": "DOMPurify",
+      "version": "3.4.15",
+      "license": "Apache-2.0 OR MPL-2.0",
+      "source": "https://github.com/cure53/DOMPurify/tree/3.4.15",
+      "files": [
+        {
+          "path": "dompurify/purify.mjs",
+          "source": "https://raw.githubusercontent.com/cure53/DOMPurify/3.4.15/dist/purify.es.mjs",
+          "sha256": "e7d8182ea0aae9daa46c3294a486067b3f4461bd18f8ca76e499c623e9bda6e3"
+        },
+        {
+          "path": "dompurify/LICENSE",
+          "source": "https://raw.githubusercontent.com/cure53/DOMPurify/3.4.15/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
+    }
+  ]
+}

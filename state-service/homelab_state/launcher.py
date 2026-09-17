@@ -24,6 +24,8 @@ from homelab_state.config import (
     DEFAULT_BING_INTERNATIONAL_PROXY,
     DEFAULT_DATA_DIRECTORY,
     DEFAULT_LISTEN,
+    DEFAULT_NOTES_DIRECTORY,
+    DEFAULT_NOTES_BACKUP_DIRECTORY,
     DEFAULT_ORIGIN,
     DEFAULT_PROBE_CONNECT_ADDRESS,
     DEFAULT_PROBE_DOMAIN_SUFFIX,
@@ -396,6 +398,9 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
     probe_connect_default = str(existing.get("probeConnectAddress", DEFAULT_PROBE_CONNECT_ADDRESS))
     probe_domain_default = str(existing.get("probeDomainSuffix", DEFAULT_PROBE_DOMAIN_SUFFIX))
     probe_timeout_default = str(existing.get("probeTimeoutSeconds", DEFAULT_PROBE_TIMEOUT_SECONDS)).removesuffix(".0")
+    notes_defaults = existing.get("notes", {})
+    if not isinstance(notes_defaults, dict):
+        notes_defaults = {}
 
     while True:
         background_text = prompt_value("背景目录", background_default)
@@ -406,6 +411,12 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
         probe_connect_text = prompt_value("Zoraxy 回环探测入口", probe_connect_default)
         probe_domain_text = prompt_value("允许探测的域名后缀", probe_domain_default)
         probe_timeout_text = prompt_value("单目标探测超时秒数（1-5）", probe_timeout_default)
+        notes_enabled = prompt_yes_no("是否启用笔记功能", default=bool(notes_defaults.get("enabled", False)))
+        notes_primary_text = str(notes_defaults.get("primaryDir", DEFAULT_NOTES_DIRECTORY))
+        notes_backup_text = str(notes_defaults.get("backupDir", DEFAULT_NOTES_BACKUP_DIRECTORY))
+        if notes_enabled:
+            notes_primary_text = prompt_value("笔记主目录（本机磁盘）", notes_primary_text)
+            notes_backup_text = prompt_value("笔记图片与备份目录（可为 NAS UNC 路径）", notes_backup_text)
         origins = [item.strip() for item in origin_text.split(",") if item.strip()]
         try:
             raw = {
@@ -419,6 +430,7 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
                 "probeConnectAddress": probe_connect_text,
                 "probeDomainSuffix": probe_domain_text,
                 "probeTimeoutSeconds": float(probe_timeout_text),
+                "notes": {"enabled": notes_enabled, "primaryDir": notes_primary_text, "backupDir": notes_backup_text},
             }
             config = _parse_config_value(
                 config_path,

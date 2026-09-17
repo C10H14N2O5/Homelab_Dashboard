@@ -61,6 +61,8 @@ from homelab_state.favicon import (
     InvalidFavicon,
 )
 from homelab_state.probe import MAX_PROBE_TARGETS, ProbeClient
+from homelab_state.notes import NotesService
+from homelab_state.notes_http import handle_notes_request, notes_accepts_body
 
 
 API_PATH = "/api/background-preferences"
@@ -120,6 +122,10 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.config = config
         self.store = store
         self.logger = logger
+        self.notes_service = None
+        self._notes_init_lock = threading.Lock()
+        self._notes_retry_at = 0.0
+        self._notes_closed = False
         self._connection_slots = threading.BoundedSemaphore(MAX_HTTP_CONNECTIONS)
         self.bestdori_manager = bestdori_manager or BestdoriDrawManager(
             store,
@@ -148,6 +154,31 @@ class StateHTTPServer(ThreadingHTTPServer):
             if owns_probe_client:
                 self.probe_client.close()
             raise
+        self.get_notes_service()
+
+    def get_notes_service(self):
+        if self.notes_service is not None or not self.config.notes_enabled or self._notes_closed:
+            return self.notes_service
+        if time.monotonic() < self._notes_retry_at or not self._notes_init_lock.acquire(blocking=False):
+            return None
+        try:
+            if self.notes_service is not None or self._notes_closed:
+                return self.notes_service
+            self._notes_retry_at = time.monotonic() + 15.0
+            try:
+                self.notes_service = NotesService(self.config.notes_primary_dir, self.config.notes_backup_dir, logger=self.logger, forbidden_root=self.config.background_dir.parent)
+            except Exception:
+                self.logger.exception("notes could not initialize; other dashboard features remain available")
+            return self.notes_service
+        finally:
+            self._notes_init_lock.release()
+
+    def server_close(self) -> None:
+        with self._notes_init_lock:
+            self._notes_closed = True
+            if self.notes_service is not None:
+                self.notes_service.close()
+        super().server_close()
 
     def get_request(self):
         request, client_address = super().get_request()
@@ -265,6 +296,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _route_accepts_body(self) -> bool:
+        if notes_accepts_body(self.command, self.path):
+            return True
         if self.command == "PATCH":
             return self.path in {API_PATH, CARDS_PATH, FAVICON_PATH, PAGE_ICON_PATH}
         if self.command != "POST":
@@ -887,6 +920,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._write_favicon_svg(icon_svg, content_hash)
 
     def do_GET(self) -> None:
+        if handle_notes_request(self):
+            return
         parsed_path = urlsplit(self.path)
         if self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             store, error_prefix = self._svg_icon_store(self.path)
@@ -975,6 +1010,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PATCH(self) -> None:
+        if handle_notes_request(self):
+            return
         if self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             self._handle_favicon_update()
             return
@@ -1036,6 +1073,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._write_json(HTTPStatus.OK, state)
 
     def do_POST(self) -> None:
+        if handle_notes_request(self):
+            return
         parsed_path = urlsplit(self.path)
         if self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             self._allow("GET, PATCH")
@@ -1114,6 +1153,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._method_not_allowed()
 
     def _method_not_allowed(self) -> None:
+        if handle_notes_request(self):
+            return
         parsed_path = urlsplit(self.path)
         if self.path == API_PATH:
             self._allow("GET, PATCH")

@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 11
+$expectedServiceVersion = 12
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -62,7 +62,7 @@ if ($pythonSources.Count -eq 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "Python failed with exit code $LASTEXITCODE"
 }
-& $resolvedPython -c "import PIL, PyInstaller, send2trash; from PIL import features; required = {'JPEG': 'jpg', 'PNG': 'zlib', 'WebP': 'webp', 'AVIF': 'avif'}; missing = [name for name, feature in required.items() if not features.check(feature)]; assert not missing, 'Pillow is missing required codec support: ' + ', '.join(missing); print('PyInstaller', PyInstaller.__version__); print('Pillow', PIL.__version__, 'codecs:', ', '.join(required)); print('Send2Trash import ok')"
+& $resolvedPython -c "import PIL, PyInstaller, send2trash, markdown_it; from PIL import features; required = {'JPEG': 'jpg', 'PNG': 'zlib', 'WebP': 'webp', 'AVIF': 'avif'}; missing = [name for name, feature in required.items() if not features.check(feature)]; assert not missing, 'Pillow is missing required codec support: ' + ', '.join(missing); print('PyInstaller', PyInstaller.__version__); print('Pillow', PIL.__version__, 'codecs:', ', '.join(required)); print('Send2Trash and Markdown parser imports ok')"
 if ($LASTEXITCODE -ne 0) {
     throw 'A pinned build/runtime dependency or required Pillow codec is unavailable. Install requirements with: python -m pip install -r requirements.txt'
 }
@@ -128,7 +128,7 @@ try {
     $listener.Stop()
     $smokeToken = 'build-smoke-control-token-0123456789abcdef'
     $smokeSettings = [ordered]@{
-        version                 = 3
+        version                 = 4
         backgroundDir           = $smokeBackgrounds
         allowedOrigins          = @('https://home.example.test')
         listen                  = "127.0.0.1:$smokePort"
@@ -138,6 +138,7 @@ try {
         probeConnectAddress     = '127.0.0.1:443'
         probeDomainSuffix       = 'home.example.test'
         probeTimeoutSeconds     = 5
+        notes                   = @{ enabled = $true; primaryDir = (Join-Path $smokeRoot 'notes-primary'); backupDir = (Join-Path $smokeRoot 'notes-backup') }
     }
     [IO.File]::WriteAllText(
         $smokeConfig,
@@ -159,7 +160,7 @@ try {
         [Text.UTF8Encoding]::new($false)
     )
     $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
-    $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n`n" + "n`n")
+    $consoleInputBytes = $strictUtf8.GetBytes($consoleBackgrounds + "`n`n`n`n`n`n`n`n" + "n`nn`n")
     $consoleResult = Invoke-BuildRedirectedProcess `
         -FilePath $temporaryArtifactPath `
         -Arguments ('configure --config "' + $consoleConfig + '"') `
@@ -563,6 +564,24 @@ try {
             throw 'Packaged executable failed the service-status API smoke test.'
         }
 
+        Write-Host 'Checking packaged notes, image worker and local backup...'
+        $notesHeaders = @{ Origin = 'https://home.example.test'; 'X-Requested-With' = 'homelab-dashboard' }
+        $notesId = [guid]::NewGuid().ToString()
+        $notesUploadId = [guid]::NewGuid().ToString()
+        $notesImage = $smokePngBytes
+        $notesUpload = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$smokePort/api/notes/uploads?id=$notesUploadId&name=smoke.png" -Headers $notesHeaders -ContentType 'application/octet-stream' -Body $notesImage -TimeoutSec 60
+        $notesBody = @{ expectedRevision = $null; operationId = [guid]::NewGuid().ToString(); title = 'Notes smoke'; body = "# Notes smoke`n![image](/api/notes/images/$notesUploadId)" } | ConvertTo-Json -Compress
+        $savedNote = Invoke-RestMethod -UseBasicParsing -Method Put -Uri "http://127.0.0.1:$smokePort/api/notes/$notesId" -Headers $notesHeaders -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($notesBody)) -TimeoutSec 10
+        if ($savedNote.note.title -ne 'Notes smoke') { throw 'Packaged notes save failed.' }
+        $notesAsset = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/images/$notesUploadId" -TimeoutSec 30
+        if ($notesAsset.StatusCode -ne 200) { throw 'Packaged notes image failed.' }
+        $backupDeadline = (Get-Date).AddSeconds(30)
+        do {
+            $notesStatus = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/status" -TimeoutSec 5
+            if ($notesStatus.backupPending) { Start-Sleep -Milliseconds 250 }
+        } while ($notesStatus.backupPending -and (Get-Date) -lt $backupDeadline)
+        if ($notesStatus.backupPending -or -not $notesStatus.backupAvailable) { throw 'Packaged notes backup did not complete.' }
+
         $null = Invoke-RestMethod `
             -UseBasicParsing `
             -Method Post `
@@ -594,6 +613,10 @@ try {
         } while (($null -eq $restartHealth -or $restartHealth.status -ne 'ok') -and (Get-Date) -lt $restartDeadline)
         if ($null -eq $restartHealth -or $restartHealth.version -ne $expectedServiceVersion) {
             throw 'Packaged executable did not become healthy after restart.'
+        }
+        $persistedNote = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/$notesId" -TimeoutSec 5
+        if ($persistedNote.note.body -ne $savedNote.note.body -or $persistedNote.note.revision -ne $savedNote.note.revision) {
+            throw 'Packaged executable did not preserve notes across restart.'
         }
         $persistedCards = Invoke-RestMethod `
             -UseBasicParsing `

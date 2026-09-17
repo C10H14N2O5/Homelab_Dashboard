@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from homelab_state import config, launcher
@@ -72,7 +73,8 @@ class ConfigTests(unittest.TestCase):
             migrated = launcher.run_configuration_wizard(self.project.config_path)
 
         saved = json.loads(self.project.config_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["version"], 3)
+        self.assertEqual(saved["version"], 4)
+        self.assertFalse(saved["notes"]["enabled"])
         self.assertEqual(saved["controlToken"], existing.control_token)
         self.assertEqual(saved["bingInternationalProxy"], "127.0.0.1:7890")
         self.assertEqual(migrated.background_dir, existing.background_dir)
@@ -100,6 +102,8 @@ class ConfigTests(unittest.TestCase):
         ]
 
         with mock.patch.object(launcher, "prompt_value", side_effect=answers), mock.patch.object(
+            launcher, "prompt_yes_no", return_value=False
+        ), mock.patch.object(
             launcher,
             "atomic_write_json",
         ) as write_config, mock.patch("builtins.print"):
@@ -121,6 +125,8 @@ class ConfigTests(unittest.TestCase):
             return default
 
         with mock.patch.object(launcher, "prompt_value", side_effect=accept_default), mock.patch.object(
+            launcher, "prompt_yes_no", return_value=False
+        ), mock.patch.object(
             launcher,
             "validate_application_location",
             side_effect=AbortWizard(),
@@ -145,6 +151,49 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.probe_connect_address, "127.0.0.1:443")
         self.assertEqual(loaded.probe_domain_suffix, "home.example.test")
         self.assertEqual(loaded.probe_timeout_seconds, 5.0)
+        self.assertFalse(loaded.notes_enabled)
+
+    def test_v4_notes_resolves_paths_without_creating_them(self) -> None:
+        loaded = self.project.write_config(version=4, notes={
+            "enabled": True, "primaryDir": "notes-main", "backupDir": "notes-backup",
+        })
+        self.assertTrue(loaded.notes_enabled)
+        self.assertEqual(loaded.notes_primary_dir, self.project.root / "notes-main")
+        self.assertEqual(loaded.notes_backup_dir, self.project.root / "notes-backup")
+        self.assertFalse(loaded.notes_primary_dir.exists())
+        self.assertFalse(loaded.notes_backup_dir.exists())
+
+    def test_v4_rejects_public_overlapping_and_remote_primary_notes_paths(self) -> None:
+        for primary, backup in (
+            ("web/html/notes", "backup"),
+            ("notes", "web/html/backup"),
+            ("notes", "notes"),
+            ("notes", "notes/backup"),
+            ("notes/primary", "notes"),
+            (r"\\server\share\notes", "backup"),
+        ):
+            with self.subTest(primary=primary, backup=backup), self.assertRaises(ConfigurationError):
+                self.project.write_config(version=4, notes={
+                    "enabled": True, "primaryDir": primary, "backupDir": backup,
+                })
+
+    def test_v4_notes_schema_is_strict(self) -> None:
+        for notes in ({}, {"enabled": "true", "primaryDir": "notes", "backupDir": "backup"},
+                      {"enabled": True, "primaryDir": "notes", "backupDir": "backup", "extra": 1}):
+            with self.subTest(notes=notes), self.assertRaises(ConfigurationError):
+                self.project.write_config(version=4, notes=notes)
+
+    def test_v4_configuration_never_resolves_backup_unc_on_startup(self) -> None:
+        original_resolve = Path.resolve
+        def guarded_resolve(path, *args, **kwargs):
+            if str(path).startswith("\\\\"):
+                raise AssertionError("startup must not contact SMB")
+            return original_resolve(path, *args, **kwargs)
+        with mock.patch.object(Path, "resolve", guarded_resolve):
+            loaded = self.project.write_config(version=4, notes={
+                "enabled": True, "primaryDir": "notes", "backupDir": r"\\offline-nas\share\notes",
+            })
+        self.assertTrue(str(loaded.notes_backup_dir).startswith("\\\\"))
 
     def test_rejects_unsafe_listen_and_public_state(self) -> None:
         for overrides in (

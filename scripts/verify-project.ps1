@@ -39,6 +39,7 @@ $frontendModulePaths = @(
     'favicon-manager.js',
     'app.js'
 ) | ForEach-Object { Join-Path $frontendModuleRoot $_ }
+$frontendModulePaths += @(Get-ChildItem -LiteralPath $frontendModuleRoot -Filter 'notes-*.js' -File | Sort-Object Name | Select-Object -ExpandProperty FullName)
 $stateServicePath = Join-Path $projectRoot 'state-service'
 $uninstallPath = Join-Path $PSScriptRoot 'uninstall-state-service.ps1'
 
@@ -76,6 +77,8 @@ function Test-BlockedRepositoryPath {
         'temp/',
         'output/',
         'homelabwallpaperstate-data/'
+        'homelabnotes-data/',
+        'homelabnotes-backup/'
     )
     foreach ($prefix in $blockedRootPrefixes) {
         if ($lower.StartsWith($prefix, [StringComparison]::Ordinal)) {
@@ -308,7 +311,7 @@ $maintenanceContracts = @(
     @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\js\search.js' },
     @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\js\service-status.js' },
     @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
-    @{ Name = 'strict v3 configuration documentation'; Source = $readmeSource; Marker = '"version": 3' },
+    @{ Name = 'strict v4 configuration documentation'; Source = $readmeSource; Marker = '"version": 4' },
     @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
     @{ Name = 'dashboard cards deployment documentation'; Source = $readmeSource; Marker = 'DashboardCards.json' },
     @{ Name = 'CORS removal documentation'; Source = $readmeSource; Marker = 'AstrBot' }
@@ -401,6 +404,7 @@ const expectedModuleNames = [
     'favicon-manager.js',
     'app.js'
 ];
+expectedModuleNames.push(...Object.keys(moduleSources).filter((name) => /^notes-.*\.js$/.test(name)).sort());
 if (JSON.stringify(Object.keys(moduleSources)) !== JSON.stringify(expectedModuleNames)) {
     throw new Error(`Unexpected ES module inputs: ${Object.keys(moduleSources).join(', ')}`);
 }
@@ -5185,6 +5189,11 @@ console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, $
     } finally {
         if (Test-Path -LiteralPath $frontendValidationPath -PathType Leaf) {
             Remove-Item -LiteralPath $frontendValidationPath -Force
+        }
+    }
+    foreach ($notesTest in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'test-notes-*.mjs' -File)) {
+        Invoke-CheckedCommand -Name $notesTest.Name -Command {
+            & $node.Source --test $notesTest.FullName
         }
     }
 }

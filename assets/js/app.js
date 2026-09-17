@@ -5,6 +5,7 @@ import { initializeServiceStatus } from './service-status.js';
 import { initializeCardManager } from './card-manager.js';
 import { initializePageSettings } from './page-settings.js';
 import { initializeFaviconManager } from './favicon-manager.js';
+import { initializeNotes } from './notes-manager.js';
 
 function initializeIntro() {
     const root = document.documentElement;
@@ -58,6 +59,7 @@ initializeFeature('页面入场', initializeIntro);
 initializeFeature('背景管理', initializeBackgroundManager);
 initializeFeature('搜索栏增强', initializeSearch);
 const pageSettingsController = initializeFeature('网页设置菜单', initializePageSettings);
+initializeFeature('笔记', initializeNotes);
 const restorePageSettingsFocus = () => {
     if (pageSettingsController) pageSettingsController.focusTrigger();
     else document.getElementById('page-settings-button')?.focus({ preventScroll: true });

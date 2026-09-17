@@ -10,6 +10,8 @@ __pycache__/
 /output/
 HomeLabWallpaperState.json
 HomeLabWallpaperState-data/
+HomeLabNotes-data/
+HomeLabNotes-backup/
 
 # Runtime state belongs on the deployment host, never in source control.
 state.json
