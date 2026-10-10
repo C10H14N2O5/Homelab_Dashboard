@@ -18,6 +18,8 @@ import uuid
 
 from homelab_state.core import atomic_write_json, file_sha256, utc_timestamp
 from homelab_state.notes_worker import fingerprint, safe_path
+from homelab_state.notes_storage import NotesStorage, primary_operation
+from homelab_state.notes_paths import StoragePathError, normalized, run_probe
 
 
 MAX_NOTES = 500
@@ -94,14 +96,9 @@ def _read(path):
     return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
 
 
-class NotesService:
-    def __init__(self, primary_dir: Path, backup_dir: Path, logger=None, *, start_worker=True, forbidden_roots=()):
-        if Path(primary_dir).is_symlink() or (hasattr(Path(primary_dir), "is_junction") and Path(primary_dir).is_junction()):
-            raise NotesError(503, "invalid_store", "linked Notes storage directories are not supported")
-        self.primary_dir = Path(primary_dir).resolve()
-        # Do not resolve a UNC/NAS path synchronously during startup.
-        self.backup_dir = Path(os.path.abspath(backup_dir))
-        self.forbidden_roots = [str(root) for root in forbidden_roots]
+class NotesService(NotesStorage):
+    def __init__(self, primary_dir: Path, backup_dir: Path, logger=None, *, start_worker=True, forbidden_roots=(), binding_file=None, config_file=None, state_dir=None):
+        self._storage_setup(primary_dir, backup_dir, forbidden_roots, binding_file, config_file, state_dir)
         self.logger = logger
         self._lock = threading.RLock()
         self._worker_lock = threading.Lock()
@@ -121,10 +118,14 @@ class NotesService:
         self._disk_signatures = {}
         self._closed = False
         self._lock_file = None
-        self.primary_dir.mkdir(parents=True, exist_ok=True)
+        self._initialize_binding()
         self._acquire_writer()
         try:
+            self._switching_load = normalized(self._bindings["primaryTarget"]) != normalized(self.primary_dir)
             self._load()
+            self._write_binding(primaryTarget=str(self.primary_dir))
+            self._loading = False
+            self._switching_load = False
         except Exception:
             self.close()
             raise
@@ -158,7 +159,7 @@ class NotesService:
             existing = [p for p in self.primary_dir.iterdir() if p.name != ".writer.lock"]
             if existing:
                 raise NotesError(503, "invalid_store", "existing Notes directory has no collection manifest")
-            atomic_write_json(manifest, {"version": 1, "collectionId": revision()})
+            atomic_write_json(manifest, {"version": 1, "collectionId": self._bindings["collectionId"]})
         collection = _read(manifest)
         if collection.get("version") != 1:
             raise NotesError(503, "invalid_store", "unsupported Notes collection version")
@@ -225,6 +226,8 @@ class NotesService:
             if image_id in self._sync["uploads"]:
                 self._sync["uploads"][image_id]["status"] = "committed"
         self._refresh_primary_health()
+        if self._switching_load and self._corrupt:
+            raise NotesError(503, "primary_target_changed", "新主目录数据不完整或损坏")
         self._save_sync()
 
     def _load_or_create(self, name, value):
@@ -285,7 +288,7 @@ class NotesService:
 
     def _refresh_primary_health(self):
         keys = set(self._records()) | set(self._corrupt)
-        keys.update("notes/" + path.name for path in (self.primary_dir / "notes").glob("*.json"))
+        keys.update("notes/" + path.name for path in safe_path(self.primary_dir, "notes").glob("*.json"))
         for key in keys:
             try:
                 path = safe_path(self.primary_dir, key)
@@ -375,6 +378,7 @@ class NotesService:
     def _note_result(self, value):
         return {"note": self._public(value), "backupPending": "notes/" + value["id"] + ".json" in self._sync["pending"], "order": self._effective_order()}
 
+    @primary_operation
     def list_notes(self):
         with self._lock:
             self._ensure_available()
@@ -389,6 +393,7 @@ class NotesService:
             order = {"revision": self._order["revision"], "ids": extras + ordered}
             return {"collectionId": self.collection_id, "notes": notes, "order": order, "orderRevision": order["revision"], "settings": self._public(self._settings)}
 
+    @primary_operation
     def get_note(self, note_id):
         identifier(note_id)
         with self._lock:
@@ -400,6 +405,7 @@ class NotesService:
                 raise NotesError(410, "note_deleted", "note has been deleted", self._public(note))
             return {"note": self._public(note)}
 
+    @primary_operation
     def save_note(self, note_id, payload):
         identifier(note_id)
         self._request(payload, {"title", "body"})
@@ -437,6 +443,7 @@ class NotesService:
             self._queue_unused()
             return self._note_result(note)
 
+    @primary_operation
     def delete_note(self, note_id, payload):
         identifier(note_id)
         self._request(payload, set())
@@ -457,6 +464,7 @@ class NotesService:
             self._queue_unused()
             return self._note_result(note)
 
+    @primary_operation
     def update_order(self, payload):
         self._request(payload, {"ids"})
         values = payload.get("ids")
@@ -479,11 +487,13 @@ class NotesService:
             self._changed("order.json", value)
             return {"order": self._public(value)}
 
+    @primary_operation
     def get_settings(self):
         with self._lock:
             self._ensure_available()
             return {"settings": self._public(self._settings)}
 
+    @primary_operation
     def update_settings(self, payload):
         self._request(payload, SETTINGS_DEFAULTS)
         self._validate_settings(payload)
@@ -500,18 +510,17 @@ class NotesService:
             self._changed("settings.json", value)
             return {"settings": self._public(value)}
 
-    def status(self):
+    def status(self, refresh=False):
+        paths = self._path_status(refresh)
         with self._lock:
             try:
-                if not self._primary_available and _read(self.primary_dir / "collection.json").get("collectionId") == self.collection_id:
-                    # A successful probe verifies write recovery without changing user data.
-                    self._persist(".health.json", {"checkedAt": utc_timestamp()})
+                if not self._primary_error and _read(safe_path(self.primary_dir, "collection.json")).get("collectionId") == self.collection_id:
                     self._primary_available = True
                 self._ensure_available(allow_corrupt=True)
                 self._refresh_primary_health()
             except (NotesError, OSError, ValueError):
                 self._primary_available = False
-            return {"enabled": True, "collectionId": self.collection_id, "primaryAvailable": self._primary_available and not self._corrupt, "primaryCorrupt": len(self._corrupt), "backupAvailable": self._backup_available, "backupPending": len(self._sync["pending"]), "backupError": self._backup_error, "backupBlocked": len(self._sync["blocked"]), "paths": {"primaryDir": str(self.primary_dir), "backupDir": str(self.backup_dir)}, "limits": {"notes": MAX_NOTES, "titleCharacters": MAX_TITLE, "bodyBytes": MAX_BODY, "totalTextBytes": MAX_TEXT, "imageBytes": MAX_IMAGE_BYTES, "images": MAX_IMAGES, "totalImageBytes": MAX_IMAGES_BYTES}}
+            return {"enabled": True, "collectionId": self.collection_id, "primaryAvailable": self._primary_available and not self._corrupt, "primaryCorrupt": len(self._corrupt), "backupAvailable": self._backup_available, "backupPending": len(self._sync["pending"]), "backupError": self._backup_error, "backupBlocked": len(self._sync["blocked"]), "paths": {"primaryDir": str(self.primary_entry), "backupDir": str(self.backup_dir)}, "limits": {"notes": MAX_NOTES, "titleCharacters": MAX_TITLE, "bodyBytes": MAX_BODY, "totalTextBytes": MAX_TEXT, "imageBytes": MAX_IMAGE_BYTES, "images": MAX_IMAGES, "totalImageBytes": MAX_IMAGES_BYTES}, **paths}
 
     def _worker(self, op, *, timeout=60, **values):
         if not self._slots.acquire(blocking=False):
@@ -524,7 +533,15 @@ class NotesService:
                     if self._process.poll() is None:
                         raise NotesError(503, "worker_unreaped", "previous Notes worker has not exited; restart may be required")
                     self._process = None
-                request = {"op": op, "root": str(self.backup_dir), "collectionId": self.collection_id, "forbiddenRoots": self.forbidden_roots, **values}
+                if op not in ("validate", "scan", "adopt") and not self._bindings["backupTarget"] and not values.get("authorizedTarget"):
+                    try:
+                        target = run_probe(self._path_request(), self._binding_probe_state)
+                    except (StoragePathError, OSError) as exc:
+                        code = getattr(exc, "code", "backup_unavailable")
+                        raise NotesError(403 if code == "storage_permission" else 503, code, str(exc)) from exc
+                    self._write_binding(backupTarget=target["target"])
+                request = {**self._path_request(op=op), "collectionId": self.collection_id,
+                           "boundTarget": self._bindings["backupTarget"], **values}
                 command = [sys.executable, "--notes-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "homelab_state.notes_worker"]
                 environment = os.environ.copy()
                 environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent) + os.pathsep + environment.get("PYTHONPATH", "")
@@ -549,17 +566,26 @@ class NotesService:
                     if response.get("kind") == "PermissionError":
                         raise NotesError(403, "storage_permission", "the backend account does not have permission to access the image/backup directory")
                     status = 400 if response.get("kind") == "ValueError" else 503
-                    raise NotesError(status, "invalid_image" if op == "validate" else "backup_unavailable", response.get("error", "Notes storage operation failed"))
+                    code = response.get("code") or ("invalid_image" if op == "validate" else "backup_unavailable")
+                    self._backup_error_code = code if op != "validate" else self._backup_error_code
+                    if code == "check_stale":
+                        status = 409
+                    raise NotesError(status, code, response.get("error", "Notes storage operation failed"))
+                if op != "validate":
+                    self._backup_error_code = None
                 return response["result"]
         finally:
             self._slots.release()
 
+    @primary_operation
     def upload(self, upload_id, name, data):
         identifier(upload_id)
         if not isinstance(name, str) or len(name) > 255 or not isinstance(data, bytes):
             raise NotesError(400, "invalid_upload", "invalid upload")
         if not data or len(data) > MAX_IMAGE_BYTES:
             raise NotesError(413, "image_limit", "image must be at most 20 MiB")
+        # Idempotent upload retries must obey the same target gate as new uploads.
+        self._worker("availability")
         digest = hashlib.sha256(data).hexdigest()
         with self._lock:
             self._ensure_available()
@@ -612,6 +638,7 @@ class NotesService:
             result["url"] = "/api/notes/images/" + upload_id
         return result
 
+    @primary_operation
     def get_upload(self, upload_id):
         identifier(upload_id)
         with self._lock:
@@ -631,6 +658,7 @@ class NotesService:
                         record = current
         return self._upload_public(upload_id, record)
 
+    @primary_operation
     def touch_upload(self, upload_id):
         identifier(upload_id)
         with self._lock:
@@ -660,6 +688,7 @@ class NotesService:
             self._save_sync()
             self._wake.set()
 
+    @primary_operation
     def discard_upload(self, upload_id):
         identifier(upload_id)
         with self._lock:
@@ -675,6 +704,7 @@ class NotesService:
                 self._wake.set()
             return {"id": upload_id, "status": "removed"}
 
+    @primary_operation
     def get_image(self, image_id):
         identifier(image_id)
         with self._lock:
@@ -698,8 +728,10 @@ class NotesService:
             self._wake.set()
         return {"scheduled": True}
 
+    @primary_operation
     def _backup_once(self):
         with self._maintenance:
+            self._worker("availability")
             with self._lock:
                 self._ensure_available()
                 self._queue_unused()
@@ -722,6 +754,8 @@ class NotesService:
                     self._save_sync()
             with self._lock:
                 removing = [key for key, value in self._sync["uploads"].items() if value["status"] == "deleting"]
+                if any(key.startswith("notes/") for key in self._sync["blocked"]):
+                    removing = []  # Unreviewed backup notes may still reference these images.
             for image_id in removing:
                 with self._lock:
                     if image_id in self._references():
@@ -750,6 +784,7 @@ class NotesService:
                     with self._lock:
                         self._backup_available = False
                         self._backup_error = str(exc)
+                        self._backup_error_code = getattr(exc, "code", "backup_unavailable")
                         delays = (30, 60, 120, 300)
                         self._next_retry = time.monotonic() + delays[min(self._retry_index, 3)]
                         self._retry_index += 1
@@ -773,12 +808,13 @@ class NotesService:
             self._jobs[job["id"]] = job
         def run():
             try:
-                result = target(job["id"])
+                with self._storage_operation():
+                    result = target(job["id"])
                 with self._lock:
                     job.update(status="complete", result=result)
             except Exception as exc:
                 with self._lock:
-                    job.update(status="failed", message=str(exc))
+                    job.update(status="failed", message=str(exc), error=getattr(exc, "code", "notes_internal_error"))
         threading.Thread(target=run, name="notes-reconcile", daemon=True).start()
         return {"job": {"id": job["id"], "status": "running"}}
 
@@ -789,6 +825,7 @@ class NotesService:
                 raise NotesError(404, "job_missing", "maintenance job expired; check again")
             return {"job": {key: copy.deepcopy(value) for key, value in self._jobs[job_id].items() if not key.startswith("_")}}
 
+    @primary_operation
     def reconcile_check(self):
         def run(job_id):
             with self._maintenance:
@@ -797,6 +834,7 @@ class NotesService:
                     self._refresh_primary_health()
                     primary = copy.deepcopy(self._records())
                     damaged = copy.deepcopy(self._corrupt)
+                    primary_snapshot = fingerprint({key: self._disk_hash(key) for key in set(primary) | set(damaged)})
                 scanned = self._worker("scan")
                 backup = scanned["records"]
                 items, snapshots = [], {}
@@ -829,10 +867,15 @@ class NotesService:
                 with self._lock:
                     self._jobs[job_id]["_snapshots"] = snapshots
                     self._jobs[job_id]["_backupCollectionId"] = scanned["collectionId"]
+                    self._jobs[job_id]["_target"] = scanned["target"]
+                    self._jobs[job_id]["_scanHash"] = fingerprint(scanned["records"])
+                    self._jobs[job_id]["_generation"] = self._primary_generation
+                    self._jobs[job_id]["_primarySnapshot"] = primary_snapshot
+                    self._jobs[job_id]["_rebind"] = bool(self._bindings["backupTarget"] and normalized(scanned["target"]) != normalized(self._bindings["backupTarget"]))
                     for snapshot in snapshots.values():
                         self._sync["blocked"][snapshot["path"]] = "manual review pending"
                     self._save_sync()
-                return {"collectionId": self.collection_id, "backupCollectionId": scanned["collectionId"], "items": items}
+                return {"collectionId": self.collection_id, "backupCollectionId": scanned["collectionId"], "items": items, "target": scanned["target"], "requiresRebind": self._jobs[job_id]["_rebind"]}
         return self._start_job(run)
 
     def _validate_backup_record(self, key, value):
@@ -852,12 +895,13 @@ class NotesService:
         else:
             raise NotesError(400, "invalid_record", "unknown backup record")
 
+    @primary_operation
     def reconcile_apply(self, payload):
         if not isinstance(payload, dict) or set(payload) != {"checkId", "choices"}:
             raise NotesError(400, "invalid_request", "checkId and choices are required")
         check_id = identifier(payload["checkId"])
         choices = payload["choices"]
-        if not isinstance(choices, list) or not choices or len(choices) > MAX_NOTES + 2:
+        if not isinstance(choices, list) or len(choices) > MAX_NOTES + 2:
             raise NotesError(400, "invalid_request", "select at least one backup action")
         with self._lock:
             checked = self._jobs.get(check_id)
@@ -865,6 +909,13 @@ class NotesService:
                 raise NotesError(409, "check_expired", "check the backup before applying changes")
             snapshots = copy.deepcopy(checked["_snapshots"])
             backup_collection = checked["_backupCollectionId"]
+            checked_target = checked["_target"]
+            checked_generation = checked["_generation"]
+            rebind = checked["_rebind"]
+            scan_hash = checked["_scanHash"]
+            primary_snapshot = checked["_primarySnapshot"]
+            if not choices and not rebind:
+                raise NotesError(400, "invalid_request", "select at least one backup action")
         seen = set()
         for choice in choices:
             if not isinstance(choice, dict) or set(choice) != {"id", "action"} or not isinstance(choice.get("id"), str) or choice.get("action") not in ("use-primary", "use-backup") or choice.get("id") not in snapshots or choice["id"] in seen:
@@ -873,10 +924,23 @@ class NotesService:
         def run(job_id):
             results = []
             with self._maintenance:
-                if backup_collection != self.collection_id:
+                if checked_generation != self._primary_generation:
+                    raise NotesError(409, "check_stale", "主目录已切换，请重新检查备份")
+                current = self._worker("scan", authorizedTarget=checked_target)
+                if current["collectionId"] != backup_collection:
+                    raise NotesError(409, "check_stale", "备份集合已变化，请重新检查")
+                if rebind:
+                    if fingerprint(current["records"]) != scan_hash:
+                        raise NotesError(409, "check_stale", "备份内容已变化，请重新检查")
+                    with self._lock:
+                        self._refresh_primary_health()
+                        current_primary = fingerprint({key: self._disk_hash(key) for key in set(self._records()) | set(self._corrupt)})
+                        if current_primary != primary_snapshot:
+                            raise NotesError(409, "check_stale", "主目录内容已变化，请重新检查")
+                if rebind or backup_collection != self.collection_id:
                     # Applying an explicit reviewed merge authorizes the new
                     # collection identity. Unselected differences stay blocked.
-                    adopted = self._worker("adopt", expectedCollectionId=backup_collection)
+                    adopted = self._worker("adopt", expectedCollectionId=backup_collection, authorizedTarget=checked_target)
                     if adopted.get("conflict"):
                         raise NotesError(409, "check_stale", "backup collection changed; check again")
                 for choice in choices:
@@ -895,7 +959,7 @@ class NotesService:
                         if choice["action"] == "use-primary":
                             if local is None:
                                 raise NotesError(400, "missing_source", "there is no primary record to copy")
-                            result = self._worker("backup", path=key, value=local, expectedHash=snapshot["backupHash"])
+                            result = self._worker("backup", path=key, value=local, expectedHash=snapshot["backupHash"], authorizedTarget=checked_target)
                             if result.get("conflict"):
                                 raise NotesError(409, "check_stale", "backup content changed; check again")
                             with self._lock:
@@ -905,14 +969,14 @@ class NotesService:
                                 self._sync["blocked"].pop(key, None)
                                 self._save_sync()
                         else:
-                            result = self._worker("restore-read", path=key, expectedHash=snapshot["backupHash"])
+                            result = self._worker("restore-read", path=key, expectedHash=snapshot["backupHash"], authorizedTarget=checked_target)
                             if result.get("conflict"):
                                 raise NotesError(409, "check_stale", "backup content changed; check again")
                             value = result.get("value")
                             if value is None:
                                 raise NotesError(400, "missing_source", "there is no backup record to restore")
                             self._validate_backup_record(key, value)
-                            images = self._recover_images(value) if key.startswith("notes/") and not value.get("deleted") else {}
+                            images = self._recover_images(value, checked_target) if key.startswith("notes/") and not value.get("deleted") else {}
                             with self._lock:
                                 if self._disk_hash(key) != snapshot["primaryHash"]:
                                     raise NotesError(409, "check_stale", "primary content changed; check again")
@@ -929,16 +993,23 @@ class NotesService:
                         results.append({"id": item_id, "status": "applied"})
                     except NotesError as exc:
                         results.append({"id": item_id, "status": "conflict" if exc.status == 409 else "failed", "message": str(exc)})
+                if rebind and any(item["status"] != "applied" for item in results):
+                    raise NotesError(503, "rebind_failed", "重新绑定未完成，目标写入仍暂停；请重新检查备份")
+                # Re-resolve before committing the binding, even for an empty selection.
+                self._worker("scan", authorizedTarget=checked_target)
+                self._write_binding(backupTarget=checked_target)
+                self._backup_error_code = None
+                self._backup_error = None
             self._wake.set()
-            return {"items": results, "adoptedCollection": backup_collection != self.collection_id}
+            return {"items": results, "adoptedCollection": backup_collection != self.collection_id, "reboundTarget": checked_target if rebind else None}
         return self._start_job(run)
 
-    def _recover_images(self, value):
+    def _recover_images(self, value, target=None):
         recovered = {}
         with self._lock:
             unknown = [image_id for image_id in value["attachments"] if image_id not in self._sync["uploads"]]
         for image_id in unknown:
-            result = self._worker("image-read", id=image_id)
+            result = self._worker("image-read", id=image_id, **({"authorizedTarget": target} if target else {}))
             if result.get("missing"):
                 continue
             try:
@@ -989,13 +1060,12 @@ class NotesService:
         thread = getattr(self, "_thread", None)
         if thread and thread.is_alive():
             thread.join(timeout=6)
-        if self._lock_file:
-            try:
-                self._lock_file.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-            self._lock_file.close()
-            self._lock_file = None
+        self._release_writer()
+        for state in (self._primary_probe_state, self._status_probe_state, self._binding_probe_state):
+            process = state.get("process")
+            if process is not None:
+                try:
+                    process.kill()
+                    process.wait(timeout=1)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass

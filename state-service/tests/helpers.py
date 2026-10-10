@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 import threading
 from pathlib import Path
@@ -9,6 +10,27 @@ from PIL import Image
 
 from homelab_state import config
 from homelab_state.core import atomic_write_json
+
+
+def link_directory(link: Path, target: Path) -> None:
+    """Real directory symlink, or a local Windows junction without privileges."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+
+
+def repoint_directory(link: Path, target: Path) -> None:
+    if link.is_symlink():
+        link.unlink()
+    elif hasattr(link, "is_junction") and link.is_junction():
+        link.rmdir()  # Remove the junction only, never its contents.
+    else:
+        raise ValueError("only a directory link can be repointed")
+    link_directory(link, target)
 
 
 FIXED_TIME = "2026-07-22T12:00:00Z"

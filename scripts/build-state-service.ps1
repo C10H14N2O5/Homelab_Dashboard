@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 12
+$expectedServiceVersion = 13
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -115,6 +115,9 @@ try {
 
     Write-Host 'Running packaged executable smoke test...'
     $smokeRoot = Join-Path $buildRoot 'smoke'
+    New-Item -ItemType Directory -Path (Join-Path $smokeRoot 'notes-primary'), (Join-Path $smokeRoot 'notes-backup') -Force | Out-Null
+    & $resolvedPython (Join-Path $PSScriptRoot 'smoke-notes-links.py') $smokeRoot --initialize
+    if ($LASTEXITCODE -ne 0) { throw 'Could not provision isolated Notes links.' }
     $smokeBackgrounds = Join-Path $smokeRoot 'web\html\backgrounds'
     $smokeState = Join-Path $smokeRoot 'HomeLabWallpaperState-data'
     $smokeConfig = Join-Path $smokeRoot 'HomeLabWallpaperState.json'
@@ -138,7 +141,7 @@ try {
         probeConnectAddress     = '127.0.0.1:443'
         probeDomainSuffix       = 'home.example.test'
         probeTimeoutSeconds     = 5
-        notes                   = @{ enabled = $true; primaryDir = (Join-Path $smokeRoot 'notes-primary'); backupDir = (Join-Path $smokeRoot 'notes-backup') }
+        notes                   = @{ enabled = $true; primaryDir = (Join-Path $smokeRoot 'notes-primary-link'); backupDir = (Join-Path $smokeRoot 'notes-backup-link') }
     }
     [IO.File]::WriteAllText(
         $smokeConfig,
@@ -581,6 +584,8 @@ try {
             if ($notesStatus.backupPending) { Start-Sleep -Milliseconds 250 }
         } while ($notesStatus.backupPending -and (Get-Date) -lt $backupDeadline)
         if ($notesStatus.backupPending -or -not $notesStatus.backupAvailable) { throw 'Packaged notes backup did not complete.' }
+        & $resolvedPython (Join-Path $PSScriptRoot 'smoke-notes-links.py') $smokeRoot --url "http://127.0.0.1:$smokePort" --note-id $notesId
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged Notes link migration smoke failed.' }
 
         $null = Invoke-RestMethod `
             -UseBasicParsing `

@@ -39,6 +39,8 @@ class NotesTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.primary = root / "primary"
         self.backup = root / "backup"
+        self.primary.mkdir(exist_ok=True)
+        self.backup.mkdir(exist_ok=True)
         self.service = notes.NotesService(self.primary, self.backup, start_worker=False)
 
     def tearDown(self):
@@ -315,6 +317,7 @@ class NotesTests(unittest.TestCase):
         old_collection = self.service.collection_id
         self.service._backup_once()
         self.service.close()
+        (self.primary.parent / "rebuilt").mkdir()
         self.service = notes.NotesService(self.primary.parent / "rebuilt", self.backup, start_worker=False)
         check = self.wait_job(self.service.reconcile_check())
         self.assertNotEqual(self.service.collection_id, old_collection)
@@ -370,6 +373,7 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.service.status()["primaryCorrupt"], 1)
 
     def test_permission_error_is_not_a_retryable_upload_failure(self):
+        self.service._backup_once()
         process = mock.Mock(returncode=0)
         process.communicate.return_value = (json.dumps({"ok": False, "kind": "PermissionError", "error": "denied"}).encode(), b"")
         with mock.patch.object(notes.subprocess, "Popen", return_value=process):

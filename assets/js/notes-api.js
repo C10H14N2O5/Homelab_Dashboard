@@ -1,5 +1,15 @@
 const BASE = '/api/notes';
 const ERROR_MESSAGES = {
+    backup_target_changed: '备份目录目标已变化，请检查／恢复备份后应用重新绑定。',
+    primary_target_changed: '主目录目标不是完整的同一笔记库，当前草稿已保留。',
+    storage_target_missing: '存储入口或链接目标不存在，请先创建目录或链接。',
+    storage_binding_invalid: '笔记目标绑定记录不可用，已停止写入。',
+    storage_boundary: '笔记目录与公开目录或状态目录重叠。',
+    storage_overlap: '两个笔记目录的真实目标重叠。',
+    primary_not_local: '笔记主目录的真实目标必须位于本机磁盘。',
+    unsupported_link_type: '存储入口使用了不支持的链接类型。',
+    storage_link_loop: '存储入口存在链接循环或跳数过多。',
+    check_stale: '目录或内容已变化，请重新检查备份。',
     primary_unavailable: '笔记主存储不可用，当前内容已保留。',
     backup_unavailable: '图片与备份目录不可用，文字仍可保存到主存储。',
     revision_conflict: '服务器内容已变化，请处理版本冲突。',

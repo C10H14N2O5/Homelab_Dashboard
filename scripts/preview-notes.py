@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--api-port", type=int, default=8788)
     parser.add_argument("--data-root", type=Path, default=PROJECT / "output" / "notes-preview")
     parser.add_argument("--empty", action="store_true", help="Do not create demonstration notes")
+    parser.add_argument("--linked-storage", action="store_true", help="Use isolated directory links for both Notes entries")
     args = parser.parse_args()
     if args.port == args.api_port:
         parser.error("preview and API ports must differ")
@@ -59,6 +60,15 @@ def main() -> int:
         "probeConnectAddress": "127.0.0.1:443", "probeDomainSuffix": "home.example.com", "probeTimeoutSeconds": 1,
         "notes": {"enabled": True, "primaryDir": str(data / "notes-primary"), "backupDir": str(data / "notes-backup")},
     }
+    for name in ("notes-primary", "notes-backup"):
+        (data / name).mkdir(exist_ok=True)
+        if args.linked_storage:
+            entry = data / (name + "-link")
+            if not entry.is_symlink() and not (hasattr(entry, "is_junction") and entry.is_junction()):
+                sys.path.insert(0, str(PROJECT / "state-service"))
+                from tests.helpers import link_directory
+                link_directory(entry, data / name)
+            config["notes"]["primaryDir" if name == "notes-primary" else "backupDir"] = str(entry)
     write_json(config_path, config)
     log = (data / "backend-console.log").open("ab", buffering=0)
     process = subprocess.Popen(

@@ -160,7 +160,7 @@ def configured_public_root(value: str, base: Path) -> Path:
     path = Path(os.path.expandvars(value)).expanduser()
     if not path.is_absolute():
         path = base / path
-    return path.parent.resolve()
+    return Path(os.path.abspath(path.parent))
 
 
 @dataclass(frozen=True)
@@ -168,6 +168,7 @@ class AppConfig:
     config_path: Path
     background_dir: Path
     public_root: Path
+    resolved_public_root: Path
     allowed_origins: frozenset[str]
     listen_host: str
     listen_port: int
@@ -185,7 +186,7 @@ class AppConfig:
 
     @property
     def public_directories(self) -> tuple[Path, ...]:
-        return (self.public_root, self.background_dir)
+        return (self.public_root, self.resolved_public_root, self.background_dir)
 
     @property
     def listen(self) -> str:
@@ -290,7 +291,8 @@ def _parse_config_value(
     if not (background_dir / DEFAULT_BACKGROUND).is_file():
         raise ConfigurationError(f"background directory must contain {DEFAULT_BACKGROUND}: {background_dir}")
     public_root = configured_public_root(raw["backgroundDir"], base)
-    public_directories = (public_root, background_dir)
+    resolved_public_root = public_root.resolve()
+    public_directories = (public_root, resolved_public_root, background_dir)
     if any(path_is_within(config_path, root) for root in public_directories):
         raise ConfigurationError("configuration file must be outside the public Web root")
     if any(path_is_within(state_dir, root) for root in public_directories):
@@ -317,13 +319,6 @@ def _parse_config_value(
         path = Path(os.path.abspath(path))
         notes_paths.append(path)
     notes_primary, notes_backup = notes_paths
-    if str(notes_primary).startswith("\\\\"):
-        raise ConfigurationError("notes.primaryDir must be on a local disk")
-    if os.name == "nt":
-        import ctypes
-        if ctypes.windll.kernel32.GetDriveTypeW(str(notes_primary.anchor)) == 4:
-            raise ConfigurationError("notes.primaryDir must not use a mapped network drive")
-    notes_primary = notes_primary.resolve()
 
     def lexical_within(candidate: Path, directory: Path) -> bool:
         try:
@@ -334,8 +329,10 @@ def _parse_config_value(
     for path in (notes_primary, notes_backup):
         if any(lexical_within(path, root) for root in public_directories):
             raise ConfigurationError("notes directories must be outside the public Web root")
-        if path == state_dir:
+        if lexical_within(path, state_dir) or lexical_within(state_dir, path):
             raise ConfigurationError("notes directories must be separate from stateDir")
+        if lexical_within(config_path, path):
+            raise ConfigurationError("notes directories must not contain the configuration file")
     if lexical_within(notes_primary, notes_backup) or lexical_within(notes_backup, notes_primary):
         raise ConfigurationError("notes directories must not overlap")
     if create_state_directory:
@@ -344,6 +341,7 @@ def _parse_config_value(
         config_path=config_path,
         background_dir=background_dir,
         public_root=public_root,
+        resolved_public_root=resolved_public_root,
         allowed_origins=normalized_origins,
         listen_host=host,
         listen_port=port,

@@ -29,6 +29,8 @@ class NotesHTTPTests(unittest.TestCase):
             listen="127.0.0.1:1",
             notes={"enabled": True, "primaryDir": "notes-primary", "backupDir": "notes-backup"},
         ), listen_port=0)
+        self.config.notes_primary_dir.mkdir()
+        self.config.notes_backup_dir.mkdir()
         logger = logging.getLogger(f"notes-http-{id(self)}")
         logger.handlers.clear()
         logger.addHandler(logging.NullHandler())
@@ -308,6 +310,14 @@ class NotesHTTPTests(unittest.TestCase):
         response = self.raw(f"PUT {endpoint} HTTP/1.1\r\nHost: localhost\r\nOrigin: {TEST_ORIGIN}\r\nX-Requested-With: homelab-dashboard\r\nContent-Type: application/json\r\nContent-Length: {notes_http.MAX_NOTES_JSON_BODY + 1}\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n")
         self.assertIn(b" 413 ", response.split(b"\r\n", 1)[0])
         self.assertNotIn(b"100 Continue", response)
+
+    def test_status_refresh_query_is_strict_and_exposes_entry_paths(self):
+        status, result, _ = self.request("GET", "/api/notes/status?refresh=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["resolvedPaths"]["primaryDir"], str(self.config.notes_primary_dir))
+        self.assertFalse(result["entryLinks"]["primaryDir"])
+        for query in ("refresh=0", "refresh=1&refresh=1", "refresh=1&other=1", "other=1"):
+            self.assertEqual(self.request("GET", "/api/notes/status?" + query)[0], 400)
 
     def test_disabled_v3_reports_unavailable_without_affecting_dashboard(self):
         self.server.notes_service.close()

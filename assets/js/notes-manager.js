@@ -554,7 +554,7 @@ export function initializeNotes() {
         return settingsMotion.hide('', () => { if (target?.isConnected) target.focus({ preventScroll: true }); });
     }
     settingsUI.dialog.addEventListener('cancel', (event) => { event.preventDefault(); void closeSettings(); });
-    settingsUI.content.innerHTML = `<form id="notes-settings-form"><fieldset><legend>保存与交互</legend><label class="notes-setting-check"><input type="checkbox" name="autoSaveEnabled"> 定时自动保存</label><label class="notes-setting-number">保存间隔（秒）<input type="number" name="autoSaveSeconds" min="10" max="3600" step="1" required></label><label class="notes-setting-check"><input type="checkbox" name="saveOnSwitch"> 切换笔记时保存全部修改</label><label class="notes-setting-check"><input type="checkbox" name="collapseOnBlur"> 点击或聚焦面板外部时自动收起</label><p class="notes-helper">偏好在设备间共享。切换应用或浏览器标签页不会自动收起。</p></fieldset><fieldset><legend>存储与备份</legend><dl class="notes-storage-paths"><dt>主数据目录</dt><dd id="notes-primary-path">读取中…</dd><dt>图片与备份目录</dt><dd id="notes-backup-path">读取中…</dd></dl><p id="notes-backup-status" role="status"></p><p class="notes-helper">目录通过后端配置向导修改，重启后生效。</p><div class="notes-dialog-actions"><button type="button" id="notes-backup-retry">立即重试备份</button><button type="button" id="notes-backup-check">检查／恢复备份</button></div></fieldset><div class="notes-dialog-actions"><span id="notes-settings-feedback" role="status"></span><button type="submit" class="notes-primary">保存设置</button></div></form>`;
+    settingsUI.content.innerHTML = `<form id="notes-settings-form"><fieldset><legend>保存与交互</legend><label class="notes-setting-check"><input type="checkbox" name="autoSaveEnabled"> 定时自动保存</label><label class="notes-setting-number">保存间隔（秒）<input type="number" name="autoSaveSeconds" min="10" max="3600" step="1" required></label><label class="notes-setting-check"><input type="checkbox" name="saveOnSwitch"> 切换笔记时保存全部修改</label><label class="notes-setting-check"><input type="checkbox" name="collapseOnBlur"> 点击或聚焦面板外部时自动收起</label><p class="notes-helper">偏好在设备间共享。切换应用或浏览器标签页不会自动收起。</p></fieldset><fieldset><legend>存储与备份</legend><dl class="notes-storage-paths"><dt>主数据目录</dt><dd id="notes-primary-path">读取中…</dd><dt>图片与备份目录</dt><dd id="notes-backup-path">读取中…</dd></dl><p id="notes-backup-status" role="status"></p><p class="notes-helper">配置入口路径修改需重启；链接重指后自动检测，备份新目标需检查并应用重新绑定。</p><div class="notes-dialog-actions"><button type="button" id="notes-backup-retry">立即重试备份</button><button type="button" id="notes-backup-check">检查／恢复备份</button></div></fieldset><div class="notes-dialog-actions"><span id="notes-settings-feedback" role="status"></span><button type="submit" class="notes-primary">保存设置</button></div></form>`;
     const settingsForm = byId('notes-settings-form');
     async function openSettings(event) {
         if (settingsMotion.isOpen()) return;
@@ -562,7 +562,7 @@ export function initializeNotes() {
         settingsReturnFocus = trigger === byId('notes-settings-button') ? byId('page-settings-button') : trigger;
         settingsMotion.show();
         try {
-            const [settings, status] = await Promise.allSettled([requestNotes('/settings'), requestNotes('/status')]);
+            const [settings, status] = await Promise.allSettled([requestNotes('/settings'), requestNotes('/status?refresh=1')]);
             if (status.status === 'fulfilled') state.status = status.value;
             if (settings.status === 'fulfilled') state.settings = { ...DEFAULT_SETTINGS, ...settings.value.settings };
             populateSettings();
@@ -574,8 +574,9 @@ export function initializeNotes() {
     function populateSettings() {
         for (const key of ['autoSaveEnabled', 'saveOnSwitch', 'collapseOnBlur']) settingsForm.elements[key].checked = state.settings[key];
         settingsForm.elements.autoSaveSeconds.value = state.settings.autoSaveSeconds;
-        byId('notes-primary-path').textContent = state.status.paths?.primaryDir || '尚未配置'; byId('notes-backup-path').textContent = state.status.paths?.backupDir || '尚未配置';
-        byId('notes-backup-status').textContent = state.status.backupError || (state.status.backupPending ? `${state.status.backupPending} 项备份待同步` : state.status.backupAvailable ? '备份目录可用' : '备份目录暂不可用');
+        const pathLabel = (key) => { const entry = state.status.paths?.[key]; const target = state.status.resolvedPaths?.[key]; return entry ? `${entry} → ${target || (state.status.pathProbePending ? '解析中…' : '目标不可用')}` : '尚未配置'; };
+        byId('notes-primary-path').textContent = pathLabel('primaryDir'); byId('notes-backup-path').textContent = pathLabel('backupDir');
+        byId('notes-backup-status').textContent = state.status.primaryError || state.status.backupError || (state.status.backupPending ? `${state.status.backupPending} 项备份待同步` : state.status.backupAvailable ? '备份目录可用' : '备份目录暂不可用');
         byId('notes-settings-feedback').textContent = '';
     }
     settingsForm.addEventListener('submit', async (event) => {
@@ -596,18 +597,18 @@ export function initializeNotes() {
         try {
             const check = await requestNotes('/reconcile/check', 'POST', {}); const result = await waitJob(check.job.id);
             const choices = [];
-            message.textContent = result.items.length ? '仅执行所选操作。使用备份会替换对应主数据；删除记录不会自动恢复。' : '两处内容一致，无需恢复。';
+            message.textContent = result.requiresRebind ? `备份真实目标已变化为 ${result.target}。应用后重新绑定；未选差异保持不变。` : result.items.length ? '仅执行所选操作。使用备份会替换对应主数据；删除记录不会自动恢复。' : '两处内容一致，无需恢复。';
             for (const item of result.items) {
                 const row = document.createElement('label'); row.className = 'notes-reconcile-item'; const title = document.createElement('span'); title.textContent = `${item.title || item.id} · ${{ 'only-primary': '仅主目录存在', 'only-backup': '仅备份存在', different: '内容不同', deleted: '包含删除记录', corrupt: '内容损坏' }[item.type] || item.type}`;
                 const select = document.createElement('select'); for (const [value, label] of [['', '保持不变'], ['use-primary', '使用主目录内容'], ['use-backup', '使用备份内容']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; option.disabled = value === 'use-primary' ? Boolean(item.primaryCorrupt) : value === 'use-backup' && Boolean(item.backupCorrupt); select.append(option); }
                 choices.push({ item, select }); row.append(title, select); content.append(row);
             }
-            if (choices.length) {
-                const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'notes-primary'; apply.textContent = '应用所选操作'; content.append(apply);
+            if (choices.length || result.requiresRebind) {
+                const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'notes-primary'; apply.textContent = result.requiresRebind ? '应用并重新绑定' : '应用所选操作'; content.append(apply);
                 apply.addEventListener('click', async () => {
-                    const selected = choices.filter(({ select }) => select.value).map(({ item, select }) => ({ id: item.id, action: select.value })); if (!selected.length) { message.textContent = '请先选择需要应用的操作。'; return; }
+                    const selected = choices.filter(({ select }) => select.value).map(({ item, select }) => ({ id: item.id, action: select.value })); if (!selected.length && !result.requiresRebind) { message.textContent = '请先选择需要应用的操作。'; return; }
                     apply.disabled = true; choices.forEach(({ select }) => { select.disabled = true; });
-                    try { const response = await requestNotes('/reconcile/apply', 'POST', { checkId: check.job.id, choices: selected }); const outcome = await waitJob(response.job.id); message.textContent = outcome.items.map((item) => `${item.id}：${item.status === 'applied' ? '已完成' : item.message || item.status}`).join('；'); await refresh(); }
+                    try { const response = await requestNotes('/reconcile/apply', 'POST', { checkId: check.job.id, choices: selected }); const outcome = await waitJob(response.job.id); message.textContent = (outcome.reboundTarget ? '备份目标已重新绑定。' : '') + outcome.items.map((item) => `${item.id}：${item.status === 'applied' ? '已完成' : item.message || item.status}`).join('；'); await refresh(); }
                     catch (error) { message.textContent = error.message; }
                 });
             }

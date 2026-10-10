@@ -415,8 +415,8 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
         notes_primary_text = str(notes_defaults.get("primaryDir", DEFAULT_NOTES_DIRECTORY))
         notes_backup_text = str(notes_defaults.get("backupDir", DEFAULT_NOTES_BACKUP_DIRECTORY))
         if notes_enabled:
-            notes_primary_text = prompt_value("笔记主目录（本机磁盘）", notes_primary_text)
-            notes_backup_text = prompt_value("笔记图片与备份目录（可为 NAS UNC 路径）", notes_backup_text)
+            notes_primary_text = prompt_value("笔记主目录（本机目录或指向本机磁盘的链接）", notes_primary_text)
+            notes_backup_text = prompt_value("笔记图片与备份目录（可为本机链接或 NAS UNC 路径）", notes_backup_text)
         origins = [item.strip() for item in origin_text.split(",") if item.strip()]
         try:
             raw = {
@@ -439,6 +439,15 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
             )
             validate_application_location(config)
             config.state_dir.mkdir(parents=True, exist_ok=True)
+            if notes_enabled:
+                from homelab_state.notes_paths import run_probe
+                for primary, entry in ((True, config.notes_primary_dir), (False, config.notes_backup_dir)):
+                    try:
+                        run_probe({"op": "probe", "root": str(entry), "primary": primary,
+                                   "forbiddenRoots": [str(root) for root in config.public_directories],
+                                   "protectedDirs": [str(config.state_dir)], "configFile": str(config.config_path)}, {})
+                    except Exception as warning:
+                        print(f"目录探测警告（配置仍会保存）：{warning}")
             atomic_write_json(config.config_path, raw)
             break
         except Exception as error:

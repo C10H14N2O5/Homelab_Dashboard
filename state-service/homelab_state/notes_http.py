@@ -45,6 +45,7 @@ def notes_accepts_body(command: str, raw_path: str) -> bool:
 def _availability(handler):
     config = handler.server.config
     enabled = config.notes_enabled
+    failure = getattr(handler.server, "_notes_init_error", None) or {}
     return {
         "enabled": enabled,
         "primaryAvailable": False,
@@ -52,6 +53,10 @@ def _availability(handler):
         "backupPending": 0,
         "backupBlocked": 0,
         "paths": {"primaryDir": str(config.notes_primary_dir or ""), "backupDir": str(config.notes_backup_dir or "")},
+        "resolvedPaths": {"primaryDir": None, "backupDir": None},
+        "entryLinks": {"primaryDir": None, "backupDir": None},
+        "primaryErrorCode": failure.get("code"), "primaryError": failure.get("message"),
+        "backupErrorCode": None, "pathProbePending": False,
         "error": "notes_unavailable" if enabled else "notes_disabled",
     }
 
@@ -68,7 +73,8 @@ def handle_notes_request(handler) -> bool:
     if handler.command not in allowed:
         handler._allow(", ".join(allowed))
         return True
-    if parsed.query and path != "/api/notes/uploads":
+    refresh_status = path == "/api/notes/status" and parsed.query == "refresh=1"
+    if parsed.query and path != "/api/notes/uploads" and not refresh_status:
         handler._close_rejected_request()
         handler._error(400, "query parameters are not allowed")
         return True
@@ -115,7 +121,7 @@ def handle_notes_request(handler) -> bool:
         if path == "/api/notes":
             result = service.list_notes()
         elif path == "/api/notes/status":
-            result = service.status()
+            result = service.status(refresh=refresh_status)
         elif path == "/api/notes/settings":
             result = service.get_settings() if handler.command == "GET" else service.update_settings(payload)
         elif path == "/api/notes/order":

@@ -12,10 +12,12 @@ import json
 import os
 from pathlib import Path
 import sys
+import stat
 import tempfile
 import warnings
 
 from homelab_state.core import atomic_write_json, file_sha256
+from homelab_state.notes_paths import StoragePathError, normalized, resolve_request
 
 
 def fingerprint(value):
@@ -24,19 +26,29 @@ def fingerprint(value):
 
 def safe_path(root: Path, name: str) -> Path:
     candidate = root / name
-    def linked(path):
-        return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
-    if linked(root) or linked(candidate) or any(linked(parent) for parent in root.parents):
-        raise ValueError("symbolic links are not supported in Notes storage")
-    resolved = root.resolve()
-    result = candidate.resolve()
-    if not result.is_relative_to(resolved):
+    relative = candidate.relative_to(root).parts
+    if any(part in ("..", ".") for part in relative):
         raise ValueError("invalid storage path")
-    current = candidate.parent
-    while current != root and current != current.parent:
-        if linked(current):
-            raise ValueError("symbolic links are not supported in Notes storage")
-        current = current.parent
+    # Inspect from ancestor to leaf before following any component. In particular,
+    # a notes/ link to offline SMB must not make a local primary read contact NAS.
+    components = [*reversed(root.parents), root]
+    current = root
+    for part in relative:
+        current /= part
+        components.append(current)
+    for component in components:
+        try:
+            info = component.lstat()
+        except FileNotFoundError:
+            if component == root or component in root.parents:
+                raise StoragePathError("storage_target_missing", "存储入口或链接目标不存在") from None
+            break
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", 0):
+            raise ValueError("symbolic links are not supported inside Notes storage")
+    if not root.is_dir():
+        raise StoragePathError("storage_target_missing", "存储入口或链接目标不存在")
+    if not candidate.resolve().is_relative_to(root.resolve()):
+        raise ValueError("invalid storage path")
     return candidate
 
 
@@ -64,7 +76,8 @@ def record_hash(path: Path):
 
 
 def ensure_collection(root: Path, collection_id: str, allow_foreign=False):
-    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise StoragePathError("storage_target_missing", "存储入口或链接目标不存在")
     manifest = safe_path(root, "collection.json")
     if manifest.exists():
         existing = read_json(manifest)
@@ -110,29 +123,40 @@ def inspect_image(data: bytes):
 
 def dispatch(request):
     op = request["op"]
+    if op == "probe-pair":
+        results = {}
+        for key in ("primary", "backup"):
+            try:
+                _, results[key] = resolve_request(request[key + "Request"])
+            except Exception as exc:
+                results[key] = {"error": str(exc), "code": getattr(exc, "code", "backup_unavailable")}
+        return results
     if op == "validate":
         return inspect_image(base64.b64decode(request["data"], validate=True))
-    root = Path(request["root"])
-    forbidden = request.get("forbiddenRoots", [])
-    if any(root.resolve().is_relative_to(Path(directory).resolve()) for directory in forbidden):
-        raise ValueError("Notes storage must not be located inside the public Web Root")
+    root, resolved = resolve_request(request)
+    if op == "probe":
+        return resolved
+    authorized = request.get("authorizedTarget")
+    bound = request.get("boundTarget")
+    if authorized and normalized(root) != normalized(authorized):
+        raise StoragePathError("check_stale", "目录目标再次变化，请重新检查备份")
+    if op != "scan" and not authorized and bound and normalized(root) != normalized(bound):
+        raise StoragePathError("backup_target_changed", "备份目录目标已变化，请检查／恢复备份后应用重新绑定")
     if op == "adopt":
-        root.mkdir(parents=True, exist_ok=True)
         manifest = safe_path(root, "collection.json")
         existing = read_json(manifest).get("collectionId") if manifest.exists() else None
         if existing not in (request.get("expectedCollectionId"), request["collectionId"]):
             return {"conflict": True}
         atomic_write_json(manifest, {"version": 1, "collectionId": request["collectionId"]})
-        return {"adopted": True}
+        return {"adopted": True, **resolved}
     if op == "scan":
         # A manual check must never initialize an absent backup.
-        if not root.exists():
-            return {"collectionId": None, "records": {}}
         manifest = safe_path(root, "collection.json")
         collection = read_json(manifest) if manifest.exists() else {}
         records = {}
         paths = list(safe_path(root, "notes").glob("*.json")) if safe_path(root, "notes").exists() else []
-        paths.extend(root / name for name in ("order.json", "settings.json") if (root / name).exists())
+        paths.extend(safe_path(root, name) for name in ("order.json", "settings.json") if safe_path(root, name).exists())
+        paths = [safe_path(root, path.relative_to(root).as_posix()) for path in paths]
         if len(paths) > 10_000 or sum(path.stat().st_size for path in paths) > 64 * 1024 * 1024:
             raise ValueError("backup is too large for one review; inspect the directory manually")
         for path in paths:
@@ -142,7 +166,10 @@ def dispatch(request):
                 records[name] = {"value": value, "hash": fingerprint(value)}
             except (ValueError, OSError, TypeError):
                 records[name] = {"error": "invalid or unreadable backup record", "hash": record_hash(path)}
-        return {"collectionId": collection.get("collectionId"), "records": records}
+        return {"collectionId": collection.get("collectionId"), "records": records, **resolved}
+    if op == "availability":
+        ensure_collection(root, request["collectionId"])
+        return resolved
     if op == "image-read":
         path = safe_path(root, "images/" + request["id"])
         if not path.exists():
@@ -194,7 +221,7 @@ def main():
         request = json.loads(sys.stdin.buffer.read())
         result = {"ok": True, "result": dispatch(request)}
     except Exception as exc:
-        result = {"ok": False, "error": str(exc), "kind": type(exc).__name__}
+        result = {"ok": False, "error": str(exc), "kind": type(exc).__name__, "code": getattr(exc, "code", None)}
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
     sys.stdout.buffer.flush()
     return 0

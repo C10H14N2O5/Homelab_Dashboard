@@ -163,19 +163,30 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(loaded.notes_primary_dir.exists())
         self.assertFalse(loaded.notes_backup_dir.exists())
 
-    def test_v4_rejects_public_overlapping_and_remote_primary_notes_paths(self) -> None:
+    def test_v4_rejects_public_and_overlapping_notes_paths(self) -> None:
         for primary, backup in (
             ("web/html/notes", "backup"),
             ("notes", "web/html/backup"),
             ("notes", "notes"),
             ("notes", "notes/backup"),
             ("notes/primary", "notes"),
-            (r"\\server\share\notes", "backup"),
         ):
             with self.subTest(primary=primary, backup=backup), self.assertRaises(ConfigurationError):
                 self.project.write_config(version=4, notes={
                     "enabled": True, "primaryDir": primary, "backupDir": backup,
                 })
+
+    def test_v4_preserves_link_entries_without_resolving_notes_paths(self):
+        original = Path.resolve
+        def guarded(path, *args, **kwargs):
+            if str(path).endswith("primary-entry") or str(path).startswith("\\\\offline-nas"):
+                raise AssertionError("config must not resolve Notes entries")
+            return original(path, *args, **kwargs)
+        with mock.patch.object(Path, "resolve", guarded):
+            loaded = self.project.write_config(version=4, notes={
+                "enabled": True, "primaryDir": "primary-entry", "backupDir": r"\\offline-nas\share\notes",
+            })
+        self.assertEqual(loaded.notes_primary_dir, self.project.root / "primary-entry")
 
     def test_v4_notes_schema_is_strict(self) -> None:
         for notes in ({}, {"enabled": "true", "primaryDir": "notes", "backupDir": "backup"},

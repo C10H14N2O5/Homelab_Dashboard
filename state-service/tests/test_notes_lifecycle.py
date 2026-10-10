@@ -19,6 +19,8 @@ class NotesStartupRecoveryTests(unittest.TestCase):
         config = replace(project.write_config(version=4, notes={
             "enabled": True, "primaryDir": "notes-primary", "backupDir": "notes-backup",
         }), listen_port=0)
+        config.notes_primary_dir.mkdir()
+        config.notes_backup_dir.mkdir()
         real_service = http_api.NotesService
         attempts = []
 

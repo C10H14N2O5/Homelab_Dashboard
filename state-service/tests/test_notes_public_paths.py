@@ -7,7 +7,7 @@ from unittest import mock
 
 from homelab_state import config, notes
 from homelab_state.core import ConfigurationError
-from tests.helpers import TemporaryProject, image_bytes
+from tests.helpers import TemporaryProject, image_bytes, link_directory
 
 
 class NotesPublicPathsTests(unittest.TestCase):
@@ -17,19 +17,12 @@ class NotesPublicPathsTests(unittest.TestCase):
         self.assets = self.project.root / "nas" / "homepage" / "backgrounds"
         self.assets.parent.mkdir(parents=True)
         self.project.backgrounds.rename(self.assets)
-        self.link_directory(self.project.backgrounds, self.assets)
+        link_directory(self.project.backgrounds, self.assets)
         self.backup = self.assets.parent / "notebook"
         self.public = self.project.backgrounds.parent.resolve()
-
-    def link_directory(self, link, target):
-        try:
-            link.symlink_to(target, target_is_directory=True)
-        except OSError:
-            if os.name != "nt":
-                raise
-            # Junctions exercise real Windows path resolution without symlink privileges.
-            import _winapi
-            _winapi.CreateJunction(str(target), str(link))
+        (self.project.root / "primary").mkdir()
+        (self.project.root / "worker-primary").mkdir()
+        self.backup.mkdir()
 
     def load(self, **overrides):
         return self.project.write_config(version=4, notes={
@@ -75,13 +68,11 @@ class NotesPublicPathsTests(unittest.TestCase):
                 finally:
                     service.close()
 
-    def test_backup_link_requires_direct_target(self):
+    def test_backup_link_is_supported(self):
         cfg = self.load()
-        self.backup.mkdir()
         link = self.project.root / "notebook_nas"
-        self.link_directory(link, self.backup)
+        link_directory(link, self.backup)
         service = notes.NotesService(cfg.notes_primary_dir, link, start_worker=False,
                                      forbidden_roots=cfg.public_directories)
         self.addCleanup(service.close)
-        with self.assertRaisesRegex(notes.NotesError, "symbolic links"):
-            service._worker("scan")
+        self.assertEqual(service._worker("scan")["target"], str(self.backup))

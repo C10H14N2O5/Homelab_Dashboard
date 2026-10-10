@@ -125,6 +125,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.notes_service = None
         self._notes_init_lock = threading.Lock()
         self._notes_retry_at = 0.0
+        self._notes_init_error = None
         self._notes_closed = False
         self._connection_slots = threading.BoundedSemaphore(MAX_HTTP_CONNECTIONS)
         self.bestdori_manager = bestdori_manager or BestdoriDrawManager(
@@ -166,8 +167,10 @@ class StateHTTPServer(ThreadingHTTPServer):
                 return self.notes_service
             self._notes_retry_at = time.monotonic() + 15.0
             try:
-                self.notes_service = NotesService(self.config.notes_primary_dir, self.config.notes_backup_dir, logger=self.logger, forbidden_roots=self.config.public_directories)
-            except Exception:
+                self.notes_service = NotesService(self.config.notes_primary_dir, self.config.notes_backup_dir, logger=self.logger, forbidden_roots=self.config.public_directories, binding_file=self.config.state_dir / "NotesStorageBindings.json", config_file=self.config.config_path, state_dir=self.config.state_dir)
+                self._notes_init_error = None
+            except Exception as exc:
+                self._notes_init_error = {"code": getattr(exc, "code", "primary_unavailable"), "message": str(exc)}
                 self.logger.exception("notes could not initialize; other dashboard features remain available")
             return self.notes_service
         finally:
