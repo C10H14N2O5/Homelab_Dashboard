@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--api-port", type=int, default=8788)
     parser.add_argument("--data-root", type=Path, default=PROJECT / "output" / "notes-preview")
     parser.add_argument("--empty", action="store_true", help="Do not create demonstration notes")
+    parser.add_argument("--password-file", type=Path, help="Read the optional test password from a private UTF-8 file (exact contents)")
     parser.add_argument("--linked-storage", action="store_true", help="Use isolated directory links for both Notes entries")
     args = parser.parse_args()
     if args.port == args.api_port:
@@ -60,6 +61,9 @@ def main() -> int:
         "probeConnectAddress": "127.0.0.1:443", "probeDomainSuffix": "home.example.com", "probeTimeoutSeconds": 1,
         "notes": {"enabled": True, "primaryDir": str(data / "notes-primary"), "backupDir": str(data / "notes-backup")},
     }
+    password = args.password_file.read_text(encoding="utf-8") if args.password_file else ""
+    if password:
+        config["notes"]["password"] = password
     for name in ("notes-primary", "notes-backup"):
         (data / name).mkdir(exist_ok=True)
         if args.linked_storage:
@@ -77,9 +81,12 @@ def main() -> int:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
+    notes_token = None
     def api(path, method="GET", payload=None, raw=None, content_type="application/json"):
         body = raw if raw is not None else (json.dumps(payload, ensure_ascii=False).encode() if payload is not None else None)
         headers = {"Origin": origin, "X-Requested-With": "homelab-dashboard"}
+        if notes_token:
+            headers["X-Notes-Token"] = notes_token
         if body is not None:
             headers["Content-Type"] = content_type
         with urlopen(Request(upstream + path, body, headers=headers, method=method), timeout=70) as response:
@@ -177,6 +184,8 @@ def main() -> int:
                 if process.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError(f"Backend failed to start; inspect {data / 'backend-console.log'}")
                 time.sleep(0.15)
+        if password:
+            notes_token = api("/api/notes/auth/unlock", "POST", {"password": password})["token"]
         if not args.empty and not (data / "seeded.json").exists():
             if not api("/api/notes")["notes"]:
                 from PIL import Image, ImageDraw
@@ -196,6 +205,10 @@ def main() -> int:
                 for title, body in demos:
                     api("/api/notes/" + str(uuid4()), "PUT", {"expectedRevision": None, "operationId": str(uuid4()), "title": title, "body": body})
             write_json(data / "seeded.json", {"seeded": True})
+        if notes_token:
+            api("/api/notes/auth/lock", "POST", {})
+            notes_token = None
+        password = None
         server = ThreadingHTTPServer(("127.0.0.1", args.port), PreviewHandler)
         write_json(data / "preview.json", {"url": origin + "/", "pid": os.getpid(), "apiPid": process.pid, "dataRoot": str(data)})
         print(f"Notes preview: {origin}/", flush=True)

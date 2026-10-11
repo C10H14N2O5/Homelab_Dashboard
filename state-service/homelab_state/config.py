@@ -4,7 +4,7 @@ import ipaddress
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -183,6 +183,7 @@ class AppConfig:
     notes_enabled: bool = False
     notes_primary_dir: Path | None = None
     notes_backup_dir: Path | None = None
+    notes_password: str = field(default="", repr=False)
 
     @property
     def public_directories(self) -> tuple[Path, ...]:
@@ -302,8 +303,10 @@ def _parse_config_value(
         "primaryDir": DEFAULT_NOTES_DIRECTORY,
         "backupDir": DEFAULT_NOTES_BACKUP_DIRECTORY,
     })
-    if not isinstance(notes_raw, dict) or set(notes_raw) != {"enabled", "primaryDir", "backupDir"}:
+    if not isinstance(notes_raw, dict) or not {"enabled", "primaryDir", "backupDir"} <= set(notes_raw) or set(notes_raw) - {"enabled", "primaryDir", "backupDir", "password"}:
         raise ConfigurationError("notes must contain enabled, primaryDir and backupDir")
+    if not isinstance(notes_raw.get("password", ""), str) or len(notes_raw.get("password", "").encode("utf-8")) > 1024:
+        raise ConfigurationError("notes.password must be a string of at most 1024 UTF-8 bytes")
     if type(notes_raw["enabled"]) is not bool:
         raise ConfigurationError("notes.enabled must be a boolean")
     notes_paths = []
@@ -356,6 +359,7 @@ def _parse_config_value(
         notes_enabled=notes_raw["enabled"],
         notes_primary_dir=notes_primary,
         notes_backup_dir=notes_backup,
+        notes_password=notes_raw.get("password", ""),
     )
 
 

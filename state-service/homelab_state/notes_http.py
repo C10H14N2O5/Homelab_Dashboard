@@ -5,6 +5,7 @@ import re
 from urllib.parse import parse_qsl, urlsplit
 
 from homelab_state.notes import NotesError
+from homelab_state.notes_auth import AuthFailure
 
 MAX_NOTES_JSON_BODY = 2 * 1024 * 1024
 MAX_NOTES_IMAGE_BODY = 20 * 1024 * 1024
@@ -12,6 +13,10 @@ _ID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _ITEM = re.compile(rf"^/api/notes/({_ID})$")
 _RESOURCE = re.compile(rf"^/api/notes/(uploads|images|jobs)/({_ID})(?:/(touch|discard))?$")
 _STATIC = {
+    "/api/notes/auth": ("GET",),
+    "/api/notes/auth/unlock": ("POST",),
+    "/api/notes/auth/resume": ("POST",),
+    "/api/notes/auth/lock": ("POST",),
     "/api/notes": ("GET",),
     "/api/notes/order": ("PATCH",),
     "/api/notes/settings": ("GET", "PATCH"),
@@ -77,6 +82,44 @@ def handle_notes_request(handler) -> bool:
     if parsed.query and path != "/api/notes/uploads" and not refresh_status:
         handler._close_rejected_request()
         handler._error(400, "query parameters are not allowed")
+        return True
+    auth = handler.server.notes_auth
+    tokens = handler.headers.get_all("X-Notes-Token", [])
+    token = tokens[0] if len(tokens) == 1 and len(tokens[0]) <= 128 else None
+    if path == "/api/notes/auth":
+        handler._write_json(200, auth.status(token))
+        return True
+    if path.startswith("/api/notes/auth/"):
+        try:
+            if path != "/api/notes/auth/unlock" and not auth.authorized(token):
+                raise AuthFailure(401, "notes_auth_required")
+            payload = handler._read_dashboard_json(4096)
+            if payload is None:
+                return True
+            if path.endswith("/unlock"):
+                if not isinstance(payload, dict) or set(payload) != {"password"} or not isinstance(payload["password"], str):
+                    handler._error(400, "invalid_password_request")
+                    return True
+                result = auth.unlock(payload["password"])
+            else:
+                if payload != {}:
+                    handler._error(400, "request must be an empty object")
+                    return True
+                result = auth.resume(token) if path.endswith("/resume") else auth.lock(token)
+            handler._write_json(200, result)
+        except AuthFailure as error:
+            handler._close_rejected_request()
+            if error.retry_after:
+                # _write_json uses the shared cache/framing headers. Supply
+                # Retry-After through the response helper without logging secrets.
+                body = {"error": error.code, "retryAfterSeconds": error.retry_after}
+                handler._write_notes_auth_wait(error.retry_after, body)
+            else:
+                handler._error(error.status, error.code)
+        return True
+    if not auth.authorized(token):
+        handler._close_rejected_request()
+        handler._error(401, "notes_auth_required")
         return True
     service = handler.server.get_notes_service()
     if service is None:

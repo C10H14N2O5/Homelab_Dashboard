@@ -62,6 +62,7 @@ from homelab_state.favicon import (
 )
 from homelab_state.probe import MAX_PROBE_TARGETS, ProbeClient
 from homelab_state.notes import NotesService
+from homelab_state.notes_auth import NotesAuth
 from homelab_state.notes_http import handle_notes_request, notes_accepts_body
 
 
@@ -123,6 +124,7 @@ class StateHTTPServer(ThreadingHTTPServer):
         self.store = store
         self.logger = logger
         self.notes_service = None
+        self.notes_auth = NotesAuth(config.notes_enabled, config.notes_password)
         self._notes_init_lock = threading.Lock()
         self._notes_retry_at = 0.0
         self._notes_init_error = None
@@ -390,16 +392,21 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Pragma", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
 
-    def _write_json(self, status: int, value: Any) -> None:
+    def _write_json(self, status: int, value: Any, headers: dict | None = None) -> None:
         body = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         self.send_response(status)
         self._common_headers()
+        for name, value in (headers or {}).items():
+            self.send_header(name, str(value))
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+
+    def _write_notes_auth_wait(self, retry_after, value):
+        self._write_json(429, value, {"Retry-After": retry_after})
 
     def _write_favicon_svg(self, icon_svg: str, content_hash: str) -> None:
         body = icon_svg.encode("utf-8")

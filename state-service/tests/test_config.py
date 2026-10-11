@@ -12,6 +12,24 @@ from tests.helpers import TEST_ORIGIN, TemporaryProject
 
 
 class ConfigTests(unittest.TestCase):
+    def test_notes_password_optional_exact_and_private(self):
+        notes = {"enabled": False, "primaryDir": "notes-primary", "backupDir": "notes-backup"}
+        self.assertEqual(self.project.write_config(version=4, notes=notes).notes_password, "")
+        for value in ["", " padded 中文 "]:
+            configured = self.project.write_config(version=4, notes={**notes, "password": value})
+            self.assertEqual(configured.notes_password, value)
+            self.assertNotIn("notes_password", repr(configured))
+        for value in [None, 1, False, [], "x" * 1025]:
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(ConfigurationError):
+                self.project.write_config(version=4, notes={**notes, "password": value})
+
+    def test_wizard_preserves_password_without_prompting_or_printing(self):
+        self.project.write_config(version=4, notes={"enabled": False, "primaryDir": "notes-primary", "backupDir": "notes-backup", "password": "private-password"})
+        with mock.patch.object(launcher, "prompt_value", side_effect=lambda label, default: default) as prompts, mock.patch.object(launcher, "prompt_yes_no", return_value=False), mock.patch.object(launcher, "validate_application_location"), mock.patch("builtins.print") as output:
+            configured = launcher.run_configuration_wizard(self.project.config_path)
+        self.assertEqual(configured.notes_password, "private-password")
+        self.assertNotIn("private-password", repr(prompts.call_args_list) + repr(output.call_args_list))
+
     def setUp(self) -> None:
         self.project = TemporaryProject()
 

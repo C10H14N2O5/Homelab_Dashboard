@@ -1,5 +1,24 @@
 const BASE = '/api/notes';
+let authorization = null;
+const pending = new Set();
+export function configureNotesAuthorization(controller) { authorization = controller; }
+export function cancelNotesRequests() { for (const abort of [...pending]) abort(); }
+function context(path) {
+    const authRoute = path === '/auth' || path.startsWith('/auth/');
+    if (!authRoute && authorization && !authorization.allowed) throw new NotesError('请先解锁笔记。', 401, { error: 'notes_auth_required' });
+    return { authRoute, epoch: authorization?.epoch, token: authorization?.token };
+}
+function checkContext(captured) {
+    if (!captured.authRoute && authorization && captured.epoch !== authorization.epoch) throw new NotesError('笔记请求已取消，请重新解锁。', 499);
+}
+function rejectAuthorization(payload) {
+    if (payload.error === 'notes_auth_required') authorization?.invalidate();
+}
 const ERROR_MESSAGES = {
+    notes_auth_required: '请重新输入密码解锁笔记，未同步草稿已保留。',
+    notes_password_incorrect: '密码错误，请重试。',
+    notes_auth_wait: '密码连续输错，请稍后重试。',
+    notes_auth_busy: '笔记解锁会话已满，请重启后端后重试。',
     backup_target_changed: '备份目录目标已变化，请检查／恢复备份后应用重新绑定。',
     primary_target_changed: '主目录目标不是完整的同一笔记库，当前草稿已保留。',
     storage_target_missing: '存储入口或链接目标不存在，请先创建目录或链接。',
@@ -38,38 +57,73 @@ export class NotesError extends Error {
 }
 
 export async function requestNotes(path = '', method = 'GET', body = null, timeout = 15000) {
+    const captured = context(path);
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (!captured.authRoute) pending.add(abort);
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
         const response = await fetch(`${BASE}${path}`, {
             method, signal: controller.signal, credentials: 'same-origin', cache: 'no-store',
-            headers: { 'X-Requested-With': 'homelab-dashboard', ...(body === null ? {} : { 'Content-Type': 'application/json' }) },
+            headers: { 'X-Requested-With': 'homelab-dashboard', ...(captured.token ? { 'X-Notes-Token': captured.token } : {}), ...(body === null ? {} : { 'Content-Type': 'application/json' }) },
             ...(body === null ? {} : { body: JSON.stringify(body) })
         });
         let payload;
         try { payload = await response.json(); } catch { throw new NotesError('笔记服务返回了无法识别的响应。', response.status); }
-        if (!response.ok) throw new NotesError(notesErrorMessage(payload, response.status), response.status, payload);
+        checkContext(captured);
+        if (!response.ok) { rejectAuthorization(payload); throw new NotesError(notesErrorMessage(payload, response.status), response.status, payload); }
         return payload;
     } catch (error) {
         if (error instanceof NotesError) throw error;
+        checkContext(captured);
         throw new NotesError(error.name === 'AbortError' ? '笔记请求超时，请检查连接后重试。' : '无法连接笔记服务，内容已保留。');
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); pending.delete(abort); }
+}
+
+export async function fetchNoteImage(path, signal) {
+    if (!/^\/api\/notes\/images\/[0-9a-f-]{36}$/.test(path)) throw new NotesError('无效的笔记图片。');
+    const captured = context(path.slice(BASE.length));
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    pending.add(abort);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) controller.abort();
+    const timer = setTimeout(abort, 30000);
+    try {
+        const response = await fetch(path, { signal: controller.signal, credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'homelab-dashboard', ...(captured.token ? { 'X-Notes-Token': captured.token } : {}) } });
+        checkContext(captured);
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            checkContext(captured); rejectAuthorization(payload);
+            throw new NotesError(notesErrorMessage(payload, response.status), response.status, payload);
+        }
+        const mime = response.headers.get('content-type')?.split(';')[0];
+        if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'].includes(mime)) throw new NotesError('图片响应类型无效。');
+        const blob = await response.blob(); checkContext(captured);
+        if (blob.size > 20 * 1024 * 1024) throw new NotesError('图片响应过大。');
+        return blob;
+    } finally { clearTimeout(timer); pending.delete(abort); signal?.removeEventListener('abort', abort); }
 }
 
 export function uploadNoteImage(task, onProgress) {
+    const captured = context('/uploads');
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         task.abort = () => xhr.abort();
+        pending.add(task.abort);
+        xhr.addEventListener('loadend', () => pending.delete(task.abort), { once: true });
         xhr.open('POST', `${BASE}/uploads?id=${encodeURIComponent(task.id)}&name=${encodeURIComponent(task.file.name || 'image')}`);
         xhr.setRequestHeader('X-Requested-With', 'homelab-dashboard');
+        if (captured.token) xhr.setRequestHeader('X-Notes-Token', captured.token);
         xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         xhr.timeout = 300000;
         xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100)); };
         xhr.onload = () => {
+            try { checkContext(captured); } catch (error) { reject(error); return; }
             let payload;
             try { payload = JSON.parse(xhr.responseText); } catch { reject(new NotesError('图片上传响应无效。', xhr.status)); return; }
             if (xhr.status >= 200 && xhr.status < 300) resolve(payload);
-            else reject(new NotesError(notesErrorMessage(payload, xhr.status), xhr.status, payload));
+            else { rejectAuthorization(payload); reject(new NotesError(notesErrorMessage(payload, xhr.status), xhr.status, payload)); }
         };
         xhr.onerror = () => reject(new NotesError('图片上传连接中断。'));
         xhr.ontimeout = () => reject(new NotesError('图片上传超时。'));

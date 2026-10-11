@@ -432,6 +432,8 @@ def run_configuration_wizard(config_path: Path) -> AppConfig:
                 "probeTimeoutSeconds": float(probe_timeout_text),
                 "notes": {"enabled": notes_enabled, "primaryDir": notes_primary_text, "backupDir": notes_backup_text},
             }
+            if "password" in notes_defaults:
+                raw["notes"]["password"] = notes_defaults["password"]
             config = _parse_config_value(
                 config_path,
                 raw,

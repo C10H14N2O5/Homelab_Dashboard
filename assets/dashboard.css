@@ -40,6 +40,13 @@
         .notes-shell :is(button,input,textarea,select):focus-visible, .notes-dialog :is(button,input,select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
         .notes-shell button:hover:not(:disabled), .notes-dialog button:hover:not(:disabled) { border-color: var(--line-strong); background-color: rgba(125,211,252,.1); }
         .notes-icon-button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid var(--line); border-radius: 50%; background: rgba(226,232,240,.045); color: var(--muted); font-size: 1.35rem; line-height: 1; }
+        #notes-lock { width: auto; padding: 0 .7rem; border-radius: 1rem; font-size: .8rem; }
+        .notes-auth { display: flex; flex-direction: column; gap: .8rem; width: min(100% - 2rem, 22rem); margin: auto; padding: 2rem 0; }
+        .notes-auth h3, .notes-auth p { margin: 0; }
+        .notes-auth p { color: var(--muted); font-size: .85rem; line-height: 1.6; }
+        .notes-auth label { display: flex; flex-direction: column; gap: .4rem; }
+        .notes-auth input { min-width: 0; border: 1px solid var(--line); border-radius: .6rem; padding: .65rem; background: rgba(15,23,42,.4); color: var(--text); }
+        .notes-auth button { border: 1px solid var(--line); border-radius: .6rem; padding: .65rem; background: rgba(226,232,240,.08); color: var(--text); }
         .notes-heading-actions .notes-icon-button:first-child { font-size: 1rem; }
         .notes-notice { flex: 0 0 auto; padding: .55rem 1.2rem; font-size: .78rem; line-height: 1.5; color: #fcd68b; background: rgba(251,191,36,.07); border-bottom: 1px solid rgba(251,191,36,.18); }
         .notes-workspace { display: grid; grid-template-columns: 240px minmax(0,1fr); flex: 1; min-height: 0; }

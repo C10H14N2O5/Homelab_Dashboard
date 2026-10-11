@@ -204,8 +204,14 @@
                     <span>笔记</span><span class="notes-capsule-hint">随手记录</span>
                 </button>
                 <div class="notes-panel" id="notes-panel" hidden>
-                    <div class="notes-panel-heading"><div><span class="notes-kicker">YOUR WORKSPACE</span><h2>笔记</h2></div><div class="notes-heading-actions"><button type="button" class="notes-icon-button" id="notes-settings-inline" aria-label="笔记设置" title="笔记设置">⚙</button><button type="button" class="notes-icon-button" id="notes-close" aria-label="保存并收起笔记" title="保存并收起">×</button></div></div>
+                    <div class="notes-panel-heading"><div><span class="notes-kicker">YOUR WORKSPACE</span><h2>笔记</h2></div><div class="notes-heading-actions"><button type="button" class="notes-icon-button" id="notes-lock" aria-label="保存并锁定笔记" title="保存并锁定" hidden>锁定</button><button type="button" class="notes-icon-button" id="notes-settings-inline" aria-label="笔记设置" title="笔记设置">⚙</button><button type="button" class="notes-icon-button" id="notes-close" aria-label="保存并收起笔记" title="保存并收起">×</button></div></div>
                     <div class="notes-notice" id="notes-notice" role="status" hidden></div>
+                    <form class="notes-auth" id="notes-auth-form" hidden>
+                        <h3>解锁笔记</h3><p>输入密码，继续查看与编辑。</p>
+                        <label for="notes-password">笔记密码</label><input id="notes-password" type="password" autocomplete="off" placeholder="输入密码" maxlength="1024">
+                        <div class="notes-auth-actions"><button class="notes-primary" id="notes-unlock" type="submit">解锁</button><button id="notes-auth-retry" type="button" hidden>重新连接</button></div>
+                        <p id="notes-auth-message" role="status" aria-live="polite"></p>
+                    </form>
                     <div class="notes-workspace">
                         <aside class="notes-sidebar"><button type="button" class="notes-new" id="notes-new">＋ 新建笔记</button><nav class="notes-list" id="notes-list" aria-label="笔记列表"></nav></aside>
                         <section class="notes-detail" id="notes-detail" aria-label="当前笔记">

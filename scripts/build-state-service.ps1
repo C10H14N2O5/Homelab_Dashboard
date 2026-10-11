@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 13
+$expectedServiceVersion = 14
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -601,6 +601,9 @@ try {
         }
         $smokeProcess.Dispose()
         $smokeProcess = $null
+        # Enable protection for the restart smoke without exposing the password in command arguments.
+        $smokeSettings.notes.password = 'isolated-build-notes-password'
+        [IO.File]::WriteAllText($smokeConfig, (($smokeSettings | ConvertTo-Json -Depth 4) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
         $smokeProcess = Start-Process `
             -FilePath $temporaryArtifactPath `
             -ArgumentList @('serve', '--config', ('"' + $smokeConfig + '"')) `
@@ -619,10 +622,20 @@ try {
         if ($null -eq $restartHealth -or $restartHealth.version -ne $expectedServiceVersion) {
             throw 'Packaged executable did not become healthy after restart.'
         }
-        $persistedNote = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/$notesId" -TimeoutSec 5
+        try { $null = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/$notesId" -TimeoutSec 5; throw 'Packaged notes protection allowed an unauthenticated read.' }
+        catch { if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 401) { throw } }
+        $authStatus = Invoke-RestMethod -Uri "http://127.0.0.1:$smokePort/api/notes/auth" -TimeoutSec 5
+        if (-not $authStatus.passwordRequired -or $authStatus.authenticated) { throw 'Packaged auth status failed.' }
+        $authResult = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$smokePort/api/notes/auth/unlock" -Headers $notesHeaders -ContentType 'application/json' -Body (@{password = $smokeSettings.notes.password} | ConvertTo-Json -Compress) -TimeoutSec 5
+        $notesHeaders['X-Notes-Token'] = $authResult.token
+        $persistedNote = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/$notesId" -Headers $notesHeaders -TimeoutSec 5
         if ($persistedNote.note.body -ne $savedNote.note.body -or $persistedNote.note.revision -ne $savedNote.note.revision) {
             throw 'Packaged executable did not preserve notes across restart.'
         }
+        $null = Invoke-WebRequest -Uri "http://127.0.0.1:$smokePort/api/notes/images/$notesUploadId" -Headers $notesHeaders -TimeoutSec 10
+        $null = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$smokePort/api/notes/auth/lock" -Headers $notesHeaders -ContentType 'application/json' -Body '{}' -TimeoutSec 5
+        try { $null = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$smokePort/api/notes/images/$notesUploadId" -Headers $notesHeaders -TimeoutSec 5; throw 'Packaged notes lock did not revoke image access.' }
+        catch { if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 401) { throw } }
         $persistedCards = Invoke-RestMethod `
             -UseBasicParsing `
             -Uri "http://127.0.0.1:$smokePort/api/cards" `

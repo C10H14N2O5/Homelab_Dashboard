@@ -33,7 +33,8 @@ async function fixture(options = {}) {
         if (request.method() !== 'GET') { report.writes.push(request.method()); await route.abort(); return; }
         const endpoint = new URL(request.url()).pathname.slice('/api/notes'.length);
         let body;
-        if (!endpoint) body = { collectionId: 'selection-motion-fixture', notes, order: { ids: notes.map(note => note.id), revision: 'order-1' }, settings };
+        if (endpoint === '/auth') body = { enabled: true, passwordRequired: false, authenticated: true, retryAfterSeconds: 0 };
+        else if (!endpoint) body = { collectionId: 'selection-motion-fixture', notes, order: { ids: notes.map(note => note.id), revision: 'order-1' }, settings };
         else if (endpoint === '/status') body = { collectionId: 'selection-motion-fixture', enabled: true, primaryAvailable: true, backupAvailable: true, backupPending: 0 };
         else if (endpoint === '/settings') body = { settings };
         else {

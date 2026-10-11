@@ -1,5 +1,6 @@
 // Parser and syntax grammars run outside the UI thread. Each container owns
 // its current request; navigation cancels obsolete work without stale writes.
+import { fetchNoteImage } from './notes-api.js';
 const renderStates = new WeakMap();
 const IMAGE_PATH = /^\/api\/notes\/images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let purifyPromise;
@@ -43,8 +44,15 @@ export async function renderNotesMarkdown(source, container, { onTaskToggle, rea
     let worker;
     let timer;
     let completed = false;
+    const resources = new Set();
+    const images = new Map();
+    const abort = new AbortController();
+    let observer;
     const state = {
         cancel() {
+            abort.abort(); observer?.disconnect();
+            for (const url of resources) URL.revokeObjectURL(url);
+            resources.clear();
             if (completed) return;
             completed = true;
             clearTimeout(timer);
@@ -54,6 +62,24 @@ export async function renderNotesMarkdown(source, container, { onTaskToggle, rea
     };
     renderStates.set(container, state);
     const active = () => !completed && renderStates.get(container) === state;
+    const owned = () => !abort.signal.aborted && renderStates.get(container) === state;
+    function imageUrl(path) {
+        if (!images.has(path)) images.set(path, fetchNoteImage(path, abort.signal).then((blob) => {
+            if (!owned()) throw new Error('Obsolete image');
+            const url = URL.createObjectURL(blob); resources.add(url); return url;
+        }));
+        return images.get(path);
+    }
+    function protectLink(link, path) {
+        link.href = '#';
+        link.addEventListener('click', async (event) => {
+            if (!owned()) { event.preventDefault(); return; }
+            if (link.getAttribute('href').startsWith('blob:')) return;
+            event.preventDefault();
+            try { const url = await imageUrl(path); if (owned()) { link.href = url; link.click(); } }
+            catch { /* Keep the original Markdown attachment unchanged. */ }
+        });
+    }
     const finish = (result) => {
         if (!active()) return;
         completed = true;
@@ -91,6 +117,7 @@ export async function renderNotesMarkdown(source, container, { onTaskToggle, rea
                     if (safeUrl(link.getAttribute('href'), false)) {
                         link.target = '_blank';
                         link.rel = 'noopener noreferrer';
+                        if (IMAGE_PATH.test(link.getAttribute('href'))) protectLink(link, link.getAttribute('href'));
                     } else link.removeAttribute('href');
                 }
                 for (const image of fragment.querySelectorAll('img')) {
@@ -106,7 +133,14 @@ export async function renderNotesMarkdown(source, container, { onTaskToggle, rea
                     link.className = 'notes-image-link';
                     image.replaceWith(link);
                     link.append(image);
+                    if (IMAGE_PATH.test(src)) {
+                        image.removeAttribute('src');
+                        protectLink(link, src);
+                        const load = () => imageUrl(src).then((url) => { if (owned()) { image.src = url; link.href = url; } }).catch(() => { if (owned()) image.dispatchEvent(new Event('error')); });
+                        image._notesLoad = load;
+                    }
                     image.addEventListener('error', () => {
+                        if (!owned()) return;
                         const missing = document.createElement('span');
                         missing.className = 'notes-image-missing';
                         missing.textContent = `[图片不可用：${image.alt || '图片'}]`;
@@ -135,6 +169,11 @@ export async function renderNotesMarkdown(source, container, { onTaskToggle, rea
                 wrapper.append(fragment);
                 if (!active()) return;
                 container.replaceChildren(wrapper);
+                const protectedImages = wrapper.querySelectorAll('img');
+                if (typeof IntersectionObserver === 'function') {
+                    observer = new IntersectionObserver((entries) => { for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); entry.target._notesLoad?.(); } }, { rootMargin: '200px' });
+                    for (const image of protectedImages) if (image._notesLoad) observer.observe(image);
+                } else for (const image of protectedImages) image._notesLoad?.();
                 finish({ fallback: false, tasks: data.tasks });
             } catch { fallback('预览暂不可用，暂时显示 Markdown 原文。'); }
         });

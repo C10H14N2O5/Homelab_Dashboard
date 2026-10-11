@@ -3,6 +3,7 @@ import { createNotesDraftStore } from './notes-drafts.js';
 import { createNotesMotion } from './notes-motion.js';
 import { createNotesSelectionMotion } from './notes-selection-motion.js';
 import { createDialogMotionController } from './dialog-motion.js';
+import { createNotesAuth } from './notes-auth.js';
 
 const DEFAULT_SETTINGS = { autoSaveEnabled: true, autoSaveSeconds: 60, saveOnSwitch: true, collapseOnBlur: false };
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -12,6 +13,12 @@ const byId = (id) => document.getElementById(id);
 export function initializeNotes() {
     const shell = byId('notes-shell');
     if (!shell) return null;
+    const auth = createNotesAuth();
+    let pendingSettings = false;
+    let verifying = false;
+    let unlockingView = false;
+    let presentedAccess = false;
+    const authAnimations = new Set();
     const ui = Object.fromEntries(['open', 'panel', 'close', 'new', 'list', 'title', 'body', 'preview', 'empty', 'editor-pane', 'format-toolbar', 'mode-edit', 'mode-preview', 'save', 'save-status', 'countdown', 'notice', 'note-meta', 'conflict', 'uploads', 'keep-draft', 'image-input'].map((key) => [key, byId(`notes-${key}`)]));
     const tabId = newOperationId();
     const drafts = createNotesDraftStore(tabId);
@@ -49,7 +56,7 @@ export function initializeNotes() {
     function showNotice(message = '') { ui.notice.textContent = message; ui.notice.hidden = !message; }
     function isEditable() {
         const current = notes.get(state.selected);
-        return state.available && !state.closing && !motion.isBusy() && !selectionMotion.isBusy() && (!current || (current.loaded && !current.deleting && !current.resolving));
+        return auth.allowed && !unlockingView && state.available && !state.closing && !motion.isBusy() && !selectionMotion.isBusy() && (!current || (current.loaded && !current.deleting && !current.resolving));
     }
     function dirtyNotes() { return [...notes.values()].filter((note) => note.dirty); }
     function noteTasks(id) { return [...uploads.values()].filter((task) => task.noteId === id && task.status !== 'removed'); }
@@ -68,6 +75,27 @@ export function initializeNotes() {
     setInterval(announce, 10000);
 
     function updateState() {
+        const locked = !auth.allowed || unlockingView;
+        shell.dataset.locked = String(locked);
+        byId('notes-auth-form').hidden = !locked;
+        shell.querySelector('.notes-workspace').hidden = locked;
+        shell.querySelector('.notes-footer').hidden = locked;
+        byId('notes-settings-inline').hidden = locked;
+        byId('notes-lock').hidden = locked || !auth.required;
+        byId('notes-lock').disabled = state.closing || Boolean(state.saving);
+        byId('notes-auth-retry').hidden = !auth.error;
+        byId('notes-unlock').disabled = verifying || auth.retrySeconds > 0 || !auth.required || Boolean(auth.error);
+        byId('notes-password').disabled = verifying || !auth.required || Boolean(auth.error);
+        if (auth.retrySeconds) byId('notes-auth-message').textContent = `请等待 ${auth.retrySeconds} 秒后重试。`;
+        else if (auth.error) byId('notes-auth-message').textContent = auth.error;
+        else if (byId('notes-auth-message').textContent.startsWith('请等待')) byId('notes-auth-message').textContent = '';
+        if (locked) {
+            ui.save.disabled = ui.new.disabled = true;
+            ui.title.readOnly = ui.body.readOnly = true;
+            ui['save-status'].textContent = '笔记已锁定'; ui.countdown.textContent = '';
+            ui.close.disabled = false;
+            return;
+        }
         const dirty = dirtyNotes();
         const saveable = dirty.filter(canAutoSave);
         state.dirtySince = saveable.length ? Math.min(...saveable.map((note) => note.dirtySince || (note.dirtySince = Date.now()))) : 0;
@@ -99,6 +127,7 @@ export function initializeNotes() {
     }
 
     function renderList() {
+        if (!auth.allowed) { ui.list.replaceChildren(); return; }
         const focus = document.activeElement;
         const focusedId = focus?.closest?.('[data-note-id]')?.dataset.noteId;
         const focusedAction = focus?.dataset.action;
@@ -128,11 +157,12 @@ export function initializeNotes() {
     }
 
     async function renderPreview(note) {
+        if (!auth.allowed) return;
         const token = ++renderToken;
         renderer ||= import('./notes-markdown.js');
         try {
             const module = await renderer;
-            if (token !== renderToken || state.selected !== note.id || note.mode !== 'preview') return;
+            if (!auth.allowed || token !== renderToken || state.selected !== note.id || note.mode !== 'preview') return;
             await module.renderNotesMarkdown(note.body || '', ui.preview, {
                 readOnly: !isEditable(), onTaskToggle: ({ offset, checked }) => {
                     if (!isEditable() || state.selected !== note.id) return;
@@ -141,15 +171,17 @@ export function initializeNotes() {
                     renderPreview(note);
                 }
             });
-        } catch (error) { if (token === renderToken) ui.preview.textContent = note.body || ''; notify(`预览暂不可用：${error.message}`, true); }
+        } catch (error) { if (auth.allowed && token === renderToken) { ui.preview.textContent = note.body || ''; notify(`预览暂不可用：${error.message}`, true); } }
     }
 
     function renderDetail(duringSwitch = false) {
+        if (!auth.allowed) { ui.title.value = ui.body.value = ''; ui.preview.replaceChildren(); ui['note-meta'].textContent = ''; return; }
         if (selectionMotion.isBusy() && !duringSwitch) {
             if (selectionTargetId === state.selected) { updateState(); return; }
             selectionMotion.cancel();
         }
         const note = notes.get(state.selected);
+        if (!note || displayedNoteId !== note.id || note.mode === 'edit') void renderer?.then((module) => module.cancelNotesMarkdown(ui.preview));
         displayedNoteId = note?.id || null;
         ui.empty.hidden = Boolean(note); ui['editor-pane'].hidden = !note;
         if (!note) { renderToken++; updateState(); return; }
@@ -178,12 +210,15 @@ export function initializeNotes() {
     }
 
     async function refresh() {
+        if (!await auth.ready() || !auth.allowed) { updateState(); return; }
+        const epoch = auth.epoch;
         if (state.loading) return state.loading;
         const selected = notes.get(state.selected);
         if (selected && displayedNoteId === selected.id) { selected.scrollTop = ui.body.scrollTop; selected.previewScrollTop = ui.preview.scrollTop; selected.selection = [ui.body.selectionStart, ui.body.selectionEnd]; }
         state.loading = (async () => {
             try {
                 const results = await Promise.allSettled([requestNotes(), requestNotes('/status')]);
+                if (!auth.allowed || epoch !== auth.epoch) return;
                 const status = results[1].status === 'fulfilled' ? results[1].value : state.status;
                 state.status = status; state.enabled = status.enabled !== false;
                 if (status.collectionId) state.scope = status.collectionId;
@@ -220,12 +255,14 @@ export function initializeNotes() {
                 if (state.selected && !notes.get(state.selected).loaded) await fetchNote(state.selected);
                 state.loaded = true; showNotice(!state.enabled ? '笔记尚未启用，请在后端配置向导中配置笔记目录。' : !state.available ? '主存储暂不可用，当前仅可阅读与复制。' : '');
                 failedToasts.clear(); renderList(); renderDetail();
-                if (!state.recoveryChecked) { state.recoveryChecked = true; await offerDraftRecovery(); }
+                // Local recovery may wait for panel motion/storage; it must not hold the online refresh slot.
+                if (!state.recoveryChecked) { state.recoveryChecked = true; void offerDraftRecovery(); }
             } catch (error) {
+                if (!auth.allowed || epoch !== auth.epoch) return;
                 state.loaded = true; state.available = false; state.enabled = error.status !== 404;
                 showNotice(error.status === 404 ? '当前后端未启用笔记或版本过旧，请检查后端配置。' : '笔记服务暂不可用，已保留当前内容；恢复连接后可继续编辑。');
                 notify(error.message, true); updateState(); renderList();
-                if (!state.recoveryChecked) { state.recoveryChecked = true; await offerDraftRecovery(); }
+                if (!state.recoveryChecked) { state.recoveryChecked = true; void offerDraftRecovery(); }
             } finally { state.loading = null; }
         })();
         return state.loading;
@@ -235,6 +272,7 @@ export function initializeNotes() {
         if (state.open || state.closing) return;
         state.open = true; shell.dataset.view = 'list';
         await Promise.all([motion.setOpen(true), refresh()]);
+        if (!auth.allowed && auth.required) byId('notes-password').focus({ preventScroll: true });
     }
     async function collapse() {
         state.open = false; state.closing = true; ui['keep-draft'].hidden = true; updateState();
@@ -244,6 +282,7 @@ export function initializeNotes() {
     }
     async function closePanel(fromOutside = false) {
         if (!state.open || state.closing) return;
+        if (!auth.allowed) { pendingSettings = false; await collapse(); if (!fromOutside) ui.open.focus({ preventScroll: true }); return; }
         if (!hasPending()) { await collapse(); if (!fromOutside) ui.open.focus({ preventScroll: true }); return; }
         state.closing = true; renderList(); updateState();
         const result = await saveAll('close');
@@ -252,7 +291,7 @@ export function initializeNotes() {
     }
 
     async function selectNote(id) {
-        if (state.closing || !notes.has(id)) return;
+        if (!auth.allowed || state.closing || !notes.has(id)) return;
         const previous = notes.get(state.selected);
         const detailHidden = !ui['editor-pane'].getClientRects().length;
         if (previous?.id === id && (selectionMotion.isBusy() || (previous.loaded && !detailHidden))) return;
@@ -306,12 +345,16 @@ export function initializeNotes() {
     async function flushAllDrafts() { const results = await Promise.all(dirtyNotes().map(flushDraft)); return results.every(Boolean); }
 
     async function saveNote(note) {
+        const epoch = auth.epoch;
+        const current = () => auth.allowed && epoch === auth.epoch;
+        if (!current()) return false;
         if (note.saving) return note.saving;
         note.saving = (async () => {
             if (!note.dirty) return true;
             if (note.conflict || !state.available) return false;
             const tasks = noteTasks(note.id);
             await Promise.all(tasks.filter((task) => task.promise).map((task) => task.promise));
+            if (!current()) return false;
             if (noteTasks(note.id).some((task) => ['failed', 'checking', 'queued', 'uploading'].includes(task.status))) return false;
             if (!note.dirty) return true;
             const generation = note.generation;
@@ -319,14 +362,17 @@ export function initializeNotes() {
             const snapshot = { expectedRevision: note.revision || null, operationId: newOperationId(), title: note.title, body: note.body };
             const releaseWrite = await acquireWrite();
             try {
+                if (!current()) return false;
                 let result;
                 try { result = await requestNotes(`/${note.id}`, 'PUT', snapshot); }
                 catch (error) {
                     if (error.status !== 0) throw error;
+                    if (!current()) throw error;
                     // A timed-out write might have committed. Verify exact content before retrying.
                     try { const current = await requestNotes(`/${note.id}`); if (current.note.title === snapshot.title && current.note.body === snapshot.body) result = current; } catch { /* Keep original transport error if verification is unavailable. */ }
                     if (!result) throw error;
                 }
+                if (!current()) return false;
                 note.revision = result.note.revision; note.updatedAt = result.note.updatedAt; note.isNew = false; note.conflict = false;
                 state.status.backupPending = result.backupPending ? Math.max(1, state.status.backupPending || 0) : state.status.backupPending;
                 if (result.order && !state.orderTimer && !state.ordering) {
@@ -337,6 +383,7 @@ export function initializeNotes() {
                 if (note.generation === generation) {
                     note.dirty = false; clearTimeout(note.draftTimer); clearTimeout(note.draftMaxTimer);
                     await drafts.remove(state.scope, note.id).catch(() => {});
+                    if (!current()) return false;
                     for (const task of tasks) if (task.status === 'uploaded') {
                         if (Array.isArray(result.note.attachments) ? result.note.attachments.includes(task.id) : snapshot.body.includes(task.url)) task.status = 'committed';
                         else { task.status = 'removed'; requestNotes(`/uploads/${task.id}/discard`, 'POST', {}).catch((error) => notify(error.message, true)); uploads.delete(task.id); }
@@ -353,7 +400,9 @@ export function initializeNotes() {
         try { return await note.saving; } finally { note.saving = null; renderList(); if (state.selected === note.id) { ui.conflict.hidden = !note.conflict; renderUploads(); } updateState(); }
     }
     async function saveAll(reason = 'manual') {
-        if (state.saving) { await state.saving; if (reason === 'close' && dirtyNotes().some((note) => !note.conflict)) return saveAll(reason); return { failed: dirtyNotes().length }; }
+        const epoch = auth.epoch;
+        if (!auth.allowed) return { failed: dirtyNotes().length };
+        if (state.saving) { await state.saving; if (auth.allowed && auth.epoch === epoch && reason === 'close' && dirtyNotes().some((note) => !note.conflict)) return saveAll(reason); return { failed: dirtyNotes().length }; }
         const batch = dirtyNotes().filter((note) => !note.deleting && !note.resolving && (reason !== 'auto' || canAutoSave(note)));
         if (!batch.length) return { failed: 0, saved: 0 };
         state.saving = (async () => {
@@ -362,7 +411,7 @@ export function initializeNotes() {
             const ready = batch.filter((note) => !noteTasks(note.id).some((task) => task.promise));
             const waiting = batch.filter((note) => !ready.includes(note));
             let index = 0;
-            const record = async (note) => { if (await saveNote(note)) saved++; else failed++; };
+            const record = async (note) => { if (auth.allowed && epoch === auth.epoch && await saveNote(note)) saved++; else failed++; };
             async function worker() { while (index < ready.length) await record(ready[index++]); }
             await Promise.all([worker(), worker(), ...waiting.map(record)]);
             if (reason === 'manual') notify(failed ? `已保存 ${saved} 篇，${failed} 篇尚未同步。` : `已保存 ${saved} 篇笔记${dirtyNotes().length ? '，仍有新修改待同步。' : ''}`, Boolean(failed), false);
@@ -382,14 +431,16 @@ export function initializeNotes() {
 
     async function deleteNote(id) {
         if (!isEditable()) return;
+        const epoch = auth.epoch;
         const note = notes.get(id); state.suppressBlur = true;
         const confirmed = window.confirm(`删除“${displayTitle(note)}”？此操作无法撤销。`); state.suppressBlur = false;
         if (!confirmed) return;
         note.deleting = true; updateState(); renderList();
         try {
             if (note.saving) await note.saving;
+            if (!auth.allowed || epoch !== auth.epoch) return;
             if (!note.isNew) { const result = await requestNotes(`/${id}`, 'DELETE', { expectedRevision: note.revision, operationId: newOperationId() }); if (result.order) state.orderRevision = result.order.revision; }
-            for (const task of noteTasks(id)) await removeUpload(task);
+            for (const task of noteTasks(id)) { if (!auth.allowed || epoch !== auth.epoch) return; await removeUpload(task); }
             clearTimeout(note.draftTimer); clearTimeout(note.draftMaxTimer); await drafts.remove(state.scope, id).catch(() => {});
             const index = state.order.indexOf(id); state.order = state.order.filter((item) => item !== id); notes.delete(id);
             if (state.selected === id) { state.selected = state.order[Math.min(index, state.order.length - 1)] || null; if (state.selected && !notes.get(state.selected).loaded) await fetchNote(state.selected); }
@@ -400,12 +451,14 @@ export function initializeNotes() {
     function moveNote(id, delta) { const index = state.order.indexOf(id); const target = index + delta; if (target < 0 || target >= state.order.length || !isEditable()) return; [state.order[index], state.order[target]] = [state.order[target], state.order[index]]; scheduleOrder(); }
     function scheduleOrder() { state.orderGeneration++; renderList(); clearTimeout(state.orderTimer); state.orderTimer = setTimeout(commitOrder, 250); }
     async function commitOrder() {
+        if (!auth.allowed) return;
         state.orderTimer = 0; if (state.ordering) { scheduleOrder(); return; }
         state.ordering = true; const generation = state.orderGeneration;
         try { const result = await requestNotes('/order', 'PATCH', { expectedRevision: state.orderRevision, operationId: newOperationId(), ids: state.order.filter((id) => !notes.get(id)?.isNew) }); state.orderRevision = result.order.revision; }
-        catch (error) { notify(error.status === 409 ? '其他页面已调整顺序，已重新读取服务器顺序。' : error.message, true); state.ordering = false; clearTimeout(state.orderTimer); state.orderTimer = 0; await refresh(); return; }
+        catch (error) { notify(error.status === 409 ? '其他页面已调整顺序，已重新读取服务器顺序。' : error.message, true); state.ordering = false; clearTimeout(state.orderTimer); state.orderTimer = 0; await refresh(); return false; }
         finally { state.ordering = false; }
         if (state.orderGeneration !== generation) scheduleOrder();
+        return true;
     }
 
     function setMode(mode) { const note = notes.get(state.selected); if (!note) return; note.mode = mode; renderDetail(); }
@@ -427,25 +480,27 @@ export function initializeNotes() {
         task.resolve = resolve; uploads.set(task.id, task); markDirty(note); renderUploads(); pumpUploads();
     }
     async function pumpUploads() {
-        if (state.uploadRunning) return;
+        if (state.uploadRunning || !auth.allowed) return;
+        const epoch = auth.epoch;
         state.uploadRunning = true;
         try {
-            while (true) {
+            while (auth.allowed && auth.epoch === epoch) {
                 const task = [...uploads.values()].find((item) => item.status === 'queued'); if (!task) break;
                 task.status = 'uploading'; renderUploads(); let result;
                 for (let attempt = 0; attempt < 2; attempt++) {
                     try { result = await uploadNoteImage(task, (progress) => { task.progress = progress; renderUploads(); }); break; }
                     catch (error) {
                         if (task.status === 'removed') break;
+                        if (!auth.allowed || epoch !== auth.epoch) break;
                         if (attempt === 0 && (!error.status || error.status >= 500)) {
                             try { const received = await requestNotes(`/uploads/${task.id}`); if (received.status === 'uploaded' && received.url) { result = received; break; } } catch { /* Stable upload ID makes the retry idempotent. */ }
-                            await sleep(2000); continue;
+                            await sleep(2000); if (!auth.allowed || epoch !== auth.epoch) break; continue;
                         }
                         task.error = error.message; task.status = 'failed'; notify(error.message, true);
                     }
                 }
                 if (task.status !== 'removed') {
-                    if (result) finishUpload(task, result);
+                    if (result && auth.allowed && epoch === auth.epoch) finishUpload(task, result);
                     else task.status = 'failed';
                 }
                 task.resolve?.(); task.promise = null;
@@ -483,6 +538,7 @@ export function initializeNotes() {
         uploads.delete(task.id); const note = notes.get(task.noteId); if (note) scheduleDraft(note); renderUploads(); updateState();
     }
     function renderUploads() {
+        if (!auth.allowed) { ui.uploads.replaceChildren(); return; }
         ui.uploads.replaceChildren(); const tasks = noteTasks(state.selected).filter((task) => !['committed', 'uploaded'].includes(task.status)); ui.uploads.hidden = !tasks.length;
         for (const task of tasks) {
             const row = document.createElement('div'); row.className = 'notes-upload-item';
@@ -511,11 +567,14 @@ export function initializeNotes() {
         finally { old.resolving = false; updateState(); }
     }
     async function offerDraftRecovery() {
+        const epoch = auth.epoch;
         await motion.settled();
-        if (!state.open) { state.recoveryChecked = false; return; }
+        if (!auth.allowed || !state.open) { state.recoveryChecked = false; return; }
         try {
             channel?.postMessage({ type: 'query', tabId }); await sleep(300);
+            if (!auth.allowed || epoch !== auth.epoch) return;
             const recoverable = (await drafts.list(state.scope)).filter((draft) => draft.tabId !== tabId && (!activeTabs.has(draft.tabId) || Date.now() - activeTabs.get(draft.tabId) > 30000));
+            if (!auth.allowed || epoch !== auth.epoch) return;
             if (!recoverable.length) return;
             const { dialog, content } = makeDialog('notes-recovery-dialog', '发现本机恢复草稿');
             const intro = document.createElement('p'); intro.textContent = '这些内容尚未确认同步到服务器。恢复后仍需保存；关闭此窗口会保留草稿供下次处理。'; content.append(intro);
@@ -525,13 +584,16 @@ export function initializeNotes() {
                 const preview = document.createElement('p'); preview.textContent = draft.body.slice(0, 180) || '（空正文）';
                 const restore = document.createElement('button'); restore.type = 'button'; restore.textContent = state.available ? '恢复草稿' : '查看草稿';
                 restore.addEventListener('click', async () => {
+                    if (!auth.allowed || epoch !== auth.epoch) return;
                     restore.disabled = true;
                     let remote = notes.get(draft.id);
                     if (remote && !remote.loaded) { try { remote = await fetchNote(draft.id); } catch { /* Draft can still be viewed in read-only state. */ } }
+                    if (!auth.allowed || epoch !== auth.epoch) return;
                     if (remote?.dirty) { notify('当前窗口已有这篇笔记的未保存内容，请先处理后再恢复。', true, false); restore.disabled = false; return; }
                     const note = { ...draft, mode: 'edit', loaded: true, dirty: true, dirtySince: Date.now(), generation: 1, isNew: !remote && draft.isNew, unverifiedRecovery: !state.available, conflict: Boolean((remote && remote.revision !== draft.revision) || (!remote && !draft.isNew)) };
                     notes.set(note.id, note); if (!state.order.includes(note.id)) state.order.unshift(note.id); state.selected = note.id; state.dirtySince ||= Date.now(); shell.dataset.view = 'detail';
                     for (const oldTask of draft.uploads || []) {
+                        if (!auth.allowed || epoch !== auth.epoch) return;
                         const task = { ...oldTask, noteId: note.id, status: 'checking', progress: 0 }; uploads.set(task.id, task);
                         await recheckUpload(task);
                     }
@@ -557,12 +619,15 @@ export function initializeNotes() {
     settingsUI.content.innerHTML = `<form id="notes-settings-form"><fieldset><legend>保存与交互</legend><label class="notes-setting-check"><input type="checkbox" name="autoSaveEnabled"> 定时自动保存</label><label class="notes-setting-number">保存间隔（秒）<input type="number" name="autoSaveSeconds" min="10" max="3600" step="1" required></label><label class="notes-setting-check"><input type="checkbox" name="saveOnSwitch"> 切换笔记时保存全部修改</label><label class="notes-setting-check"><input type="checkbox" name="collapseOnBlur"> 点击或聚焦面板外部时自动收起</label><p class="notes-helper">偏好在设备间共享。切换应用或浏览器标签页不会自动收起。</p></fieldset><fieldset><legend>存储与备份</legend><dl class="notes-storage-paths"><dt>主数据目录</dt><dd id="notes-primary-path">读取中…</dd><dt>图片与备份目录</dt><dd id="notes-backup-path">读取中…</dd></dl><p id="notes-backup-status" role="status"></p><p class="notes-helper">配置入口路径修改需重启；链接重指后自动检测，备份新目标需检查并应用重新绑定。</p><div class="notes-dialog-actions"><button type="button" id="notes-backup-retry">立即重试备份</button><button type="button" id="notes-backup-check">检查／恢复备份</button></div></fieldset><div class="notes-dialog-actions"><span id="notes-settings-feedback" role="status"></span><button type="submit" class="notes-primary">保存设置</button></div></form>`;
     const settingsForm = byId('notes-settings-form');
     async function openSettings(event) {
+        if (!await auth.ready() || !auth.allowed) { pendingSettings = true; await openPanel(); return; }
         if (settingsMotion.isOpen()) return;
         const trigger = event?.currentTarget || document.activeElement;
         settingsReturnFocus = trigger === byId('notes-settings-button') ? byId('page-settings-button') : trigger;
         settingsMotion.show();
+        const epoch = auth.epoch;
         try {
             const [settings, status] = await Promise.allSettled([requestNotes('/settings'), requestNotes('/status?refresh=1')]);
+            if (!auth.allowed || epoch !== auth.epoch) return;
             if (status.status === 'fulfilled') state.status = status.value;
             if (settings.status === 'fulfilled') state.settings = { ...DEFAULT_SETTINGS, ...settings.value.settings };
             populateSettings();
@@ -572,6 +637,7 @@ export function initializeNotes() {
         catch (error) { byId('notes-settings-feedback').textContent = error.message; }
     }
     function populateSettings() {
+        if (!auth.allowed) return;
         for (const key of ['autoSaveEnabled', 'saveOnSwitch', 'collapseOnBlur']) settingsForm.elements[key].checked = state.settings[key];
         settingsForm.elements.autoSaveSeconds.value = state.settings.autoSaveSeconds;
         const pathLabel = (key) => { const entry = state.status.paths?.[key]; const target = state.status.resolvedPaths?.[key]; return entry ? `${entry} → ${target || (state.status.pathProbePending ? '解析中…' : '目标不可用')}` : '尚未配置'; };
@@ -589,7 +655,8 @@ export function initializeNotes() {
     });
     byId('notes-backup-retry').addEventListener('click', async () => { try { await requestNotes('/backup/retry', 'POST', {}); byId('notes-backup-status').textContent = '已请求立即重试备份'; } catch (error) { byId('notes-backup-status').textContent = error.message; } });
     async function waitJob(jobId, onStatus) {
-        for (;;) { const { job } = await requestNotes(`/jobs/${jobId}`); if (job.status === 'complete') return job.result; if (job.status === 'failed') throw new Error(job.message || '备份操作失败'); onStatus?.(job); await sleep(1000); }
+        const epoch = auth.epoch;
+        for (;;) { if (!auth.allowed || epoch !== auth.epoch) throw new Error('笔记授权已失效'); const { job } = await requestNotes(`/jobs/${jobId}`); if (job.status === 'complete') return job.result; if (job.status === 'failed') throw new Error(job.message || '备份操作失败'); onStatus?.(job); await sleep(1000); }
     }
     byId('notes-backup-check').addEventListener('click', async () => {
         const button = byId('notes-backup-check'); button.disabled = true;
@@ -617,6 +684,80 @@ export function initializeNotes() {
     });
 
     ui.open.addEventListener('click', openPanel); ui.close.addEventListener('click', () => closePanel()); ui.new.addEventListener('click', newNote); ui.save.addEventListener('click', () => saveAll());
+    function animateAccess(surface, entering) {
+        if (!state.open || matchMedia('(prefers-reduced-motion: reduce)').matches || !surface.animate) return Promise.resolve();
+        const animation = surface.animate(entering ? [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }] : [{ opacity: 1 }, { opacity: 0 }], { duration: entering ? 160 : 120, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+        authAnimations.add(animation);
+        return animation.finished.catch(() => {}).finally(() => authAnimations.delete(animation));
+    }
+    auth.subscribe(() => {
+        for (const animation of authAnimations) animation.cancel();
+        authAnimations.clear();
+        const changed = presentedAccess !== auth.allowed;
+        presentedAccess = auth.allowed;
+        if (!auth.allowed) {
+            unlockingView = false;
+            state.available = false; state.closing = false; renderToken++; selectionMotion.cancel();
+            clearTimeout(state.orderTimer); state.orderTimer = 0;
+            void flushAllDrafts();
+            for (const task of uploads.values()) { if (task.status === 'queued') { task.status = 'failed'; task.message = '请解锁后重试上传。'; task.resolve?.(false); } }
+            ui.title.value = ui.body.value = ''; ui.preview.replaceChildren(); ui.list.replaceChildren(); ui.uploads.replaceChildren();
+            ui['image-input'].value = ''; settingsForm.reset();
+            ui['note-meta'].textContent = ''; showNotice();
+            toast.hidden = true; ui['keep-draft'].hidden = true; ui.conflict.hidden = true;
+            document.querySelectorAll('.notes-dialog').forEach((dialog) => { if (dialog.open) dialog.close(); });
+            settingsUI.content.querySelectorAll('dd,p[role="status"],#notes-settings-feedback').forEach((node) => { node.textContent = ''; });
+            void renderer?.then((module) => module.cancelNotesMarkdown(ui.preview));
+            updateState();
+            if (changed) void animateAccess(byId('notes-auth-form'), true);
+            return;
+        }
+        if (changed && state.open && !byId('notes-auth-form').hidden) {
+            const epoch = auth.epoch;
+            unlockingView = true; updateState();
+            void animateAccess(byId('notes-auth-form'), false).then(() => {
+                if (!auth.allowed || epoch !== auth.epoch) return;
+                unlockingView = false; updateState(); renderList(); renderDetail();
+                void animateAccess(shell.querySelector('.notes-workspace'), true);
+            });
+            return;
+        }
+        updateState();
+    });
+    byId('notes-auth-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (verifying || auth.retrySeconds || auth.error) return;
+        verifying = true; updateState();
+        const input = byId('notes-password'); const password = input.value; input.value = '';
+        try {
+            if (!await auth.unlock(password)) return;
+            byId('notes-auth-message').textContent = '';
+            await refresh();
+            for (const task of uploads.values()) if (task.status === 'failed' && task.file) task.message = '请重试或移除未完成的上传。';
+            if (pendingSettings) { pendingSettings = false; await openSettings({ currentTarget: byId('notes-settings-button') }); }
+        } catch (error) { byId('notes-auth-message').textContent = error.message; input.focus({ preventScroll: true }); }
+        finally { verifying = false; updateState(); if (!auth.allowed) input.focus({ preventScroll: true }); }
+    });
+    byId('notes-auth-retry').addEventListener('click', async () => { await auth.retry(); updateState(); if (auth.allowed) await refresh(); });
+    byId('notes-lock').addEventListener('click', async () => {
+        if (!auth.allowed || state.closing) return;
+        const epoch = auth.epoch;
+        state.closing = true; updateState();
+        try {
+            while (state.ordering) { await sleep(50); if (!auth.allowed || epoch !== auth.epoch) return; }
+            if (state.orderTimer) {
+                clearTimeout(state.orderTimer);
+                if (!await commitOrder()) { notify('顺序尚未同步，请重试后再锁定。', true); return; }
+            }
+            const result = await saveAll('close');
+            if (!auth.allowed || epoch !== auth.epoch) return;
+            if (hasPending() || result.failed) { notify('尚有内容未同步，请处理后再锁定。', true); return; }
+            await auth.lock();
+            notes.clear(); uploads.clear(); state.order = []; state.selected = null; state.loaded = false; state.recoveryChecked = false;
+            byId('notes-password').focus({ preventScroll: true });
+        } catch (error) { notify(`尚未锁定：${error.message}`, true); }
+        finally { state.closing = false; updateState(); }
+    });
     ui['keep-draft'].addEventListener('click', async () => { if (await flushAllDrafts()) { await collapse(); notify('草稿保留在本机，尚未同步到服务器。'); } });
     byId('notes-settings-button').addEventListener('click', openSettings); byId('notes-settings-inline').addEventListener('click', openSettings);
     byId('notes-back').addEventListener('click', () => { shell.dataset.view = 'list'; if (state.settings.saveOnSwitch) saveAll('switch'); });
@@ -682,7 +823,7 @@ export function initializeNotes() {
             state.lastStatusRead = Date.now(); try { state.status = await requestNotes('/status'); if (state.status.primaryAvailable === false) { state.available = false; renderDetail(); renderList(); } } catch { state.available = false; updateState(); }
         }
     }, 1000);
-    setInterval(() => { for (const task of uploads.values()) if (task.status === 'uploaded') requestNotes(`/uploads/${task.id}/touch`, 'POST', {}).catch(() => {}); }, 30000);
+    setInterval(() => { if (!auth.allowed) return; for (const task of uploads.values()) if (task.status === 'uploaded') requestNotes(`/uploads/${task.id}/touch`, 'POST', {}).catch(() => {}); }, 30000);
     updateState();
     return { open: openPanel, refresh, saveAll };
 }
