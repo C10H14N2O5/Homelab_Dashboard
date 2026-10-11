@@ -82,6 +82,9 @@ FAVICON_PATH = "/api/favicon"
 FAVICON_ASSET_PATH = "/api/favicon.svg"
 PAGE_ICON_PATH = "/api/page-icon"
 PAGE_ICON_ASSET_PATH = "/api/page-icon.svg"
+ICON_PREVIEW_PATHS = {"/api/favicon/preview", "/api/page-icon/preview"}
+ICON_IMAGE_PATHS = {"/api/favicon/image", "/api/page-icon/image", "/api/page-icon/poster.png"}
+ICON_RESOURCE_PATHS = ICON_IMAGE_PATHS | {FAVICON_ASSET_PATH, PAGE_ICON_ASSET_PATH}
 HEALTH_PATH = "/healthz"
 CONTROL_PATH = "/_control/shutdown"
 MAX_PATCH_BODY = 4 * 1024
@@ -307,6 +310,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return self.path in {API_PATH, CARDS_PATH, FAVICON_PATH, PAGE_ICON_PATH}
         if self.command != "POST":
             return False
+        if self.path in ICON_PREVIEW_PATHS:
+            return True
         if urlsplit(self.path).path == BACKGROUND_UPLOAD_PATH:
             return True
         return self.path in {
@@ -408,8 +413,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
     def _write_notes_auth_wait(self, retry_after, value):
         self._write_json(429, value, {"Retry-After": retry_after})
 
-    def _write_favicon_svg(self, icon_svg: str, content_hash: str) -> None:
-        body = icon_svg.encode("utf-8")
+    def _write_favicon_svg(self, icon_svg: str | bytes, content_hash: str, mime_type="image/svg+xml") -> None:
+        body = icon_svg.encode("utf-8") if isinstance(icon_svg, str) else icon_svg
         etag = f'"sha256-{content_hash}"'
         if self.headers.get("If-None-Match") == etag:
             self.send_response(HTTPStatus.NOT_MODIFIED)
@@ -425,7 +430,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "private, max-age=31536000, immutable")
         self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+        self.send_header("Content-Type", mime_type + ("; charset=utf-8" if mime_type == "image/svg+xml" else ""))
         self.send_header("Content-Length", str(len(body)))
         if self.close_connection:
             self.send_header("Connection", "close")
@@ -873,7 +878,7 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         self._write_json(HTTPStatus.OK, state)
 
     def _svg_icon_store(self, path: str) -> tuple[FaviconStore, str]:
-        if path in {PAGE_ICON_PATH, PAGE_ICON_ASSET_PATH}:
+        if path == PAGE_ICON_PATH or path.startswith(PAGE_ICON_PATH + "/") or path == PAGE_ICON_ASSET_PATH:
             return self.server.page_icon_store, "page_icon"
         return self.server.favicon_store, "favicon"
 
@@ -884,6 +889,8 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             state = store.update(request)
+            if self.headers.get("X-Icon-Format-Version") == "2":
+                state = store.get(modern=True)
         except InvalidFavicon as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
             return
@@ -916,7 +923,11 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, f"{error_prefix}_not_found")
             return
         try:
-            icon_svg, content_hash = store.get_asset(query[0][1])
+            if parsed_path.path in ICON_IMAGE_PATHS:
+                icon_svg, mime_type, content_hash = store.get_image(query[0][1], poster=parsed_path.path.endswith("/poster.png"))
+            else:
+                icon_svg, content_hash = store.get_asset(query[0][1])
+                mime_type = "image/svg+xml"
         except FaviconNotFound:
             self._error(HTTPStatus.NOT_FOUND, f"{error_prefix}_not_found")
             return
@@ -927,23 +938,38 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self.server.logger.exception("GET %s failed", parsed_path.path)
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
             return
-        self._write_favicon_svg(icon_svg, content_hash)
+        self._write_favicon_svg(icon_svg, content_hash, mime_type)
+
+    def _handle_icon_preview(self):
+        request = self._read_dashboard_json(MAX_FAVICON_REQUEST_BODY)
+        if request is None:
+            return
+        store, _ = self._svg_icon_store(self.path)
+        try:
+            result = store.prepare(request)
+        except InvalidFavicon as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        self._write_json(HTTPStatus.OK, result)
 
     def do_GET(self) -> None:
         if handle_notes_request(self):
             return
         parsed_path = urlsplit(self.path)
+        if parsed_path.path in ICON_PREVIEW_PATHS:
+            self._allow("POST")
+            return
         if self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             store, error_prefix = self._svg_icon_store(self.path)
             try:
-                self._write_json(HTTPStatus.OK, store.get())
+                self._write_json(HTTPStatus.OK, store.get(modern=True) if self.headers.get("X-Icon-Format-Version") == "2" else store.get())
             except FaviconStateUnavailable:
                 self._error(HTTPStatus.SERVICE_UNAVAILABLE, f"{error_prefix}_state_unavailable")
             except Exception:
                 self.server.logger.exception("GET %s failed", self.path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal server error")
             return
-        if parsed_path.path in {FAVICON_ASSET_PATH, PAGE_ICON_ASSET_PATH}:
+        if parsed_path.path in ICON_RESOURCE_PATHS:
             self._handle_favicon_asset(parsed_path)
             return
         if self.path == CARDS_PATH:
@@ -1050,7 +1076,10 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if self.path == BACKGROUND_FILES_PATH:
             self._allow("GET")
             return
-        if urlsplit(self.path).path in {FAVICON_ASSET_PATH, PAGE_ICON_ASSET_PATH}:
+        if urlsplit(self.path).path in ICON_PREVIEW_PATHS:
+            self._allow("POST")
+            return
+        if urlsplit(self.path).path in ICON_RESOURCE_PATHS:
             self._allow("GET")
             return
         if self.path != API_PATH:
@@ -1086,10 +1115,13 @@ class StateRequestHandler(BaseHTTPRequestHandler):
         if handle_notes_request(self):
             return
         parsed_path = urlsplit(self.path)
+        if self.path in ICON_PREVIEW_PATHS:
+            self._handle_icon_preview()
+            return
         if self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             self._allow("GET, PATCH")
             return
-        if parsed_path.path in {FAVICON_ASSET_PATH, PAGE_ICON_ASSET_PATH}:
+        if parsed_path.path in ICON_RESOURCE_PATHS:
             self._allow("GET")
             return
         if self.path == CARDS_INITIALIZE_PATH:
@@ -1170,7 +1202,9 @@ class StateRequestHandler(BaseHTTPRequestHandler):
             self._allow("GET, PATCH")
         elif self.path in {FAVICON_PATH, PAGE_ICON_PATH}:
             self._allow("GET, PATCH")
-        elif parsed_path.path in {FAVICON_ASSET_PATH, PAGE_ICON_ASSET_PATH}:
+        elif parsed_path.path in ICON_PREVIEW_PATHS:
+            self._allow("POST")
+        elif parsed_path.path in ICON_RESOURCE_PATHS:
             self._allow("GET")
         elif self.path == CARDS_PATH:
             self._allow("GET, PATCH")

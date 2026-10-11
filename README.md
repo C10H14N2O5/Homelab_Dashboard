@@ -55,7 +55,7 @@ zoraxy-homelab-dashboard/
 │   ├── main.py                  # 稳定的薄入口；转交 homelab_state.launcher.main
 │   ├── homelab_state/
 │   │   ├── core.py              # 共享常量、异常、校验和原子 JSON 写入
-│   │   ├── config.py            # 严格 v3 配置模型、解析和路径边界
+│   │   ├── config.py            # 严格 v4 配置、v3 兼容和路径边界
 │   │   ├── backgrounds.py       # 背景状态、上传、缩略图和删除
 │   │   ├── cards.py             # 卡片模型、SVG 清洗、原子初始化和修订号存储
 │   │   ├── favicon.py           # favicon 与页面图标共用的状态存储、哈希和资源读取
@@ -133,7 +133,7 @@ GitHub 公共镜像保留私人 Gitea 历史的提交顺序、作者名、作者
 
 设置窗口显示“入口 → 真实目标”，打开时强制进行最多 5 秒的独立探测，普通状态采用 30 秒缓存；NAS 探测超时仅影响状态文案，不阻塞正文保存。状态接口 `/api/notes/status` 增加 `resolvedPaths`、`entryLinks`、`primaryErrorCode`、`backupErrorCode` 与 `pathProbePending`；`?refresh=1` 强制刷新，实际存储操作重新解析并校验，不使用状态缓存授权写入。
 
-升级 EXE 后，可把备份配置改为指向现有 NAS 目录的本地链接，属于零数据迁移：重启加载配置，确认路径显示和图片／备份可用。`backgroundDir` 继续支持 NAS 链接；壁纸目标的同级目录不属于公开路径。回退链接配置可改回原真实路径并重启。接口版本为 13；使用旧 EXE 回退时需停止新版后端并恢复匹配的前端文件，保留绑定与笔记数据。
+升级 EXE 后，可把备份配置改为指向现有 NAS 目录的本地链接，属于零数据迁移：重启加载配置，确认路径显示和图片／备份可用。`backgroundDir` 继续支持 NAS 链接；壁纸目标的同级目录不属于公开路径。回退链接配置可改回原真实路径并重启。接口版本为 15；使用旧 EXE 回退时需停止新版后端并恢复匹配的前端文件，保留绑定与笔记数据。
 
 正文保存或笔记删除后，无任何已保存笔记引用的图片及时清理，不设置长期草稿保留期。当前未提交上传按临时任务处理；旧草稿或旧备份中的图片引用可能已失效，恢复时显示缺图提示。NAS 不可用期间记录清理任务，恢复后重新核对引用再删除。
 
@@ -228,11 +228,11 @@ Hero 标题下方提供一枚默认收起的小胶囊，当前引擎的图标、
 
 ### 网页设置与图标
 
-页脚“网页设置”按钮在上方打开包含“修改卡片”、“网站图标”和“页面图标”的菜单，支持方向键、Home、End、Escape、外部点击和焦点离开。网站图标编辑器只接受本地 `.svg` 文件，选择后先在当前页面形成经过清洗的安全预览草稿，点击保存后才写入服务器；移除已有图标需要单独二次确认。写入期间会锁定重复操作，关闭后焦点回到“网页设置”，减少动态效果时不等待过渡。
+页脚“网页设置”按钮提供卡片、网站图标、页面图标及笔记设置，支持方向键、Home、End、Escape、外部点击和焦点离开。两个图标编辑器支持 SVG 和常见图片，选择后生成经过检查的最终草稿，点击保存后才写入服务器；移除已有图标需要单独二次确认。写入期间锁定重复操作，关闭后焦点回到“网页设置”，减少动态效果时不等待过渡。格式、动画与限制见“多格式网站与页面图标”。
 
-全站 favicon 独立保存在 Web Root 之外的 `DashboardFavicon.json`，不创建公开 `favicon.svg`，也不占用卡片修订号。页面加载时读取 `GET /api/favicon`，按完整 SHA-256 构造 `/api/favicon.svg?v=...` 并维护 `<link rel="icon" type="image/svg+xml">`；保存或移除所在页面立即更新，其它标签页和设备在下次加载时同步。旧后端、网络故障或尚未配置时保持无图标，主页和其它功能继续可用；网站图标编辑器仍可打开并说明 API 状态，但不可写入。
+全站 favicon 独立保存在 Web Root 之外的 `DashboardFavicon.json`，不创建公开图标文件，也不占用卡片修订号。页面加载时读取 `GET /api/favicon`，按完整 SHA-256 构造资源地址并按实际 MIME 与尺寸维护 `<link rel="icon">`；保存或移除所在页面立即更新，其它标签页和设备在下次加载时同步。API 不支持、网络故障或尚未配置时保持无图标；旧后端支持原有 v1 API 时仍可管理 SVG。
 
-“页面图标”独立控制 HomeLab 标题左侧和宽屏左右下角的三个装饰图标，与 favicon 互不覆盖。两个编辑器复用 SVG 校验、草稿预览、保存和移除流程。页面图标通过 `GET/PATCH /api/page-icon` 管理，资源为 `/api/page-icon.svg?v=<SHA-256>`，私有状态独立保存在 `DashboardPageIcon.json`，不修改 `DashboardFavicon.json`。
+“页面图标”独立控制 HomeLab 标题左侧和宽屏左右下角的三个装饰图标，与 favicon 互不覆盖。两个编辑器复用校验、草稿预览、保存和移除流程。页面图标通过 `GET/PATCH /api/page-icon` 管理，v2 资源为 `/api/page-icon/image?v=<SHA-256>`，原 SVG 地址继续兼容。私有状态独立保存在 `DashboardPageIcon.json`，不修改 `DashboardFavicon.json`。
 
 未配置、移除自定义图标、API 不可用或 SVG 加载失败时，页面图标回退到版本管理中的 `assets/icons/homepage-badge.svg`。标题图标按大写字母高度和基线对齐，间距为 `0.22em`；两枚角落图标只在宽度至少 1440px 且横屏时显示，边距为 16px，默认宽度为 `2.65rem`。自定义 SVG 会按透明区域计算显示边界并等比例缩放，特别宽或高的图形会限制尺寸以免遮挡内容；SVG 母版不变。三个装饰不接收点击或焦点，不重复朗读。其它页面在刷新后读取共享的页面图标配置。
 
@@ -398,7 +398,7 @@ Content-Type: application/json
 - `POST /api/cards/initialize`：只在状态文件缺失时一次性原子导入静态 Services 与 Quick Links；
 - `PATCH /api/cards`：携带预期修订号整批替换一个频道，冲突时拒绝静默覆盖；
 - `GET /api/favicon`：读取是否已配置、更新时间和当前 SVG 的完整内容哈希；
-- `PATCH /api/favicon`：上传、替换或以 `iconSvg: null` 移除全站 SVG favicon；
+- `PATCH /api/favicon`：上传、替换或移除 favicon，兼容 v1 SVG 与 v2 多格式图标；
 - `GET /api/favicon.svg?v=<完整 SHA-256>`：仅在哈希与当前配置一致时返回清洗后的 SVG 资源；
 - `POST /api/background-files/upload?name=...`：流式接收、验证并保存一张图片；
 - `POST /api/background-files/remove`：将图片移入回收站，必要时处理带短时令牌的永久删除；
@@ -469,7 +469,7 @@ Content-Type: application/json
 }
 ```
 
-笔记相对路径以配置文件目录为基准，`backupDir` 可设为 `\\\\NAS\\share\\notes` 形式的 JSON 字符串，SMB 权限由运行后端的 Windows 账号提供，网页不保存 NAS 密码。入口和最终目标均不得重叠或位于公开目录；主目录按解析后目标判断本机磁盘，禁止 UNC 与映射网络盘。配置版本保持 v4，新增可选密码字段，接口版本为 14。配置字符串修改需重启，链接重指无需修改配置或重启，具体绑定与热切换行为见“笔记”。向导提示支持链接，最多 5 秒的目录探测失败仅警告，配置仍保存；使用前须自行准备存在的目录或链接。未启用或旧后端时笔记入口提示不可用，不影响其他主页功能。
+笔记相对路径以配置文件目录为基准，`backupDir` 可设为 `\\\\NAS\\share\\notes` 形式的 JSON 字符串，SMB 权限由运行后端的 Windows 账号提供，网页不保存 NAS 密码。入口和最终目标均不得重叠或位于公开目录；主目录按解析后目标判断本机磁盘，禁止 UNC 与映射网络盘。配置版本保持 v4，新增可选密码字段，接口版本为 15。配置字符串修改需重启，链接重指无需修改配置或重启，具体绑定与热切换行为见“笔记”。向导提示支持链接，最多 5 秒的目录探测失败仅警告，配置仍保存；使用前须自行准备存在的目录或链接。未启用或旧后端时笔记入口提示不可用，不影响其他主页功能。
 
 `bingInternationalProxy` 只接受无协议、无凭据、无路径的回环 IP 与 1–65535 端口，默认 `127.0.0.1:7890`；代理必须支持 HTTPS CONNECT。`probeConnectAddress` 只允许回环 IP，`probeTimeoutSeconds` 允许 1–5 秒。服务状态请求示例：
 
@@ -531,6 +531,18 @@ D:/Zoraxy/www/html/backgrounds/
 ```
 
 引导会验证 `bg.jpg`、公开目录边界、Bing 国际版回环代理、回环探测入口、域名后缀和超时，并提供笔记启用与两条目录配置；最后询问是否在当前用户 `shell:startup` 中创建快捷方式。旧配置可通过向导升级到 v4，现有状态文件继续使用。
+
+### 多格式网站与页面图标
+
+两类图标均支持 SVG、PNG/APNG、JPEG、WebP、GIF、ICO，仍分别保存在非公开的 `DashboardFavicon.json` 和 `DashboardPageIcon.json`。选择文件时后端生成最终草稿，只有点击保存才写入；网站图标取静态画面，居中补透明留白，不裁掉图案。页面图标保留动画，完整等比显示，按全部帧计算透明边界；任意弹窗打开或减少动态效果时显示首帧，弹窗关闭后重新播放。移除页面图标仍恢复默认金边徽章。
+
+静态位图规范化为 PNG，页面动图规范化为无损 WebP，并提供 PNG 首帧；ICO 选择最大图像，APNG 的独立默认图不作为第一动画帧。SVG 保持矢量并沿用白名单，图片会校正方向并移除 EXIF、ICC 及文字元数据。图标图片最长边限制为 512px，不放大小图；网站图标居中补成正方形。动画保留循环语义，帧时长低于 20ms 时按 20ms 处理。
+
+SVG 输入最多 64 KiB；位图最多 5 MiB、单边 4096px、单帧 16MP，动画最多 200 帧且累计解码不超过 64MP。规范化静态／首帧 PNG 分别最多 2 MiB，动画 WebP 最多 8 MiB；正文最多 8 MiB，预览响应与状态文件最多 16 MiB。隐藏转换进程最多两个并发，每次 10 秒，超限或损坏输入不会覆盖当前配置。
+
+新增 `POST /api/favicon/preview`、`POST /api/page-icon/preview`，请求为 `{version:2,fileName,contentBase64}`，返回规范化的 `icon` 和 `metadata`，不持久化。现有 PATCH 增加 `{version:2,icon:{fileName,contentBase64}}` 和移除用的 `icon:null`；保存时后端重新处理输入。状态 v2 增加 MIME、尺寸、动画标记、首帧哈希和显示边界。客户端发送 `X-Icon-Format-Version: 2` 协商新版元数据；旧后端返回 v1 时新前端仅允许 SVG 并提示升级。旧 SVG 请求、状态及 `.svg?v=<SHA-256>` 资源仍兼容；v1 文件只读时不改写。
+
+通用资源为 `/api/favicon/image?v=<SHA-256>`、`/api/page-icon/image?v=<SHA-256>`，动画首帧为 `/api/page-icon/poster.png?v=<SHA-256>`；沿用完整哈希、ETag、`nosniff` 和私有 immutable 缓存。资源不会发布到 Web Root。位图配置不由旧版前端管理；完整使用需要同时更新前端与服务版本 15 的 EXE，配置仍为 v4。
 
 ## 构建
 

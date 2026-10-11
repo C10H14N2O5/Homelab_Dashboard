@@ -291,6 +291,7 @@ $maintenanceContracts = @(
     @{ Name = 'packaged card initialization check'; Source = $buildSource; Marker = '/api/cards/initialize' },
     @{ Name = 'packaged card restart persistence check'; Source = $buildSource; Marker = 'did not preserve card state across restart' },
     @{ Name = 'packaged icon route coverage'; Source = $buildSource; Marker = 'foreach ($iconKind in @(''favicon'', ''page-icon''))' },
+    @{ Name = 'packaged multi-format icon smoke'; Source = $buildSource; Marker = 'smoke-icons.py' },
     @{ Name = 'packaged icon resource check'; Source = $buildSource; Marker = '/api/$iconKind.svg?v=' },
     @{ Name = 'packaged favicon removal persistence check'; Source = $buildSource; Marker = 'did not preserve removed favicon state across restart' },
     @{ Name = 'temporary artifact hash'; Source = $buildSource; Marker = 'temporaryHash' },
@@ -651,8 +652,8 @@ if (!cardIconInputTag.includes('type="file"') || !cardIconInputTag.includes('acc
     throw new Error('Card icons must be selected through an SVG-only file input.');
 }
 const faviconInputTag = htmlDocument.match(/<input\b[^>]*\bid="favicon-file-input"[^>]*>/)?.[0] || '';
-if (!faviconInputTag.includes('type="file"') || !faviconInputTag.includes('accept=".svg,image/svg+xml"')) {
-    throw new Error('The favicon must be selected through an SVG-only file input.');
+if (!faviconInputTag.includes('type="file"') || !['.svg', '.png', '.jpg', '.webp', '.gif', '.ico'].every((format) => faviconInputTag.includes(format))) {
+    throw new Error('The favicon file input must support all approved icon formats.');
 }
 if (!pageSettingsScript.includes("event.key === 'ArrowDown'")
     || !pageSettingsScript.includes("event.key === 'ArrowUp'")
@@ -5190,6 +5191,9 @@ console.log(`Frontend checks passed: ${inlineScripts.length} inline bootstrap, $
         if (Test-Path -LiteralPath $frontendValidationPath -PathType Leaf) {
             Remove-Item -LiteralPath $frontendValidationPath -Force
         }
+    }
+    Invoke-CheckedCommand -Name 'icon metadata contracts' -Command {
+        & $node.Source --experimental-vm-modules --test (Join-Path $PSScriptRoot 'test-icons-ui.mjs')
     }
     foreach ($notesTest in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'test-notes-*.mjs' -File)) {
         Invoke-CheckedCommand -Name $notesTest.Name -Command {

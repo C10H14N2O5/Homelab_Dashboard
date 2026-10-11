@@ -559,7 +559,7 @@
             <header class="dialog-header">
                 <div>
                     <h2 id="favicon-title">网站图标</h2>
-                    <p id="favicon-description">上传服务器共享的 SVG 地址栏图标；选择文件后需确认保存才会生效。</p>
+                    <p id="favicon-description">上传服务器共享的地址栏图标；选择文件后需确认保存才会生效。动图使用静态首帧。</p>
                 </div>
                 <button class="dialog-close" id="favicon-close" type="button" aria-label="关闭网站图标设置">✕</button>
             </header>
@@ -570,10 +570,10 @@
                     <p id="favicon-state-label">正在读取当前网站图标…</p>
                 </section>
                 <section class="favicon-editor-copy" aria-labelledby="favicon-upload-title">
-                    <h3 id="favicon-upload-title">选择 SVG</h3>
-                    <p>仅接受不含脚本、外部资源或动画的本地 SVG 文件。服务器会在保存时再次进行安全净化。</p>
-                    <button class="background-action-button" id="favicon-select-button" type="button">选择 / 更换 SVG</button>
-                    <input class="sr-only" id="favicon-file-input" type="file" accept=".svg,image/svg+xml">
+                    <h3 id="favicon-upload-title">选择图标</h3>
+                    <p>支持 SVG、PNG、JPEG、WebP、GIF、ICO。SVG 最多 64 KiB，图片最多 5 MiB；完整等比显示，动图取首帧。</p>
+                    <button class="background-action-button" id="favicon-select-button" type="button">选择 / 更换图标</button>
+                    <input class="sr-only" id="favicon-file-input" type="file" accept=".svg,.png,.apng,.jpg,.jpeg,.webp,.gif,.ico,image/svg+xml,image/png,image/apng,image/jpeg,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon">
                 </section>
             </div>
             <p class="favicon-status" id="favicon-status" role="status" aria-live="polite"></p>
@@ -601,7 +601,7 @@
             <header class="dialog-header">
                 <div>
                     <h2 id="page-icon-title">页面图标</h2>
-                    <p id="page-icon-description">上传 SVG，同时替换标题和宽屏左右下角的图标；地址栏图标独立设置。</p>
+                    <p id="page-icon-description">同时替换标题和宽屏左右下角的图标，支持静态图片和动图；地址栏图标独立设置。</p>
                 </div>
                 <button class="dialog-close" id="page-icon-close" type="button" aria-label="关闭页面图标设置">✕</button>
             </header>
@@ -612,10 +612,10 @@
                     <p id="page-icon-state-label">正在读取当前页面图标…</p>
                 </section>
                 <section class="favicon-editor-copy" aria-labelledby="page-icon-upload-title">
-                    <h3 id="page-icon-upload-title">选择 SVG</h3>
-                    <p>选择新的 SVG 查看预览；保存后才会更新页面。移除自定义图标将恢复默认金边徽章。</p>
-                    <button class="background-action-button" id="page-icon-select-button" type="button">选择 / 更换 SVG</button>
-                    <input class="sr-only" id="page-icon-file-input" type="file" accept=".svg,image/svg+xml">
+                    <h3 id="page-icon-upload-title">选择图标</h3>
+                    <p>支持 SVG、PNG/APNG、JPEG、WebP、GIF、ICO；SVG 最多 64 KiB，图片最多 5 MiB。完整等比显示，页面保留动画；弹窗或减少动态效果时显示首帧。移除后恢复默认金边徽章。</p>
+                    <button class="background-action-button" id="page-icon-select-button" type="button">选择 / 更换图标</button>
+                    <input class="sr-only" id="page-icon-file-input" type="file" accept=".svg,.png,.apng,.jpg,.jpeg,.webp,.gif,.ico,image/svg+xml,image/png,image/apng,image/jpeg,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon">
                 </section>
             </div>
             <p class="favicon-status" id="page-icon-status" role="status" aria-live="polite"></p>

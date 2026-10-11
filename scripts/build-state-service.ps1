@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'process-utils.ps1')
 
-$expectedServiceVersion = 14
+$expectedServiceVersion = 15
 
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName -or
     $OutputName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.exe$') {
@@ -684,6 +684,9 @@ try {
         }
     }
 
+    Write-Host 'Checking packaged multi-format icons and animated resource persistence...'
+    & $resolvedPython (Join-Path $PSScriptRoot 'smoke-icons.py') $temporaryArtifactPath $smokeConfig
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged multi-format icon smoke failed.' }
     $temporaryHash = Get-FileHash -LiteralPath $temporaryArtifactPath -Algorithm SHA256
     Write-Host "Verified temporary artifact: $($temporaryArtifact.Length) bytes, SHA256 $($temporaryHash.Hash)"
     Move-Item -LiteralPath $temporaryArtifactPath -Destination $outputPath -Force

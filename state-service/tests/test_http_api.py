@@ -889,6 +889,41 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(health["status"], "ok")
 
+    def test_multiformat_icon_preview_resources_and_independent_stores(self):
+        from tests.test_icon_images import fixture
+        from homelab_state.icon_images import encode
+        headers = {"Origin": TEST_ORIGIN, "X-Requested-With": "homelab-dashboard",
+                   "Content-Type": "application/json", "X-Icon-Format-Version": "2"}
+        upload = {"fileName": "animation.gif", "contentBase64": encode(fixture("GIF", True))}
+        for kind in ("favicon", "page-icon"):
+            path = "/api/" + kind
+            status, initial = self.request("GET", path, headers=headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(initial["version"], 2)
+            status, preview = self.request("POST", path + "/preview", json.dumps({"version": 2, **upload}).encode(), headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(preview["metadata"]["animated"], kind == "page-icon")
+            self.assertFalse(self.request("GET", path)[1]["configured"])
+            status, saved = self.request("PATCH", path, json.dumps({"version": 2, "icon": upload}).encode(), headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(saved["contentHash"], preview["metadata"]["contentHash"])
+            resource = path + "/image?v=" + saved["contentHash"]
+            status, data, response_headers = self.raw_http_request("GET", resource)
+            self.assertEqual(status, 200)
+            self.assertEqual(response_headers["content-type"], "image/webp" if kind == "page-icon" else "image/png")
+            self.assertEqual(response_headers["x-content-type-options"], "nosniff")
+            self.assertEqual(self.raw_http_request("GET", resource, headers={"If-None-Match": response_headers["etag"]})[0], 304)
+            self.assertEqual(self.request("GET", path + ".svg?v=" + saved["contentHash"])[0], 404)
+            if kind == "page-icon":
+                self.assertEqual(self.raw_http_request("GET", path + "/poster.png?v=" + saved["posterHash"])[2]["content-type"], "image/png")
+            for method in ("POST", "PATCH", "PUT", "DELETE", "HEAD"):
+                self.assertEqual(self.request(method, resource)[0], 405)
+            self.assertEqual(self.request("GET", path + "/preview")[0], 405)
+            self.assertEqual(self.request("POST", path + "/preview", json.dumps({"version": 2, **upload}).encode(), headers | {"Origin": "https://evil.test"})[0], 403)
+        before = self.request("GET", http_api.FAVICON_PATH)[1]
+        self.assertEqual(self.request("PATCH", http_api.PAGE_ICON_PATH, json.dumps({"version": 2, "icon": None}).encode(), headers)[0], 200)
+        self.assertEqual(self.request("GET", http_api.FAVICON_PATH)[1], before)
+
     def test_favicon_get_upload_asset_replace_remove_and_cache_contract(self) -> None:
         status, initial = self.request("GET", http_api.FAVICON_PATH)
         self.assertEqual(status, 200)
