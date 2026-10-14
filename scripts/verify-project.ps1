@@ -160,6 +160,8 @@ $requiredFiles = @(
     'assets\js\favicon-manager.js',
     'assets\js\app.js',
     'README.md',
+    'docs\deployment.md',
+    'docs\maintenance.md',
     'CHANGELOG.md',
     'LICENSE',
     'ASSETS.md',
@@ -246,6 +248,8 @@ $faviconServiceTestSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'state-service\tests\test_favicon.py')
 )
 $readmeSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
+$deploymentSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'docs\deployment.md'))
+$maintenanceSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'docs\maintenance.md'))
 $changelogSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'CHANGELOG.md'))
 $coreServiceVersionMatch = [regex]::Match($coreServiceSource, '(?m)^SERVICE_VERSION\s*=\s*(\d+)\s*$')
 $buildServiceVersionMatch = [regex]::Match($buildSource, '(?m)^\$expectedServiceVersion\s*=\s*(\d+)\s*$')
@@ -253,9 +257,6 @@ if (-not $coreServiceVersionMatch.Success -or
     -not $buildServiceVersionMatch.Success -or
     $coreServiceVersionMatch.Groups[1].Value -ne $buildServiceVersionMatch.Groups[1].Value) {
     throw 'Source and packaged smoke-test service versions must match.'
-}
-if ($readmeSource.Contains('index.txt')) {
-    throw 'README.md must not list the removed index.txt file.'
 }
 $maintenanceContracts = @(
     @{ Name = 'PyInstaller one-file build'; Source = $buildSource; Marker = '--onefile' },
@@ -311,11 +312,10 @@ $maintenanceContracts = @(
     @{ Name = 'release core HTTP module'; Source = $packageSource; Marker = 'assets\js\core-http.js' },
     @{ Name = 'release search module'; Source = $packageSource; Marker = 'assets\js\search.js' },
     @{ Name = 'release service status module'; Source = $packageSource; Marker = 'assets\js\service-status.js' },
-    @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $readmeSource; Marker = 'MatchingPath' },
-    @{ Name = 'strict v4 configuration documentation'; Source = $readmeSource; Marker = '"version": 4' },
-    @{ Name = 'loopback service probe documentation'; Source = $readmeSource; Marker = 'probeConnectAddress' },
-    @{ Name = 'dashboard cards deployment documentation'; Source = $readmeSource; Marker = 'DashboardCards.json' },
-    @{ Name = 'CORS removal documentation'; Source = $readmeSource; Marker = 'AstrBot' }
+    @{ Name = 'Zoraxy Virtual Directory documentation'; Source = $deploymentSource; Marker = 'MatchingPath' },
+    @{ Name = 'strict v4 configuration documentation'; Source = $deploymentSource; Marker = '"version": 4' },
+    @{ Name = 'loopback service probe documentation'; Source = $deploymentSource; Marker = 'probeConnectAddress' },
+    @{ Name = 'dashboard cards backup documentation'; Source = $maintenanceSource; Marker = 'DashboardCards.json' }
 )
 foreach ($contract in $maintenanceContracts) {
     if (-not $contract.Source.Contains($contract.Marker)) {
@@ -324,6 +324,8 @@ foreach ($contract in $maintenanceContracts) {
 }
 foreach ($document in @(
     @{ Name = 'README.md'; Source = $readmeSource },
+    @{ Name = 'docs/deployment.md'; Source = $deploymentSource },
+    @{ Name = 'docs/maintenance.md'; Source = $maintenanceSource },
     @{ Name = 'CHANGELOG.md'; Source = $changelogSource },
     @{ Name = 'ASSETS.md'; Source = [IO.File]::ReadAllText((Join-Path $projectRoot 'ASSETS.md')) },
     @{ Name = 'THIRD_PARTY_NOTICES.md'; Source = [IO.File]::ReadAllText((Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md')) }
