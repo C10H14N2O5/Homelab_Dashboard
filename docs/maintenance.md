@@ -156,6 +156,8 @@ python -m venv .venv
 
 验证覆盖文档、PowerShell、前端模块与行为、Python 测试、Git 忽略规则和差异空白。`-Build` 追加 EXE 构建；`-SkipPython` 或 `-SkipFrontend` 用于环境受限时的部分检查。部署前使用完整验证及配套构建结果。
 
+公开版从干净检出的提交运行完整验证和构建，再执行 `./scripts/package-release.ps1 -Version V3.5.0`。脚本核对本地 vendored 依赖的 SHA-256，输出 Windows x64 ZIP、包内 `SHA256SUMS.txt` 和 ZIP 的独立 `.sha256` 文件。发行包中的 EXE 与前端资源应来自同一提交。
+
 ### 本地预览与浏览器回归
 
 笔记完整联调使用隔离实例：
